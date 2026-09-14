@@ -1,32 +1,27 @@
 import { useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import { open, save } from "@tauri-apps/plugin-dialog";
+import { open } from "@tauri-apps/plugin-dialog";
 import { detectLocale, makeT, MessageId } from "./i18n";
-import { defaultProjectDir, formatBytes, formatOffset } from "./util";
+import { defaultProjectDir, formatBytes } from "./util";
+import ProjectView from "./ProjectView";
 import {
   GameProject,
   InspectionReport,
   OpenProjectReport,
   PLATFORM_NAMES,
-  ScanEncoding,
-  ScanOutcome,
   SupportLevel,
 } from "./types";
 import "./App.css";
 
 const TARGET_LANGUAGES = ["pt-BR", "en-US", "es-ES", "fr-FR", "de-DE", "it-IT", "ja-JP"];
 const SOURCE_LANGUAGES = ["en-US", "ja-JP", "es-ES", "fr-FR", "de-DE"];
-const SCAN_ENCODINGS: ScanEncoding[] = ["ascii", "utf8", "utf16_le", "utf16_be", "table"];
-const RENDER_CAP = 500;
-
-type T = ReturnType<typeof makeT>;
 
 type Screen =
   | { kind: "home" }
   | { kind: "inspecting" }
   | { kind: "report"; report: InspectionReport }
   | { kind: "created"; project: GameProject }
-  | { kind: "extract"; project: GameProject; warning: MessageId | null };
+  | { kind: "project"; project: GameProject; projectDir: string; warning: MessageId | null };
 
 export default function App() {
   const locale = useMemo(detectLocale, []);
@@ -65,7 +60,7 @@ export default function App() {
         : report.sourceChanged
           ? "project.sourceChanged"
           : null;
-      setScreen({ kind: "extract", project: report.project, warning });
+      setScreen({ kind: "project", project: report.project, projectDir: dir, warning });
     } catch (e) {
       setError(String(e));
     }
@@ -156,7 +151,12 @@ export default function App() {
             <button
               className="primary"
               onClick={() =>
-                setScreen({ kind: "extract", project: screen.project, warning: null })
+                setScreen({
+                  kind: "project",
+                  project: screen.project,
+                  projectDir: defaultProjectDir(screen.project.sourcePath),
+                  warning: null,
+                })
               }
             >
               {t("project.extract")}
@@ -165,9 +165,10 @@ export default function App() {
         </section>
       )}
 
-      {screen.kind === "extract" && (
-        <ExtractView
+      {screen.kind === "project" && (
+        <ProjectView
           project={screen.project}
+          projectDir={screen.projectDir}
           warning={screen.warning}
           t={t}
           onBack={() => setScreen({ kind: "home" })}
@@ -179,7 +180,7 @@ export default function App() {
 
 interface ReportViewProps {
   report: InspectionReport;
-  t: T;
+  t: ReturnType<typeof makeT>;
   busy: boolean;
   targetLanguage: string;
   sourceLanguage: string;
@@ -296,215 +297,6 @@ function ReportView({
             ))}
           </ul>
         </details>
-      )}
-    </section>
-  );
-}
-
-interface ExtractViewProps {
-  project: GameProject;
-  warning: MessageId | null;
-  t: T;
-  onBack: () => void;
-}
-
-function ExtractView({ project, warning, t, onBack }: ExtractViewProps) {
-  const [encoding, setEncoding] = useState<ScanEncoding>("ascii");
-  const [minChars, setMinChars] = useState(4);
-  const [tblPath, setTblPath] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<ScanOutcome | null>(null);
-  const [filter, setFilter] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [savedPath, setSavedPath] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const sourceBroken = warning === "project.sourceMissing";
-
-  async function chooseTbl() {
-    const path = await open({
-      multiple: false,
-      directory: false,
-      filters: [{ name: "Table", extensions: ["tbl", "txt"] }],
-    });
-    if (typeof path === "string") setTblPath(path);
-  }
-
-  async function runScan() {
-    if (encoding === "table" && !tblPath) {
-      setError(t("extract.tblMissing"));
-      return;
-    }
-    setError(null);
-    setSavedPath(null);
-    setBusy(true);
-    try {
-      const result = await invoke<ScanOutcome>("scan_file", {
-        path: project.sourcePath,
-        config: {
-          encoding,
-          tblPath: encoding === "table" ? tblPath : null,
-          minChars,
-          regionStart: null,
-          regionEnd: null,
-          maxEntries: 20000,
-        },
-      });
-      setOutcome(result);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function exportAs(format: "json" | "csv") {
-    if (!outcome) return;
-    setError(null);
-    const defaultPath = `${defaultProjectDir(project.sourcePath)}/extracted/strings.${format}`;
-    const path = await save({
-      defaultPath,
-      filters: [{ name: format.toUpperCase(), extensions: [format] }],
-    });
-    if (typeof path !== "string") return;
-    try {
-      const saved = await invoke<string>("export_entries", {
-        entries: outcome.entries,
-        path,
-        format,
-      });
-      setSavedPath(saved);
-    } catch (e) {
-      setError(String(e));
-    }
-  }
-
-  const filtered = outcome
-    ? filter
-      ? outcome.entries.filter((e) =>
-          e.sourceText.toLowerCase().includes(filter.toLowerCase()),
-        )
-      : outcome.entries
-    : [];
-  const shown = filtered.slice(0, RENDER_CAP);
-
-  return (
-    <section className="card">
-      <h2>{t("extract.title")}</h2>
-      <dl className="facts">
-        <dt>{t("inspect.file")}</dt>
-        <dd className="path">{project.sourcePath}</dd>
-        <dt>{t("inspect.platform")}</dt>
-        <dd>{PLATFORM_NAMES[project.platform]}</dd>
-      </dl>
-
-      {warning && (
-        <div className={sourceBroken ? "error" : "warn"} role="alert">
-          {t(warning)}
-        </div>
-      )}
-      {error && (
-        <div className="error" role="alert">
-          <strong>{t("common.error")}:</strong> {error}
-        </div>
-      )}
-
-      <div className="scan-controls">
-        <label>
-          {t("extract.encoding")}
-          <select
-            value={encoding}
-            onChange={(e) => setEncoding(e.target.value as ScanEncoding)}
-          >
-            {SCAN_ENCODINGS.map((enc) => (
-              <option key={enc} value={enc}>
-                {enc}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          {t("extract.minChars")}
-          <input
-            type="number"
-            min={1}
-            max={64}
-            value={minChars}
-            onChange={(e) => setMinChars(Number(e.target.value) || 1)}
-          />
-        </label>
-        {encoding === "table" && (
-          <label>
-            {t("extract.chooseTbl")}
-            <button onClick={chooseTbl}>
-              {tblPath ? tblPath.split(/[\\/]/).pop() : t("extract.chooseTbl")}
-            </button>
-          </label>
-        )}
-        <div className="scan-run">
-          <button onClick={onBack}>{t("common.back")}</button>
-          <button className="primary" onClick={runScan} disabled={busy || sourceBroken}>
-            {busy ? t("extract.scanning") : t("extract.scan")}
-          </button>
-        </div>
-      </div>
-      <p className="hint left">{t("extract.hint")}</p>
-
-      {outcome && (
-        <>
-          <div className="results-bar">
-            <span>{t("extract.found", { n: outcome.entries.length })}</span>
-            <input
-              type="search"
-              placeholder={t("extract.filter")}
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-            />
-            <button onClick={() => exportAs("json")} disabled={!outcome.entries.length}>
-              {t("export.json")}
-            </button>
-            <button onClick={() => exportAs("csv")} disabled={!outcome.entries.length}>
-              {t("export.csv")}
-            </button>
-          </div>
-          {outcome.truncated && (
-            <div className="warn">{t("extract.truncated", { n: 20000 })}</div>
-          )}
-          {savedPath && (
-            <div className="ok">{t("export.saved", { path: savedPath })}</div>
-          )}
-
-          {outcome.entries.length === 0 ? (
-            <p className="no-match">{t("extract.none")}</p>
-          ) : (
-            <>
-              {filtered.length > RENDER_CAP && (
-                <p className="hint left">
-                  {t("extract.showing", { shown: RENDER_CAP, total: filtered.length })}
-                </p>
-              )}
-              <div className="strings-wrap">
-                <table className="strings">
-                  <thead>
-                    <tr>
-                      <th>{t("extract.offset")}</th>
-                      <th>{t("extract.bytes")}</th>
-                      <th>{t("extract.text")}</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shown.map((e) => (
-                      <tr key={e.id}>
-                        <td className="mono">{formatOffset(e.offset)}</td>
-                        <td className="mono num">{e.originalBytes.length / 2}</td>
-                        <td className="text-cell">{e.sourceText}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </>
-          )}
-        </>
       )}
     </section>
   );

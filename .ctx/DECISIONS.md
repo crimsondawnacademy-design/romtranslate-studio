@@ -80,3 +80,29 @@
 **Decisão:** fora do Sprint 2. Entra com `encoding_rs` quando houver adapter/caso de uso japonês real; a arquitetura (enum `ScanEncoding` + `TextEncoding::ShiftJis` já existente) já reserva o lugar.
 
 **Driver:** claude (ponytail).
+
+## [2026-09-14] Sprint 3: um SQLite por projeto; TM global adiada
+
+**Contexto:** spec §13 pede TM com "optional game scope" e glossário global-ou-projeto. O arquivo `translations.sqlite` dentro do `.rtsproj` (spec §20) já dá TM e glossário por projeto com zero infra extra.
+
+**Decisão:** um banco por projeto. TM global cross-projeto (e glossário global) entram depois como segundo banco no config dir, consultado em cascata.
+
+**Consequências:** retraduzir o mesmo jogo é grátis via TM; reaproveitar entre jogos ainda não.
+
+**Driver:** claude (ponytail).
+
+## [2026-09-14] Secrets: arquivo 0600 separado, keyring adiado
+
+**Contexto:** spec §11 pede keychain "quando possível"; §18 exige secrets fora do config normal. Crate keyring adiciona dep nativa + prompts de sistema.
+
+**Decisão:** API key em `secrets.json` (0600) no app_config_dir — fora do repo, fora do projeto, fora de logs; `settings.toml` nunca contém a chave. Upgrade pra keyring quando o app for distribuído.
+
+**Driver:** claude (ponytail).
+
+## [2026-09-14] Batches sequenciais; privacidade remota com opt-in
+
+**Contexto:** spec §28 sugere batches concorrentes configuráveis; §18 default `allow_remote_translation=false`.
+
+**Decisão:** pipeline sequencial (Ollama local não paraleliza de verdade; concorrência entra se API remota medir como gargalo). Endpoint OpenAI-compatible fora de localhost é BLOQUEADO até o usuário ativar "permitir tradução remota" — localhost (LM Studio, vLLM local) passa sempre.
+
+**Driver:** claude (ponytail).

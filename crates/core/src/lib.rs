@@ -5,11 +5,15 @@
 
 pub mod adapter;
 pub mod adapters;
+pub mod db;
 pub mod detect;
 pub mod error;
 pub mod export;
 pub mod hash;
+pub mod pipeline;
 pub mod project;
+pub mod provider;
+pub mod providers;
 pub mod scan;
 pub mod synth;
 pub mod tbl;

@@ -1,13 +1,29 @@
-use std::path::PathBuf;
+mod settings;
 
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+
+use serde::Serialize;
+use tauri::{AppHandle, Emitter, Manager, State};
+
+use romtranslate_core::db::ProjectDb;
 use romtranslate_core::detect::{inspect, InspectionReport};
 use romtranslate_core::export;
+use romtranslate_core::pipeline::{run_translation, TranslateOptions, TranslateSummary};
 use romtranslate_core::project::{self, CreateProjectArgs, OpenProjectReport};
+use romtranslate_core::provider::{GlossaryTerm, TranslationProvider};
+use romtranslate_core::providers::ollama::OllamaProvider;
+use romtranslate_core::providers::openai_compat::OpenAiCompatProvider;
 use romtranslate_core::scan::{self, ScanConfig, ScanOutcome};
 use romtranslate_core::types::{GameProject, TextEntry};
 
-/// Todo comando roda em spawn_blocking: hash/scan de arquivos grandes nao pode
-/// travar a UI.
+use settings::AppSettings;
+
+/// Flag de cancelamento da traducao em andamento (uma por vez).
+struct TranslationState(Mutex<Option<Arc<AtomicBool>>>);
+
+/// Todo comando de IO roda em spawn_blocking: nao trava a UI.
 async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> romtranslate_core::Result<T> + Send + 'static,
 ) -> Result<T, String> {
@@ -16,6 +32,52 @@ async fn blocking<T: Send + 'static>(
         .map_err(|e| format!("task falhou: {e}"))?
         .map_err(|e| e.to_string())
 }
+
+fn config_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    app.path().app_config_dir().map_err(|e| e.to_string())
+}
+
+fn is_localhost(url: &str) -> bool {
+    ["://localhost", "://127.", "://0.0.0.0", "://[::1]"]
+        .iter()
+        .any(|h| url.contains(h))
+}
+
+/// Monta o provider a partir dos settings, aplicando a guarda de privacidade
+/// (spec §18: traducao remota so com allow_remote_translation).
+fn build_provider(
+    cfg: &AppSettings,
+    api_key: Option<String>,
+) -> Result<(Box<dyn TranslationProvider>, String), String> {
+    match cfg.provider.as_str() {
+        "ollama" => {
+            let p = OllamaProvider::new(&cfg.ollama.base_url, &cfg.ollama.model, cfg.timeout_secs)
+                .map_err(|e| e.to_string())?;
+            Ok((Box::new(p), cfg.ollama.model.clone()))
+        }
+        "openai_compatible" => {
+            let base = &cfg.openai_compatible.base_url;
+            if !cfg.allow_remote_translation && !is_localhost(base) {
+                return Err(
+                    "traducao remota desabilitada: ative 'permitir traducao remota' nas \
+                     configuracoes para usar um endpoint fora do localhost"
+                        .to_string(),
+                );
+            }
+            let p = OpenAiCompatProvider::new(
+                base,
+                &cfg.openai_compatible.model,
+                api_key,
+                cfg.timeout_secs,
+            )
+            .map_err(|e| e.to_string())?;
+            Ok((Box::new(p), cfg.openai_compatible.model.clone()))
+        }
+        other => Err(format!("provider desconhecido: {other}")),
+    }
+}
+
+// ---- Sprint 1-2 ----
 
 #[tauri::command]
 async fn inspect_file(path: String) -> Result<InspectionReport, String> {
@@ -59,6 +121,145 @@ async fn export_entries(
     .await
 }
 
+// ---- Sprint 3: persistencia de entries ----
+
+#[tauri::command]
+async fn save_entries(project_dir: String, entries: Vec<TextEntry>) -> Result<usize, String> {
+    blocking(move || ProjectDb::open(&PathBuf::from(project_dir))?.upsert_entries(&entries)).await
+}
+
+#[tauri::command]
+async fn load_entries(project_dir: String) -> Result<Vec<TextEntry>, String> {
+    blocking(move || ProjectDb::open(&PathBuf::from(project_dir))?.load_entries()).await
+}
+
+// ---- Sprint 3: glossario ----
+
+#[tauri::command]
+async fn glossary_list(project_dir: String) -> Result<Vec<GlossaryTerm>, String> {
+    blocking(move || ProjectDb::open(&PathBuf::from(project_dir))?.glossary_list()).await
+}
+
+#[tauri::command]
+async fn glossary_upsert(project_dir: String, term: GlossaryTerm) -> Result<(), String> {
+    blocking(move || ProjectDb::open(&PathBuf::from(project_dir))?.glossary_upsert(&term)).await
+}
+
+#[tauri::command]
+async fn glossary_delete(project_dir: String, term: String) -> Result<(), String> {
+    blocking(move || ProjectDb::open(&PathBuf::from(project_dir))?.glossary_delete(&term)).await
+}
+
+// ---- Sprint 3: settings ----
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SettingsReport {
+    settings: AppSettings,
+    api_key_set: bool,
+}
+
+#[tauri::command]
+fn get_settings(app: AppHandle) -> Result<SettingsReport, String> {
+    let dir = config_dir(&app)?;
+    Ok(SettingsReport {
+        settings: settings::load_settings(&dir),
+        api_key_set: settings::load_api_key(&dir).is_some(),
+    })
+}
+
+#[tauri::command]
+fn save_settings(
+    app: AppHandle,
+    new_settings: AppSettings,
+    api_key: Option<String>,
+) -> Result<SettingsReport, String> {
+    let dir = config_dir(&app)?;
+    settings::save_settings(&dir, &new_settings)?;
+    if let Some(key) = api_key {
+        settings::save_api_key(&dir, &key)?;
+    }
+    Ok(SettingsReport {
+        settings: new_settings,
+        api_key_set: settings::load_api_key(&dir).is_some(),
+    })
+}
+
+#[tauri::command]
+async fn test_provider(app: AppHandle) -> Result<String, String> {
+    let dir = config_dir(&app)?;
+    let cfg = settings::load_settings(&dir);
+    let api_key = settings::load_api_key(&dir);
+    let (provider, model) = build_provider(&cfg, api_key)?;
+    provider.health_check().await.map_err(|e| e.to_string())?;
+    Ok(model)
+}
+
+// ---- Sprint 3: traducao ----
+
+#[tauri::command]
+async fn translate_project(
+    app: AppHandle,
+    state: State<'_, TranslationState>,
+    project_dir: String,
+) -> Result<TranslateSummary, String> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    {
+        let mut guard = state.0.lock().map_err(|e| e.to_string())?;
+        if guard.is_some() {
+            return Err("ja existe uma traducao em andamento".to_string());
+        }
+        *guard = Some(cancel.clone());
+    }
+
+    let result = do_translate(&app, &project_dir, &cancel).await;
+
+    if let Ok(mut guard) = state.0.lock() {
+        *guard = None;
+    }
+    result
+}
+
+async fn do_translate(
+    app: &AppHandle,
+    project_dir: &str,
+    cancel: &AtomicBool,
+) -> Result<TranslateSummary, String> {
+    let dir = PathBuf::from(project_dir);
+    let cfg_dir = config_dir(app)?;
+    let cfg = settings::load_settings(&cfg_dir);
+    let api_key = settings::load_api_key(&cfg_dir);
+    let (provider, model) = build_provider(&cfg, api_key)?;
+
+    let game = project::load_project(&dir).map_err(|e| e.to_string())?;
+    let mut opts = TranslateOptions::new(game.target_language);
+    opts.source_language = game.source_language;
+    opts.batch_size = cfg.batch_size.clamp(1, 50);
+
+    let mut db = ProjectDb::open(&dir).map_err(|e| e.to_string())?;
+    let emitter = app.clone();
+    run_translation(
+        &mut db,
+        provider.as_ref(),
+        &model,
+        &opts,
+        cancel,
+        &move |p| {
+            let _ = emitter.emit("translation-progress", &p);
+        },
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn cancel_translation(state: State<'_, TranslationState>) -> Result<(), String> {
+    if let Some(flag) = state.0.lock().map_err(|e| e.to_string())?.as_ref() {
+        flag.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tracing_subscriber::fmt()
@@ -70,12 +271,23 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .manage(TranslationState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             inspect_file,
             create_project,
             open_project,
             scan_file,
-            export_entries
+            export_entries,
+            save_entries,
+            load_entries,
+            glossary_list,
+            glossary_upsert,
+            glossary_delete,
+            get_settings,
+            save_settings,
+            test_provider,
+            translate_project,
+            cancel_translation
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

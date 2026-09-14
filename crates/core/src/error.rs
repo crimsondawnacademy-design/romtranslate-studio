@@ -19,6 +19,12 @@ pub enum CoreError {
     #[error("tabela .tbl: {0}")]
     Tbl(String),
 
+    #[error("banco de dados: {0}")]
+    Db(#[from] rusqlite::Error),
+
+    #[error("provider de traducao: {0}")]
+    Provider(String),
+
     #[error("serializacao: {0}")]
     Serde(#[from] serde_json::Error),
 }

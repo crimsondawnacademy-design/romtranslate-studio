@@ -374,3 +374,125 @@ table.strings tr:last-child td {
 .text-cell {
   overflow-wrap: anywhere;
 }
+
+.panel {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.panel h3,
+.panel summary {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+
+.panel summary {
+  cursor: pointer;
+}
+
+input[type="text"],
+input[type="password"] {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+.checkline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+  margin: 10px 0;
+}
+
+.progress-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.progress-row progress {
+  flex: 1;
+  height: 8px;
+  accent-color: var(--accent);
+}
+
+.status {
+  font-size: 11px;
+  border-radius: 999px;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.status.machine {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.status.reviewed {
+  color: var(--ok);
+  border-color: var(--ok);
+}
+
+.status.error {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+.glossary-form {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.glossary-form .checkline {
+  margin: 0;
+}
+
+.glossary-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  font-size: 13px;
+}
+
+.glossary-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.linkish {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 2px 6px;
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.linkish:hover {
+  color: var(--danger);
+  border: none;
+}
+
+em {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 12px;
+}

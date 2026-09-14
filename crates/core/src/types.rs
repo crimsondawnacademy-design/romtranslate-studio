@@ -50,18 +50,20 @@ pub enum ProjectStatus {
     Completed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TranslationStatus {
+    #[default]
     Untranslated,
     Machine,
     Reviewed,
     Error,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TextEncoding {
+    #[default]
     Ascii,
     Utf8,
     Utf16Le,

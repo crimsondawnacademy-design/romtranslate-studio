@@ -10,48 +10,51 @@ motivo: fim-de-feature
 ## 0. TL;DR
 | Entregável | Estado | Path/URL | Próximo passo |
 |---|---|---|---|
-| Workspace Cargo+pnpm | pronto | raiz do repo | — |
-| Detecção GBA/NES/SNES | pronto (Experimental, detect-only) | `crates/core/src/adapters/` | mais evidências conforme casos reais |
-| Projeto `.rtsproj` | pronto (criar/abrir c/ verificação de hash) | `crates/core/src/project.rs` | — |
-| Extração de strings (Camada A) | pronto (ascii/utf8/utf16le-be/.tbl) | `crates/core/src/scan.rs` | Shift-JIS quando houver caso real |
-| Export JSON/CSV | pronto | `crates/core/src/export.rs` | persistir no projeto automaticamente |
-| App desktop | pronto (wizard + extração) | `apps/desktop/` | Sprint 3: UI de tradução |
-| CI | pronto (verde) | `.github/workflows/ci.yml` | job de build Tauri por SO |
-| Sprint 3 (tradução) | não começou | spec §11-13 | provider trait + Ollama + TM/glossário |
+| Workspace Cargo+pnpm | pronto | raiz | — |
+| Detecção GBA/NES/SNES | pronto (Experimental) | `crates/core/src/adapters/` | — |
+| Projeto `.rtsproj` | pronto (criar/abrir/verificar hash) | `crates/core/src/project.rs` | — |
+| Extração (Camada A) | pronto (ascii/utf8/utf16/.tbl) | `crates/core/src/scan.rs` | Shift-JIS qdo houver caso |
+| Persistência entries | pronto (SQLite, preserva traduções) | `crates/core/src/db.rs` | — |
+| Tradução Ollama/OpenAI-compat | pronto, validado com Ollama REAL | `crates/core/src/{provider,providers,pipeline}.rs` | — |
+| TM + glossário | pronto (por projeto) | `crates/core/src/db.rs` | TM global depois |
+| Settings + secrets | pronto (toml + secrets 0600) | `apps/desktop/src-tauri/src/settings.rs` | keyring qdo distribuir |
+| UI tradução | pronto (config/progresso/cancel/glossário) | `apps/desktop/src/ProjectView.tsx` | Sprint 4: edição inline |
+| Sprint 4 (editor/validação) | não começou | spec §14 | placeholders + byte limits |
 
 ## 1. Arquitetura técnica
-- `romtranslate-core` (Rust, SEM Tauri):
-  - `detect::inspect(path)` → `InspectionReport { size, sha256, results, best }`; probes via `adapters::all()`, best = confiança ≥ 0.5.
-  - `scan::scan_file(path, &ScanConfig)` → `ScanOutcome { entries: Vec<TextEntry>, truncated, scanned_bytes }`. Config: encoding (ascii/utf8/utf16_le/utf16_be/table), tbl_path, min_chars (CARACTERES), region_start/end, max_entries (default 20k). Determinístico. Limite de arquivo do scan: 64 MiB (`MAX_SCAN_FILE_SIZE`). Filtro unicode `is_text_char` exclui controle, private-use, replacement e noncharacters (padding 0xFFFF!).
-  - `tbl::TblTable` — `HEX=texto` (chaves 1-4 bytes), longest-match greedy, erros com número de linha.
-  - `export::{export_json, export_csv}` — CSV RFC4180; `original_bytes` serializa como HEX string (serde custom em types.rs).
-  - `project::{create_project, open_project}` — open_project reconfere SHA-256 e reporta `source_found`/`source_changed`.
-- Shell Tauri: 5 commands (`inspect_file`, `create_project`, `open_project`, `scan_file`, `export_entries`) todos via helper `blocking()` (spawn_blocking). serde `rename_all=camelCase` espelhado em `apps/desktop/src/types.ts`.
-- UI: React, tela única com 5 estados (home → inspecting → report → created → extract). "Abrir projeto" na home vai direto pro extract com warnings de origem. Strings SÓ via `t()` de `i18n.ts` (pt-BR/en-US, interpolação `{param}`, teste de paridade). Tabela de resultados: filtro client-side + cap de render 500.
+- **Fluxo de tradução**: `pipeline::run_translation(db, provider, model, opts, cancel, on_progress)` — (1) carrega entries sem tradução; (2) fase TM: lookup por texto normalizado (trim+collapse, case preservado) + par de idiomas, aplica direto; (3) restante em batches sequenciais (`batch_size`, default 10): glossário filtrado ao batch → prompt (§12) → provider → retry com backoff exponencial (`max_attempts` 3, `retry_delay_ms`) → grava entry (status Machine) + TM; (4) `record_run` em provider_runs. Cancel = AtomicBool checado entre batches. Progresso = callback (Tauri emite `translation-progress`).
+- **Providers**: trait `TranslationProvider` (async_trait) com `translate_batch`/`health_check`. Ollama usa `/api/chat` com `format:"json"`; OpenAI-compat usa `/chat/completions` com bearer opcional. `parse_model_response` tolera objeto/array/```fences/<think> e ids faltantes (contam como failed). Modelo vem SEMPRE de config.
+- **DB**: `translations.sqlite` no `.rtsproj` (WAL). Upsert de entries preserva `translated_text`/`status` quando o re-scan vem sem tradução. Enums gravados como JSON string.
+- **Settings do app**: `settings.toml` (camelCase serde, legível) + `secrets.json` 0600 no `app_config_dir`; `save_settings(newSettings, apiKey)` — apiKey None mantém, "" remove. Guarda: provider openai_compatible fora de localhost exige `allowRemoteTranslation`.
+- **Commands**: inspect_file, create_project, open_project, scan_file, export_entries, save_entries, load_entries, glossary_*, get/save_settings, test_provider, translate_project (State TranslationState impede 2 simultâneas), cancel_translation.
+- **UI**: `ProjectView.tsx` = tela do projeto (scan auto-salva no DB → tabela com tradução+status → painel de tradução → glossário em details). `App.tsx` = wizard.
 
 ## 2. Estrutura de arquivos
 ```
-crates/core/src/       adapter.rs (trait+GameInput) · adapters/{gba,nes,snes}.rs
-                       detect.rs · scan.rs · tbl.rs · export.rs · hash.rs
-                       project.rs · synth.rs · types.rs · error.rs
-crates/core/tests/     pipeline.rs (detecção+projeto) · scan.rs (scanners+export)
-crates/core/examples/  gen_fixtures.rs → fixtures/generated/ (gitignored)
-apps/desktop/src/      App.tsx · i18n.ts · types.ts · util.ts · *.test.ts
-apps/desktop/src-tauri/ lib.rs (commands) · tauri.conf.json · capabilities/
-docs/SPEC.md           spec master completa — LER antes de sprint novo
+crates/core/src/       adapter.rs · adapters/ · detect.rs · scan.rs · tbl.rs · export.rs
+                       provider.rs (trait+prompt+parse) · providers/{ollama,openai_compat}.rs
+                       pipeline.rs (run_translation) · db.rs (ProjectDb) · project.rs
+                       hash.rs · synth.rs · types.rs · error.rs
+crates/core/tests/     pipeline.rs · scan.rs · translate.rs (mock + #[ignore] Ollama real)
+apps/desktop/src-tauri/ lib.rs (commands+state) · settings.rs · tauri.conf.json
+apps/desktop/src/      App.tsx (wizard) · ProjectView.tsx (tela do projeto) · i18n.ts · types.ts · util.ts
+docs/SPEC.md           spec master — LER antes de sprint novo
 ```
 
 ## 3. Como validar
 ```bash
 cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test --workspace
 pnpm lint && pnpm test && pnpm web:build
-pnpm dev   # teste manual: fixtures/generated/synthetic.gba tem strings plantadas
-           # (WELCOME TO THE VILLAGE!, POTION, HP {0}: 120, SYNTH QUEST em utf16le)
+# prova de fogo com Ollama local (fora do CI):
+cargo test -p romtranslate-core --test translate -- --ignored --nocapture
+pnpm dev   # manual: synthetic.gba de fixtures/generated → criar projeto → escanear → traduzir
 ```
 
 ## 4. Armadilhas conhecidas
-- Probes e scanners NUNCA panicam: bounds check em todo acesso; testes `*_never_panic*` cobrem — mantenha o padrão.
-- Não embutir bytes do logo Nintendo (nem de nenhum jogo) — ver DECISIONS.md.
-- `TextEntry.original_bytes` cruza a ponte como string HEX, não array.
-- Máquina de casa ganhou Rust/pnpm em 14/09; a do trabalho provavelmente NÃO tem (rustup + `npm i -g pnpm`).
-- PROJETO PESSOAL: nada disso vai pra infra de trabalho nem pro assistente interno (decisão do Rhuan, DECISIONS.md).
+- Parsers/scanners nunca panicam; bounds check sempre (testes *_never_panic*).
+- `TextEntry.original_bytes` cruza a ponte como HEX string.
+- API key NUNCA em settings.toml, logs, .rtsproj ou repo — só secrets.json 0600.
+- Ollama: modelo tem que estar puxado (`ollama pull llama3.2:3b`); o campo modelo vazio dá erro claro.
+- llama3.2:3b traduz com escorregões de gramática ("À VILAREJO") — revisão é Sprint 4; pipeline está correto (placeholders/glossário preservados).
+- Máquina do trabalho provavelmente sem Rust/pnpm (rustup + `npm i -g pnpm`).
+- PROJETO PESSOAL: nada vai pra infra de trabalho nem pro assistente interno (DECISIONS.md).

@@ -92,6 +92,46 @@ export interface OpenProjectReport {
   sourceChanged: boolean;
 }
 
+export interface GlossaryTerm {
+  term: string;
+  translation: string | null;
+  noTranslate: boolean;
+  caseSensitive: boolean;
+  note: string | null;
+}
+
+export interface TranslateSummary {
+  translated: number;
+  tmHits: number;
+  failed: number;
+  cancelled: boolean;
+}
+
+export interface ProgressEvent {
+  done: number;
+  total: number;
+  phase: "tm" | "translate";
+}
+
+export interface EndpointSettings {
+  baseUrl: string;
+  model: string;
+}
+
+export interface AppSettings {
+  provider: "ollama" | "openai_compatible";
+  ollama: EndpointSettings;
+  openaiCompatible: EndpointSettings;
+  allowRemoteTranslation: boolean;
+  batchSize: number;
+  timeoutSecs: number;
+}
+
+export interface SettingsReport {
+  settings: AppSettings;
+  apiKeySet: boolean;
+}
+
 export const PLATFORM_NAMES: Record<Platform, string> = {
   nes: "Nintendo Entertainment System",
   snes: "Super Nintendo",
