@@ -134,6 +134,44 @@ async fn load_entries(project_dir: String) -> Result<Vec<TextEntry>, String> {
     blocking(move || ProjectDb::open(&PathBuf::from(project_dir))?.load_entries()).await
 }
 
+// ---- Sprint 5: extracao estruturada + reinsercao ----
+
+#[tauri::command]
+async fn extract_structured(project_dir: String) -> Result<usize, String> {
+    blocking(move || {
+        let dir = PathBuf::from(&project_dir);
+        let game = project::load_project(&dir)?;
+        let adapter = romtranslate_core::adapters::find(&game.adapter_id).ok_or_else(|| {
+            romtranslate_core::CoreError::Project(format!("adapter {} nao existe", game.adapter_id))
+        })?;
+        let size = std::fs::metadata(&game.source_path)
+            .map_err(|e| romtranslate_core::CoreError::io(&game.source_path, e))?
+            .len();
+        if size > romtranslate_core::adapter::MAX_FILE_SIZE {
+            return Err(romtranslate_core::CoreError::FileTooLarge {
+                size,
+                limit: romtranslate_core::adapter::MAX_FILE_SIZE,
+            });
+        }
+        let data = std::fs::read(&game.source_path)
+            .map_err(|e| romtranslate_core::CoreError::io(&game.source_path, e))?;
+        let entries = adapter.extract_structured(&data)?;
+        ProjectDb::open(&dir)?.upsert_entries(&entries)
+    })
+    .await
+}
+
+#[tauri::command]
+async fn reinsert_project(
+    project_dir: String,
+    allow_errors: bool,
+) -> Result<romtranslate_core::reinsert::ReinsertOutcome, String> {
+    blocking(move || {
+        romtranslate_core::reinsert::reinsert_project(&PathBuf::from(project_dir), allow_errors)
+    })
+    .await
+}
+
 // ---- Sprint 4: editor + validacao ----
 
 #[tauri::command]
@@ -329,6 +367,8 @@ pub fn run() {
             export_entries,
             save_entries,
             load_entries,
+            extract_structured,
+            reinsert_project,
             update_entry,
             set_entry_reviewed,
             validate_project,

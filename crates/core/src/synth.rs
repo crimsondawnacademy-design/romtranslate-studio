@@ -77,6 +77,53 @@ pub fn make_snes_headered(title: &str) -> Vec<u8> {
     rom
 }
 
+/// Fixture RTSF (formato proprio, ver `adapters::rtsf`): 4 strings fixas em
+/// slots de 24 bytes + 4 relocaveis num blob com folga, checksum correto.
+pub fn make_rtsf_fixture() -> Vec<u8> {
+    use crate::adapters::rtsf::{compute_checksum, HEADER_LEN, MAGIC, VERSION};
+
+    let fixed: [&str; 4] = ["SAVE GAME", "LOAD GAME", "OPTIONS", "EXIT"];
+    let reloc: [&str; 4] = [
+        "WELCOME TO THE VILLAGE!",
+        "HP {0} RESTORED",
+        "YOU FOUND A POTION",
+        "THANKS FOR PLAYING",
+    ];
+    let slot_size = 24usize;
+    let fixed_offset = HEADER_LEN;
+    let ptr_offset = fixed_offset + fixed.len() * slot_size;
+    let blob_offset = ptr_offset + reloc.len() * 4;
+    let blob_capacity = 256usize; // folga p/ traducoes maiores
+    let total = blob_offset + blob_capacity;
+
+    let mut data = vec![0u8; total];
+    data[0..4].copy_from_slice(MAGIC);
+    data[4] = VERSION;
+    data[5] = fixed.len() as u8;
+    data[6] = slot_size as u8;
+    data[0x08..0x0C].copy_from_slice(&(fixed_offset as u32).to_le_bytes());
+    data[0x0C..0x10].copy_from_slice(&(ptr_offset as u32).to_le_bytes());
+    data[0x10..0x14].copy_from_slice(&(reloc.len() as u32).to_le_bytes());
+    data[0x14..0x18].copy_from_slice(&(blob_offset as u32).to_le_bytes());
+    data[0x18..0x1C].copy_from_slice(&(blob_capacity as u32).to_le_bytes());
+
+    for (i, text) in fixed.iter().enumerate() {
+        let off = fixed_offset + i * slot_size;
+        data[off..off + text.len()].copy_from_slice(text.as_bytes());
+    }
+    let mut cursor = blob_offset;
+    for (i, text) in reloc.iter().enumerate() {
+        data[cursor..cursor + text.len()].copy_from_slice(text.as_bytes());
+        let ptr_pos = ptr_offset + i * 4;
+        data[ptr_pos..ptr_pos + 4].copy_from_slice(&(cursor as u32).to_le_bytes());
+        cursor += text.len() + 1;
+    }
+
+    let checksum = compute_checksum(&data);
+    data[0x1C..0x20].copy_from_slice(&checksum.to_le_bytes());
+    data
+}
+
 /// Bytes pseudo-aleatorios deterministicos (xorshift), p/ testes negativos.
 pub fn make_random(len: usize, seed: u64) -> Vec<u8> {
     let mut state = seed.max(1);

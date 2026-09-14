@@ -13,6 +13,7 @@ import {
   ScanEncoding,
   ScanOutcome,
   SettingsReport,
+  ReinsertOutcome,
   TextEntry,
   TranslateSummary,
   ValidationIssue,
@@ -81,6 +82,9 @@ export default function ProjectView({
   const [gTerm, setGTerm] = useState("");
   const [gTranslation, setGTranslation] = useState("");
   const [gNoTranslate, setGNoTranslate] = useState(false);
+
+  const [reinserting, setReinserting] = useState(false);
+  const [reinsertOutcome, setReinsertOutcome] = useState<ReinsertOutcome | null>(null);
 
   const [issuesByEntry, setIssuesByEntry] = useState<
     Record<string, ValidationIssue[]>
@@ -161,6 +165,38 @@ export default function ProjectView({
       setError(String(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function runStructuredExtract() {
+    setError(null);
+    setBusy(true);
+    try {
+      const n = await invoke<number>("extract_structured", { projectDir });
+      setScanInfo({ found: n, truncated: false });
+      await reloadEntries();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runReinsert() {
+    setError(null);
+    setReinsertOutcome(null);
+    setReinserting(true);
+    try {
+      const outcome = await invoke<ReinsertOutcome>("reinsert_project", {
+        projectDir,
+        allowErrors: false,
+      });
+      setReinsertOutcome(outcome);
+      await reloadEntries();
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setReinserting(false);
     }
   }
 
@@ -414,6 +450,9 @@ export default function ProjectView({
         )}
         <div className="scan-run">
           <button onClick={onBack}>{t("common.back")}</button>
+          <button onClick={runStructuredExtract} disabled={busy || sourceBroken}>
+            {t("extract.structured")}
+          </button>
           <button className="primary" onClick={runScan} disabled={busy || sourceBroken}>
             {busy ? t("extract.scanning") : t("extract.scan")}
           </button>
@@ -621,6 +660,39 @@ export default function ProjectView({
               })}
               {summary.cancelled && t("translate.summaryCancelled")}
             </div>
+          )}
+        </div>
+      )}
+
+      {entries.length > 0 && (
+        <div className="panel">
+          <h3>{t("reinsert.title")}</h3>
+          <p className="hint left">{t("reinsert.hint")}</p>
+          <div className="actions">
+            <button
+              className="primary"
+              onClick={runReinsert}
+              disabled={reinserting || sourceBroken || translating}
+            >
+              {reinserting ? t("reinsert.running") : t("reinsert.run")}
+            </button>
+          </div>
+          {reinsertOutcome && (
+            <>
+              <div className="ok">
+                {t("reinsert.done", { path: reinsertOutcome.workingPath })}
+                <br />
+                {t("reinsert.applied", {
+                  applied: reinsertOutcome.apply.applied,
+                  kept: reinsertOutcome.apply.keptOriginal,
+                })}
+              </div>
+              <ul className="evidence">
+                {reinsertOutcome.verification.checks.map((c) => (
+                  <li key={c}>{c}</li>
+                ))}
+              </ul>
+            </>
           )}
         </div>
       )}

@@ -8,6 +8,7 @@ export type Platform =
   | "game_cube"
   | "wii"
   | "wii_u"
+  | "synthetic"
   | "unknown";
 
 export type SupportLevel =
@@ -163,5 +164,25 @@ export const PLATFORM_NAMES: Record<Platform, string> = {
   game_cube: "GameCube",
   wii: "Wii",
   wii_u: "Wii U",
+  synthetic: "Fixture sintética (RTSF)",
   unknown: "?",
 };
+
+export interface ApplyReport {
+  applied: number;
+  keptOriginal: number;
+  ignoredGeneric: number;
+}
+
+export interface VerificationReport {
+  ok: boolean;
+  checks: string[];
+  problems: string[];
+}
+
+export interface ReinsertOutcome {
+  workingPath: string;
+  apply: ApplyReport;
+  verification: VerificationReport;
+  forcedErrors: number;
+}

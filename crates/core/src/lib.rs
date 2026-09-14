@@ -14,6 +14,7 @@ pub mod pipeline;
 pub mod project;
 pub mod provider;
 pub mod providers;
+pub mod reinsert;
 pub mod scan;
 pub mod synth;
 pub mod tbl;

@@ -116,3 +116,13 @@
 **Consequências:** filtro "placeholder mismatch" cobre as três famílias; falso positivo raro se destrava corrigindo o texto ou (futuro) modo avançado.
 
 **Driver:** claude (ponytail).
+
+## [2026-09-14] Reinserção: apply all-or-nothing e verify no arquivo relido
+
+**Contexto:** spec §15 exige trabalho em working copy com validação posterior; aplicação parcial deixaria imagem meio-traduzida sem aviso.
+
+**Decisão:** `apply_text` é all-or-nothing (qualquer tradução que não serializa → Err, nada gravado). A verificação roda sobre os bytes RELIDOS do disco (não os da memória) — o que foi persistido é o que vale. Entries com status Error bloqueiam a reinserção; `allow_errors` é o "modo avançado" da spec §14 (no core e no command; UI ainda passa false).
+
+**Consequências:** working copy ou está íntegra e verificada, ou não existe (falha de verify mantém o arquivo só para inspeção, com erro claro).
+
+**Driver:** claude.

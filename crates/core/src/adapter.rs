@@ -53,11 +53,49 @@ impl GameInput {
     }
 }
 
+use crate::types::TextEntry;
+use serde::Serialize;
+
+/// Resultado de `apply_text`: quantas entries entraram na imagem nova.
+/// Falha de serializacao e `Err` (all-or-nothing) — nunca imagem parcial.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyReport {
+    /// Entries com traducao aplicadas na imagem.
+    pub applied: usize,
+    /// Entries estruturadas sem traducao: texto original mantido.
+    pub kept_original: usize,
+    /// Entries de scanner generico ignoradas (adapter so aplica as estruturadas).
+    pub ignored_generic: usize,
+}
+
+/// Imagem modificada em memoria + relatorio. O caller decide onde gravar
+/// (sempre working copy — nunca o original).
+#[derive(Debug)]
+pub struct AppliedImage {
+    pub bytes: Vec<u8>,
+    pub report: ApplyReport,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerificationReport {
+    pub ok: bool,
+    pub checks: Vec<String>,
+    pub problems: Vec<String>,
+}
+
+fn unsupported<T>(id: &str, what: &str) -> Result<T> {
+    Err(crate::error::CoreError::Project(format!(
+        "adapter {id} nao suporta {what}"
+    )))
+}
+
 /// Contrato de adapter de plataforma.
 ///
-/// Sprint 1 usa apenas `probe`. `extract`/`apply`/`verify` entram no Sprint 2+.
-/// Sync por enquanto: probing e IO local rapido; vira async junto com os
-/// providers de traducao (Sprint 3) se necessario.
+/// `probe` e obrigatorio; os metodos estruturados tem default "nao suportado" —
+/// so quem declara a capability implementa (Camada B). Sync por enquanto:
+/// IO local rapido; vira async se algum adapter precisar de verdade.
 pub trait GameAdapter: Send + Sync {
     fn id(&self) -> &'static str;
     fn display_name(&self) -> &'static str;
@@ -66,4 +104,20 @@ pub trait GameAdapter: Send + Sync {
 
     /// Nunca panica com input malformado; retorna confidence 0.0 quando nao reconhece.
     fn probe(&self, input: &GameInput) -> ProbeResult;
+
+    /// Extracao estruturada (offsets/ponteiros/limites reais) — Camada B.
+    fn extract_structured(&self, _data: &[u8]) -> Result<Vec<TextEntry>> {
+        unsupported(self.id(), "extracao estruturada")
+    }
+
+    /// Serializa traducoes numa NOVA imagem (checksums/ponteiros atualizados).
+    /// All-or-nothing: qualquer traducao que nao serializa retorna Err.
+    fn apply_text(&self, _data: &[u8], _entries: &[TextEntry]) -> Result<AppliedImage> {
+        unsupported(self.id(), "reinsercao")
+    }
+
+    /// Verificacao estrutural da imagem (usada apos gravar a working copy).
+    fn verify(&self, _data: &[u8]) -> Result<VerificationReport> {
+        unsupported(self.id(), "verificacao")
+    }
 }

@@ -10,7 +10,7 @@ fn main() -> std::io::Result<()> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/generated");
     fs::create_dir_all(&dir)?;
 
-    let files: [(&str, Vec<u8>); 5] = [
+    let files: [(&str, Vec<u8>); 6] = [
         ("synthetic.gba", synth::make_gba_rom("SYNTHRPG")),
         ("synthetic.nes", synth::make_nes_rom()),
         (
@@ -22,6 +22,7 @@ fn main() -> std::io::Result<()> {
             synth::make_snes_headered("SYNTHETIC QUEST"),
         ),
         ("not_a_rom.bin", synth::make_random(4096, 2026)),
+        ("synthetic.rtsf", synth::make_rtsf_fixture()),
     ];
 
     for (name, bytes) in files {
