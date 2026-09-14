@@ -10,7 +10,7 @@ em vez de cópias modificadas.
 calcula SHA-256 e cria projetos locais `.rtsproj`. Extração e tradução vêm nos
 próximos sprints.
 
-![screenshot placeholder](docs/screenshot-placeholder.png)
+<!-- TODO: screenshot da tela de detecção quando a UI estabilizar -->
 
 ## O que funciona hoje
 
