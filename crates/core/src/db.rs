@@ -152,6 +152,20 @@ impl ProjectDb {
         Ok(())
     }
 
+    pub fn set_status(&mut self, id: &str, status: TranslationStatus) -> Result<()> {
+        self.conn.execute(
+            "UPDATE entries SET status=?2 WHERE id=?1",
+            params![id, json_str(&status)?],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_entry(&self, id: &str) -> Result<Option<TextEntry>> {
+        Ok(self.load_entries()?.into_iter().find(|e| e.id == id))
+        // ponytail: filtra em memoria (poucos milhares de rows); query dedicada
+        // se o load completo aparecer em profile.
+    }
+
     // ---- Translation memory ----
 
     pub fn tm_lookup(

@@ -11,6 +11,31 @@ export function formatBytes(bytes: number): string {
   return `${value.toFixed(value >= 100 ? 0 : 1)} ${unit}`;
 }
 
+import { TextEncodingWire } from "./types";
+
+/** Bytes da string no encoding destino; null = nao codificavel ou sem encoder. */
+export function encodedByteLength(
+  text: string,
+  encoding: TextEncodingWire,
+): number | null {
+  if (typeof encoding === "object") return null; // tabela custom: sem encoder no front
+  switch (encoding) {
+    case "ascii":
+      // eslint-disable-next-line no-control-regex
+      return /^[\x00-\x7F]*$/.test(text) ? text.length : null;
+    case "utf8":
+      return new TextEncoder().encode(text).length;
+    case "utf16_le":
+    case "utf16_be": {
+      let units = 0;
+      for (const ch of text) units += (ch.codePointAt(0) ?? 0) > 0xffff ? 2 : 1;
+      return units * 2;
+    }
+    case "shift_jis":
+      return null;
+  }
+}
+
 export function formatOffset(offset: number | null): string {
   if (offset === null) return "";
   return "0x" + offset.toString(16).toUpperCase().padStart(8, "0");

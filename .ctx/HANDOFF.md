@@ -18,10 +18,12 @@ motivo: fim-de-feature
 | Tradução Ollama/OpenAI-compat | pronto, validado com Ollama REAL | `crates/core/src/{provider,providers,pipeline}.rs` | — |
 | TM + glossário | pronto (por projeto) | `crates/core/src/db.rs` | TM global depois |
 | Settings + secrets | pronto (toml + secrets 0600) | `apps/desktop/src-tauri/src/settings.rs` | keyring qdo distribuir |
-| UI tradução | pronto (config/progresso/cancel/glossário) | `apps/desktop/src/ProjectView.tsx` | Sprint 4: edição inline |
-| Sprint 4 (editor/validação) | não começou | spec §14 | placeholders + byte limits |
+| UI tradução | pronto (config/progresso/cancel/glossário) | `apps/desktop/src/ProjectView.tsx` | — |
+| Editor + validação | pronto (tokens/bytes/statuses/filtros) | `crates/core/src/validate.rs` + ProjectView | — |
+| Sprint 5 (reinserção fixture) | não começou | spec §15 | round-trip + bloqueio de Error |
 
 ## 1. Arquitetura técnica
+- **Validação (Sprint 4)**: `validate::validate_entry` — tokens {..}/<..>/[..]/%x/\x comparados em multiset (remoção/invenção = Error), `encoded_len` por encoding (ASCII não-codificável = Error Unencodable; tabela/Shift-JIS = check pulado), overflow: Error acima de `max_bytes`, Warning acima do espaço original, vazia = Error, anomalia >3x = Warning. `validate_project_db` ajusta statuses (Error↔Machine; Reviewed limpo fica). `apply_manual_translation` = editar → status Machine + TM + valida. `set_reviewed(true)` recusa com Error pendente. UI valida automático pós-tradução; filtros derivam de status + issues.
 - **Fluxo de tradução**: `pipeline::run_translation(db, provider, model, opts, cancel, on_progress)` — (1) carrega entries sem tradução; (2) fase TM: lookup por texto normalizado (trim+collapse, case preservado) + par de idiomas, aplica direto; (3) restante em batches sequenciais (`batch_size`, default 10): glossário filtrado ao batch → prompt (§12) → provider → retry com backoff exponencial (`max_attempts` 3, `retry_delay_ms`) → grava entry (status Machine) + TM; (4) `record_run` em provider_runs. Cancel = AtomicBool checado entre batches. Progresso = callback (Tauri emite `translation-progress`).
 - **Providers**: trait `TranslationProvider` (async_trait) com `translate_batch`/`health_check`. Ollama usa `/api/chat` com `format:"json"`; OpenAI-compat usa `/chat/completions` com bearer opcional. `parse_model_response` tolera objeto/array/```fences/<think> e ids faltantes (contam como failed). Modelo vem SEMPRE de config.
 - **DB**: `translations.sqlite` no `.rtsproj` (WAL). Upsert de entries preserva `translated_text`/`status` quando o re-scan vem sem tradução. Enums gravados como JSON string.

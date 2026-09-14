@@ -17,6 +17,7 @@ use romtranslate_core::providers::ollama::OllamaProvider;
 use romtranslate_core::providers::openai_compat::OpenAiCompatProvider;
 use romtranslate_core::scan::{self, ScanConfig, ScanOutcome};
 use romtranslate_core::types::{GameProject, TextEntry};
+use romtranslate_core::validate;
 
 use settings::AppSettings;
 
@@ -131,6 +132,54 @@ async fn save_entries(project_dir: String, entries: Vec<TextEntry>) -> Result<us
 #[tauri::command]
 async fn load_entries(project_dir: String) -> Result<Vec<TextEntry>, String> {
     blocking(move || ProjectDb::open(&PathBuf::from(project_dir))?.load_entries()).await
+}
+
+// ---- Sprint 4: editor + validacao ----
+
+#[tauri::command]
+async fn update_entry(
+    project_dir: String,
+    id: String,
+    translation: String,
+) -> Result<Vec<validate::ValidationIssue>, String> {
+    blocking(move || {
+        let dir = PathBuf::from(&project_dir);
+        let game = project::load_project(&dir)?;
+        let mut db = ProjectDb::open(&dir)?;
+        validate::apply_manual_translation(
+            &mut db,
+            &id,
+            &translation,
+            game.source_language.as_deref().unwrap_or(""),
+            &game.target_language,
+        )
+    })
+    .await
+}
+
+#[tauri::command]
+async fn set_entry_reviewed(
+    project_dir: String,
+    id: String,
+    reviewed: bool,
+) -> Result<String, String> {
+    blocking(move || {
+        let mut db = ProjectDb::open(&PathBuf::from(project_dir))?;
+        let status = validate::set_reviewed(&mut db, &id, reviewed)?;
+        Ok(serde_json::to_string(&status)?
+            .trim_matches('"')
+            .to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn validate_project(project_dir: String) -> Result<validate::ValidationReport, String> {
+    blocking(move || {
+        let mut db = ProjectDb::open(&PathBuf::from(project_dir))?;
+        validate::validate_project_db(&mut db)
+    })
+    .await
 }
 
 // ---- Sprint 3: glossario ----
@@ -280,6 +329,9 @@ pub fn run() {
             export_entries,
             save_entries,
             load_entries,
+            update_entry,
+            set_entry_reviewed,
+            validate_project,
             glossary_list,
             glossary_upsert,
             glossary_delete,

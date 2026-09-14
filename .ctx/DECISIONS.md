@@ -106,3 +106,13 @@
 **Decisão:** pipeline sequencial (Ollama local não paraleliza de verdade; concorrência entra se API remota medir como gargalo). Endpoint OpenAI-compatible fora de localhost é BLOQUEADO até o usuário ativar "permitir tradução remota" — localhost (LM Studio, vLLM local) passa sempre.
 
 **Driver:** claude (ponytail).
+
+## [2026-09-14] Validação: tokens unificados; revisão exige validação limpa
+
+**Contexto:** spec §14 separa placeholders/control codes/tags. Nos textos extraídos (printable), todos são padrões no texto: {..}, <..>, [..], %x, \x.
+
+**Decisão:** um extrator único de tokens com comparação multiset — remoção OU invenção é Error. "Marcar revisada" exige validação sem Error (bypass "modo avançado" da spec fica pra reinserção, Sprint 5). Edição manual grava na TM (melhor fonte de tradução) e revalida na hora.
+
+**Consequências:** filtro "placeholder mismatch" cobre as três famílias; falso positivo raro se destrava corrigindo o texto ou (futuro) modo avançado.
+
+**Driver:** claude (ponytail).

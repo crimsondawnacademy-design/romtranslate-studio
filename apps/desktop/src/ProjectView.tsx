@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { makeT, MessageId } from "./i18n";
-import { defaultProjectDir, formatOffset } from "./util";
+import { defaultProjectDir, encodedByteLength, formatOffset } from "./util";
 import {
   AppSettings,
   GameProject,
@@ -15,7 +15,28 @@ import {
   SettingsReport,
   TextEntry,
   TranslateSummary,
+  ValidationIssue,
+  ValidationReport,
 } from "./types";
+
+type StatusFilter =
+  | "all"
+  | "untranslated"
+  | "machine"
+  | "reviewed"
+  | "error"
+  | "too_long"
+  | "placeholder_mismatch";
+
+const STATUS_FILTERS: StatusFilter[] = [
+  "all",
+  "untranslated",
+  "machine",
+  "reviewed",
+  "error",
+  "too_long",
+  "placeholder_mismatch",
+];
 
 const SCAN_ENCODINGS: ScanEncoding[] = ["ascii", "utf8", "utf16_le", "utf16_be", "table"];
 const RENDER_CAP = 500;
@@ -60,6 +81,14 @@ export default function ProjectView({
   const [gTerm, setGTerm] = useState("");
   const [gTranslation, setGTranslation] = useState("");
   const [gNoTranslate, setGNoTranslate] = useState(false);
+
+  const [issuesByEntry, setIssuesByEntry] = useState<
+    Record<string, ValidationIssue[]>
+  >({});
+  const [valReport, setValReport] = useState<ValidationReport | null>(null);
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
 
   const sourceBroken = warning === "project.sourceMissing";
 
@@ -180,6 +209,21 @@ export default function ProjectView({
     }
   }
 
+  const runValidation = useCallback(async () => {
+    try {
+      const report = await invoke<ValidationReport>("validate_project", { projectDir });
+      const map: Record<string, ValidationIssue[]> = {};
+      for (const issue of report.issues) {
+        (map[issue.entryId] ??= []).push(issue);
+      }
+      setIssuesByEntry(map);
+      setValReport(report);
+      await reloadEntries();
+    } catch (e) {
+      setError(String(e));
+    }
+  }, [projectDir, reloadEntries]);
+
   async function runTranslation() {
     setError(null);
     setSummary(null);
@@ -188,13 +232,48 @@ export default function ProjectView({
     try {
       const result = await invoke<TranslateSummary>("translate_project", { projectDir });
       setSummary(result);
-      await reloadEntries();
+      await runValidation(); // erros aparecem antes de qualquer reinsercao
     } catch (e) {
       setError(String(e));
     } finally {
       setTranslating(false);
       setProgress(null);
     }
+  }
+
+  async function saveDraft() {
+    if (!selectedId) return;
+    setError(null);
+    try {
+      const issues = await invoke<ValidationIssue[]>("update_entry", {
+        projectDir,
+        id: selectedId,
+        translation: draft,
+      });
+      setIssuesByEntry((prev) => ({ ...prev, [selectedId]: issues }));
+      await reloadEntries();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  async function toggleReviewed(entry: TextEntry) {
+    setError(null);
+    try {
+      await invoke<string>("set_entry_reviewed", {
+        projectDir,
+        id: entry.id,
+        reviewed: entry.status !== "reviewed",
+      });
+      await reloadEntries();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
+  function selectEntry(entry: TextEntry) {
+    setSelectedId(entry.id);
+    setDraft(entry.translatedText ?? "");
   }
 
   async function cancelTranslation() {
@@ -246,14 +325,30 @@ export default function ProjectView({
     setSettings({ ...settings, [key]: { ...settings[key], [field]: value } });
   }
 
-  const filtered = filter
-    ? entries.filter(
-        (e) =>
-          e.sourceText.toLowerCase().includes(filter.toLowerCase()) ||
-          (e.translatedText ?? "").toLowerCase().includes(filter.toLowerCase()),
-      )
-    : entries;
+  function matchesStatusFilter(e: TextEntry): boolean {
+    switch (statusFilter) {
+      case "all":
+        return true;
+      case "too_long":
+        return (issuesByEntry[e.id] ?? []).some((i) => i.kind === "byte_overflow");
+      case "placeholder_mismatch":
+        return (issuesByEntry[e.id] ?? []).some(
+          (i) => i.kind === "placeholder_mismatch",
+        );
+      default:
+        return e.status === statusFilter;
+    }
+  }
+
+  const filtered = entries.filter(
+    (e) =>
+      matchesStatusFilter(e) &&
+      (!filter ||
+        e.sourceText.toLowerCase().includes(filter.toLowerCase()) ||
+        (e.translatedText ?? "").toLowerCase().includes(filter.toLowerCase())),
+  );
   const shown = filtered.slice(0, RENDER_CAP);
+  const selected = selectedId ? entries.find((e) => e.id === selectedId) : undefined;
   const endpoint = settings
     ? settings.provider === "ollama"
       ? settings.ollama
@@ -338,15 +433,35 @@ export default function ProjectView({
         <>
           <div className="results-bar">
             <span>{t("extract.found", { n: entries.length })}</span>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+            >
+              {STATUS_FILTERS.map((f) => (
+                <option key={f} value={f}>
+                  {t(`filter.${f}` as MessageId)}
+                </option>
+              ))}
+            </select>
             <input
               type="search"
               placeholder={t("extract.filter")}
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             />
+            <button onClick={runValidation}>{t("validate.run")}</button>
             <button onClick={() => exportAs("json")}>{t("export.json")}</button>
             <button onClick={() => exportAs("csv")}>{t("export.csv")}</button>
           </div>
+          {valReport && (
+            <div className={valReport.errors > 0 ? "warn" : "ok"}>
+              {t("validate.summary", {
+                errors: valReport.errors,
+                warnings: valReport.warnings,
+                checked: valReport.checked,
+              })}
+            </div>
+          )}
           {filtered.length > RENDER_CAP && (
             <p className="hint left">
               {t("extract.showing", { shown: RENDER_CAP, total: filtered.length })}
@@ -363,21 +478,47 @@ export default function ProjectView({
                 </tr>
               </thead>
               <tbody>
-                {shown.map((e) => (
-                  <tr key={e.id}>
-                    <td className="mono">{formatOffset(e.offset)}</td>
-                    <td className="text-cell">{e.sourceText}</td>
-                    <td className="text-cell">{e.translatedText ?? ""}</td>
-                    <td>
-                      <span className={`status ${e.status}`}>
-                        {t(`status.${e.status}` as MessageId)}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {shown.map((e) => {
+                  const issues = issuesByEntry[e.id] ?? [];
+                  const worst = issues.some((i) => i.severity === "error")
+                    ? "error"
+                    : issues.length > 0
+                      ? "warning"
+                      : "";
+                  return (
+                    <tr
+                      key={e.id}
+                      className={`row ${worst} ${selectedId === e.id ? "selected" : ""}`}
+                      onClick={() => selectEntry(e)}
+                    >
+                      <td className="mono">{formatOffset(e.offset)}</td>
+                      <td className="text-cell">{e.sourceText}</td>
+                      <td className="text-cell">{e.translatedText ?? ""}</td>
+                      <td>
+                        <span className={`status ${e.status}`}>
+                          {t(`status.${e.status}` as MessageId)}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
+
+          {selected ? (
+            <EntryEditor
+              entry={selected}
+              draft={draft}
+              issues={issuesByEntry[selected.id] ?? []}
+              t={t}
+              onDraft={setDraft}
+              onSave={saveDraft}
+              onToggleReviewed={() => toggleReviewed(selected)}
+            />
+          ) : (
+            <p className="hint left">{t("editor.pick")}</p>
+          )}
         </>
       )}
 
@@ -531,5 +672,83 @@ export default function ProjectView({
         )}
       </details>
     </section>
+  );
+}
+
+interface EntryEditorProps {
+  entry: TextEntry;
+  draft: string;
+  issues: ValidationIssue[];
+  t: ReturnType<typeof makeT>;
+  onDraft: (v: string) => void;
+  onSave: () => void;
+  onToggleReviewed: () => void;
+}
+
+function EntryEditor({
+  entry,
+  draft,
+  issues,
+  t,
+  onDraft,
+  onSave,
+  onToggleReviewed,
+}: EntryEditorProps) {
+  const draftBytes = encodedByteLength(draft, entry.encoding);
+  const originalBytes = entry.originalBytes.length / 2;
+  const limit = entry.maxBytes ?? originalBytes;
+  const overflow = draftBytes !== null && draftBytes > limit;
+  const dirty = draft !== (entry.translatedText ?? "");
+
+  return (
+    <div className="panel editor">
+      <div className="editor-cols">
+        <div>
+          <h4>{t("editor.original")}</h4>
+          <div className="editor-original">{entry.sourceText}</div>
+          <p className="hint left">
+            {t("editor.bytes", { n: originalBytes })} · {formatOffset(entry.offset)}
+          </p>
+        </div>
+        <div>
+          <h4>{t("editor.translation")}</h4>
+          <textarea
+            rows={3}
+            value={draft}
+            onChange={(e) => onDraft(e.target.value)}
+          />
+          <p className={`hint left ${overflow ? "overflow" : ""}`}>
+            {draftBytes === null
+              ? t("editor.noEncoder")
+              : `${t("editor.bytes", { n: draftBytes })} · ${
+                  entry.maxBytes !== null
+                    ? t("editor.bytesLimit", { max: entry.maxBytes })
+                    : t("editor.bytesOriginal", { n: originalBytes })
+                }`}
+          </p>
+        </div>
+      </div>
+
+      {issues.length > 0 && (
+        <ul className="issues">
+          {issues.map((issue, i) => (
+            <li key={i} className={issue.severity}>
+              {issue.message}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="actions">
+        <button onClick={onToggleReviewed} disabled={!entry.translatedText}>
+          {entry.status === "reviewed"
+            ? t("editor.unmarkReviewed")
+            : t("editor.markReviewed")}
+        </button>
+        <button className="primary" onClick={onSave} disabled={!dirty}>
+          {t("editor.save")}
+        </button>
+      </div>
+    </div>
   );
 }

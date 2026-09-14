@@ -132,6 +132,29 @@ export interface SettingsReport {
   apiKeySet: boolean;
 }
 
+export type Severity = "error" | "warning";
+
+export type IssueKind =
+  | "placeholder_mismatch"
+  | "byte_overflow"
+  | "empty_translation"
+  | "length_anomaly"
+  | "unencodable";
+
+export interface ValidationIssue {
+  entryId: string;
+  severity: Severity;
+  kind: IssueKind;
+  message: string;
+}
+
+export interface ValidationReport {
+  issues: ValidationIssue[];
+  errors: number;
+  warnings: number;
+  checked: number;
+}
+
 export const PLATFORM_NAMES: Record<Platform, string> = {
   nes: "Nintendo Entertainment System",
   snes: "Super Nintendo",

@@ -496,3 +496,87 @@ em {
   font-style: normal;
   font-size: 12px;
 }
+
+table.strings tr.row {
+  cursor: pointer;
+}
+
+table.strings tr.row:hover td {
+  background: rgba(110, 127, 255, 0.06);
+}
+
+table.strings tr.selected td {
+  background: rgba(110, 127, 255, 0.12);
+}
+
+table.strings tr.error td:first-child {
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+
+table.strings tr.warning td:first-child {
+  box-shadow: inset 3px 0 0 #e8b34b;
+}
+
+.editor-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.editor-cols h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.editor-original {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  min-height: 64px;
+  overflow-wrap: anywhere;
+}
+
+.editor textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+}
+
+.hint.overflow {
+  color: var(--danger);
+}
+
+.issues {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0;
+  font-size: 13px;
+}
+
+.issues li {
+  padding: 6px 10px;
+  border-radius: 6px;
+  margin-bottom: 4px;
+  border: 1px solid var(--border);
+}
+
+.issues li.error {
+  border-color: var(--danger);
+  background: rgba(224, 86, 77, 0.1);
+}
+
+.issues li.warning {
+  border-color: #e8b34b;
+  background: rgba(232, 179, 75, 0.1);
+}

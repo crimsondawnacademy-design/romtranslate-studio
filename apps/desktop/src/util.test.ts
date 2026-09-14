@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { defaultProjectDir, formatBytes, formatOffset } from "./util";
+import { defaultProjectDir, encodedByteLength, formatBytes, formatOffset } from "./util";
+
+describe("encodedByteLength", () => {
+  it("calcula por encoding e devolve null quando nao codifica", () => {
+    expect(encodedByteLength("SAVE", "ascii")).toBe(4);
+    expect(encodedByteLength("POÇÃO", "ascii")).toBeNull();
+    expect(encodedByteLength("Poção", "utf8")).toBe(7);
+    expect(encodedByteLength("ABC", "utf16_le")).toBe(6);
+    expect(encodedByteLength("𝄞", "utf16_be")).toBe(4); // par surrogate
+    expect(encodedByteLength("abc", { table: "x" })).toBeNull();
+    expect(encodedByteLength("abc", "shift_jis")).toBeNull();
+  });
+});
 
 describe("formatOffset", () => {
   it("hex de 8 digitos ou vazio", () => {

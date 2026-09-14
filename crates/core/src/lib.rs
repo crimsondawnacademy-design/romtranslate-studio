@@ -18,5 +18,6 @@ pub mod scan;
 pub mod synth;
 pub mod tbl;
 pub mod types;
+pub mod validate;
 
 pub use error::{CoreError, Result};
