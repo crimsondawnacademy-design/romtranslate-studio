@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { defaultProjectDir, formatBytes } from "./util";
+import { defaultProjectDir, formatBytes, formatOffset } from "./util";
+
+describe("formatOffset", () => {
+  it("hex de 8 digitos ou vazio", () => {
+    expect(formatOffset(0)).toBe("0x00000000");
+    expect(formatOffset(0x1fc0)).toBe("0x00001FC0");
+    expect(formatOffset(null)).toBe("");
+  });
+});
 
 describe("formatBytes", () => {
   it("formata unidades binarias", () => {

@@ -244,3 +244,133 @@ code {
   padding: 1px 5px;
   border-radius: 4px;
 }
+
+.warn {
+  background: rgba(232, 179, 75, 0.12);
+  border: 1px solid #e8b34b;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
+
+.ok {
+  background: rgba(53, 196, 143, 0.12);
+  border: 1px solid var(--ok);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.center-actions {
+  justify-content: center;
+}
+
+.hint.left {
+  text-align: left;
+  margin: 10px 0 16px;
+  max-width: none;
+}
+
+.scan-controls {
+  display: flex;
+  gap: 20px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+
+.scan-controls label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.scan-controls input[type="number"] {
+  width: 90px;
+}
+
+.scan-run {
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+}
+
+input[type="number"],
+input[type="search"] {
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 14px;
+}
+
+.results-bar {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 4px 0 12px;
+  flex-wrap: wrap;
+}
+
+.results-bar span {
+  font-weight: 600;
+  font-size: 14px;
+  margin-right: auto;
+}
+
+.results-bar input[type="search"] {
+  min-width: 200px;
+}
+
+.strings-wrap {
+  max-height: 420px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+table.strings {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+table.strings th {
+  position: sticky;
+  top: 0;
+  background: var(--panel-2);
+  text-align: left;
+  padding: 8px 12px;
+  color: var(--muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+}
+
+table.strings td {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+table.strings tr:last-child td {
+  border-bottom: none;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.num {
+  text-align: right;
+}
+
+.text-cell {
+  overflow-wrap: anywhere;
+}

@@ -54,3 +54,29 @@
 **Decisão:** probe e fixture cobrem só o par. Quando a reinserção recalcular checksums internos (spec §15), aí entra a soma canônica com testes próprios.
 
 **Driver:** claude.
+
+## [2026-09-14] Projeto pessoal: nada na VPS da agência nem no assistente interno
+
+**Contexto:** o RomTranslate Studio é projeto PESSOAL do Rhuan. A infra da empresa (VPS [ip interno removido], agentes internos, RAG da empresa) é da agência.
+
+**Decisão:** nenhum deploy, automação, cron ou registro deste projeto vai para a VPS da empresa nem para o assistente interno. O projeto vive nas máquinas locais + repo privado GitHub. Se um dia precisar de automação agendada, é na infra pessoal (infra pessoal), nunca na da agência.
+
+**Driver:** rhuan (14/09/2026).
+
+## [2026-09-14] Scanner genérico fora do trait GameAdapter
+
+**Contexto:** spec §8 põe `extract_text` no trait de adapter; spec §10 define a Camada A (scanner genérico) como ferramenta de descoberta que serve qualquer plataforma.
+
+**Decisão:** a Camada A vive em `scan.rs` como função independente do adapter — a UI chama direto. `extract_text` estruturado entra no trait quando a Camada B nascer (fixture adapter do Sprint 5), onde extração de verdade depende de formato/ponteiros por plataforma.
+
+**Consequências:** trait continua enxuto; scanner reutilizável em CLI futura sem adapter.
+
+**Driver:** claude (ponytail).
+
+## [2026-09-14] Shift-JIS adiado
+
+**Contexto:** spec §10 lista Shift-JIS "quando apropriado". Exige tabela de conversão (crate encoding_rs).
+
+**Decisão:** fora do Sprint 2. Entra com `encoding_rs` quando houver adapter/caso de uso japonês real; a arquitetura (enum `ScanEncoding` + `TextEncoding::ShiftJis` já existente) já reserva o lugar.
+
+**Driver:** claude (ponytail).

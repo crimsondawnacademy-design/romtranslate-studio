@@ -46,6 +46,52 @@ export interface GameProject {
   createdAt: string;
 }
 
+export type TextEncodingWire =
+  | "ascii"
+  | "utf8"
+  | "utf16_le"
+  | "utf16_be"
+  | "shift_jis"
+  | { table: string };
+
+export interface TextEntry {
+  id: string;
+  resourcePath: string | null;
+  offset: number | null;
+  /** hex string (serde serializa bytes como hex) */
+  originalBytes: string;
+  sourceText: string;
+  translatedText: string | null;
+  context: string | null;
+  maxBytes: number | null;
+  encoding: TextEncodingWire;
+  status: string;
+  metadata: unknown;
+}
+
+export type ScanEncoding = "ascii" | "utf8" | "utf16_le" | "utf16_be" | "table";
+
+export interface ScanConfig {
+  encoding: ScanEncoding;
+  tblPath: string | null;
+  minChars: number;
+  regionStart: number | null;
+  regionEnd: number | null;
+  maxEntries: number;
+}
+
+export interface ScanOutcome {
+  entries: TextEntry[];
+  truncated: boolean;
+  scannedBytes: number;
+}
+
+export interface OpenProjectReport {
+  project: GameProject;
+  sourceFound: boolean;
+  sourceChanged: boolean;
+}
+
 export const PLATFORM_NAMES: Record<Platform, string> = {
   nes: "Nintendo Entertainment System",
   snes: "Super Nintendo",

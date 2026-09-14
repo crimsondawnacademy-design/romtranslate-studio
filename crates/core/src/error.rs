@@ -16,6 +16,9 @@ pub enum CoreError {
     #[error("projeto: {0}")]
     Project(String),
 
+    #[error("tabela .tbl: {0}")]
+    Tbl(String),
+
     #[error("serializacao: {0}")]
     Serde(#[from] serde_json::Error),
 }

@@ -11,6 +11,11 @@ export function formatBytes(bytes: number): string {
   return `${value.toFixed(value >= 100 ? 0 : 1)} ${unit}`;
 }
 
+export function formatOffset(offset: number | null): string {
+  if (offset === null) return "";
+  return "0x" + offset.toString(16).toUpperCase().padStart(8, "0");
+}
+
 /** `/roms/Game.gba` -> `/roms/Game.rtsproj` (aceita separador Windows). */
 export function defaultProjectDir(sourcePath: string): string {
   const sep = sourcePath.includes("\\") ? "\\" : "/";

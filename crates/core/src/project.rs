@@ -78,6 +78,32 @@ pub fn load_project(project_dir: &Path) -> Result<GameProject> {
     Ok(serde_json::from_str(&data)?)
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenProjectReport {
+    pub project: GameProject,
+    /// false = a ROM de origem nao esta mais no path gravado.
+    pub source_found: bool,
+    /// true = o arquivo existe mas o SHA-256 mudou desde a criacao (spec §20: avisar).
+    pub source_changed: bool,
+}
+
+/// Reabre o projeto e confere se a origem ainda existe e nao mudou.
+pub fn open_project(project_dir: &Path) -> Result<OpenProjectReport> {
+    let project = load_project(project_dir)?;
+    let (source_found, source_changed) = if project.source_path.is_file() {
+        let current = sha256_file(&project.source_path)?;
+        (true, current != project.source_sha256)
+    } else {
+        (false, false)
+    };
+    Ok(OpenProjectReport {
+        project,
+        source_found,
+        source_changed,
+    })
+}
+
 /// Escrita atomica: escreve num `.tmp` e faz rename (mesmo filesystem).
 fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     let tmp = path.with_extension("json.tmp");

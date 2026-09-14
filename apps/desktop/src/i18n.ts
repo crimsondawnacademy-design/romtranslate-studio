@@ -1,5 +1,5 @@
-// i18n minimo por IDs de mensagem (spec §29). Sem lib: um dict por locale.
-// Quando crescer, migrar para uma lib de i18n mantendo os mesmos IDs.
+// i18n minimo por IDs de mensagem (spec §29). Sem lib: um dict por locale e
+// interpolacao {param}. Quando crescer, migrar para lib mantendo os IDs.
 
 export type Locale = "pt-BR" | "en-US";
 
@@ -8,6 +8,7 @@ const messages = {
     "app.title": "RomTranslate Studio",
     "app.tagline": "Tradução de jogos assistida por IA — local-first",
     "home.selectFile": "Selecionar arquivo de jogo",
+    "home.openProject": "Abrir projeto",
     "home.hint":
       "Selecione uma ROM ou dump obtido legalmente por você. O arquivo nunca sai do seu computador nesta etapa.",
     "inspect.loading": "Inspecionando arquivo...",
@@ -35,8 +36,32 @@ const messages = {
     "project.auto": "Detectar depois",
     "project.createdTitle": "Projeto criado",
     "project.createdAt": "Projeto salvo em:",
-    "project.next":
-      "Próximo passo (Sprint 2): extração de texto. Por enquanto o projeto guarda caminho, hash e configuração de idiomas.",
+    "project.extract": "Extrair strings",
+    "project.sourceMissing":
+      "A ROM de origem não está mais no caminho gravado no projeto. Coloque o arquivo de volta e reabra.",
+    "project.sourceChanged":
+      "Atenção: o arquivo de origem mudou desde a criação do projeto (SHA-256 diferente).",
+    "extract.title": "Extração de strings",
+    "extract.hint":
+      "Scanner genérico: serve para descoberta e debug — não garante reinserção segura.",
+    "extract.encoding": "Codificação",
+    "extract.minChars": "Mín. caracteres",
+    "extract.chooseTbl": "Escolher .tbl",
+    "extract.tblMissing": "Escolha um arquivo .tbl para escanear com tabela.",
+    "extract.scan": "Escanear",
+    "extract.scanning": "Escaneando...",
+    "extract.found": "{n} strings encontradas",
+    "extract.truncated":
+      "Resultado cortado em {n} entries — restrinja a região ou aumente o limite.",
+    "extract.none": "Nenhuma string com essa configuração.",
+    "extract.filter": "Filtrar texto...",
+    "extract.showing": "Mostrando {shown} de {total}",
+    "extract.offset": "Offset",
+    "extract.bytes": "Bytes",
+    "extract.text": "Texto",
+    "export.json": "Exportar JSON",
+    "export.csv": "Exportar CSV",
+    "export.saved": "Salvo em: {path}",
     "common.back": "Voltar",
     "common.error": "Erro",
   },
@@ -44,6 +69,7 @@ const messages = {
     "app.title": "RomTranslate Studio",
     "app.tagline": "Local-first, AI-assisted game translation toolkit",
     "home.selectFile": "Select game file",
+    "home.openProject": "Open project",
     "home.hint":
       "Select a ROM or dump you legally own. The file never leaves your computer in this step.",
     "inspect.loading": "Inspecting file...",
@@ -71,8 +97,32 @@ const messages = {
     "project.auto": "Detect later",
     "project.createdTitle": "Project created",
     "project.createdAt": "Project saved at:",
-    "project.next":
-      "Next step (Sprint 2): text extraction. For now the project stores path, hash and language settings.",
+    "project.extract": "Extract strings",
+    "project.sourceMissing":
+      "The source ROM is no longer at the path stored in the project. Put the file back and reopen.",
+    "project.sourceChanged":
+      "Warning: the source file changed since the project was created (different SHA-256).",
+    "extract.title": "String extraction",
+    "extract.hint":
+      "Generic scanner: discovery and debugging — it does not guarantee safe reinsertion.",
+    "extract.encoding": "Encoding",
+    "extract.minChars": "Min. characters",
+    "extract.chooseTbl": "Choose .tbl",
+    "extract.tblMissing": "Pick a .tbl file to scan with a custom table.",
+    "extract.scan": "Scan",
+    "extract.scanning": "Scanning...",
+    "extract.found": "{n} strings found",
+    "extract.truncated":
+      "Result cut at {n} entries — narrow the region or raise the limit.",
+    "extract.none": "No strings with this configuration.",
+    "extract.filter": "Filter text...",
+    "extract.showing": "Showing {shown} of {total}",
+    "extract.offset": "Offset",
+    "extract.bytes": "Bytes",
+    "extract.text": "Text",
+    "export.json": "Export JSON",
+    "export.csv": "Export CSV",
+    "export.saved": "Saved to: {path}",
     "common.back": "Back",
     "common.error": "Error",
   },
@@ -87,5 +137,13 @@ export function detectLocale(): Locale {
 export const dictionaries = messages;
 
 export function makeT(locale: Locale) {
-  return (id: MessageId): string => messages[locale][id] ?? id;
+  return (id: MessageId, params?: Record<string, string | number>): string => {
+    let msg: string = messages[locale][id] ?? id;
+    if (params) {
+      for (const [key, value] of Object.entries(params)) {
+        msg = msg.replace(`{${key}}`, String(value));
+      }
+    }
+    return msg;
+  };
 }

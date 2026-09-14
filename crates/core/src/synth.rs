@@ -15,7 +15,20 @@ pub fn make_gba_rom(title: &str) -> Vec<u8> {
     rom[0xB0..0xB2].copy_from_slice(b"01");
     rom[0xB2] = 0x96;
     rom[0xBD] = header_checksum(&rom);
+
+    // Strings plantadas para demo/teste do scanner (offsets estaveis; zeros ao
+    // redor separam os runs). Header checksum cobre so 0xA0..=0xBC — nao muda.
+    plant(&mut rom, 0x100, b"WELCOME TO THE VILLAGE!\0");
+    plant(&mut rom, 0x120, b"POTION\0");
+    plant(&mut rom, 0x128, b"HP {0}: 120\0");
+    for (k, u) in "SYNTH QUEST".encode_utf16().enumerate() {
+        rom[0x140 + k * 2..0x142 + k * 2].copy_from_slice(&u.to_le_bytes());
+    }
     rom
+}
+
+fn plant(rom: &mut [u8], offset: usize, bytes: &[u8]) {
+    rom[offset..offset + bytes.len()].copy_from_slice(bytes);
 }
 
 /// NES (iNES): header + 16 KiB PRG + 8 KiB CHR coerentes com o declarado.

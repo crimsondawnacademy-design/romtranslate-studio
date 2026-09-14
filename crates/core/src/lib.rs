@@ -7,9 +7,12 @@ pub mod adapter;
 pub mod adapters;
 pub mod detect;
 pub mod error;
+pub mod export;
 pub mod hash;
 pub mod project;
+pub mod scan;
 pub mod synth;
+pub mod tbl;
 pub mod types;
 
 pub use error::{CoreError, Result};
