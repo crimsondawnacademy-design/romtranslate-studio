@@ -1,0 +1,11 @@
+{
+  "name": "romtranslate-studio",
+  "private": true,
+  "scripts": {
+    "dev": "pnpm --filter @romtranslate/desktop tauri dev",
+    "build": "pnpm --filter @romtranslate/desktop tauri build",
+    "web:build": "pnpm --filter @romtranslate/desktop build",
+    "lint": "pnpm --filter @romtranslate/desktop lint",
+    "test": "pnpm --filter @romtranslate/desktop test"
+  }
+}

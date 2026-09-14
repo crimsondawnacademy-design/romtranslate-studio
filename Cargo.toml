@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = ["apps/desktop/src-tauri", "crates/core"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/crimsondawnacademy-design/romtranslate-studio"
+
+# Otimizacao de tamanho do binario (https://tauri.app/concept/size/)
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

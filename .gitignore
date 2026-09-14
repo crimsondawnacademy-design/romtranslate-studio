@@ -1,0 +1,14 @@
+# Rust
+/target/
+
+# Node
+node_modules/
+dist/
+
+# Fixtures geradas localmente (rode: cargo run -p romtranslate-core --example gen_fixtures)
+/fixtures/generated/
+
+# OS / editor
+.DS_Store
+*.log
+.scratch/
