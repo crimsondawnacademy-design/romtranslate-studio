@@ -1,0 +1,43 @@
+name: Bug report
+description: Algo quebrou, travou ou se comportou errado
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Nunca anexe ROMs, BIOS, keys ou qualquer arquivo de jogo.** Use as
+        fixtures sintéticas (`cargo run -p romtranslate-core --example gen_fixtures`)
+        para reproduzir sempre que possível.
+  - type: textarea
+    id: what
+    attributes:
+      label: O que aconteceu
+      description: Comportamento observado vs. esperado.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Passos para reproduzir
+      placeholder: |
+        1. Abrir fixtures/generated/synthetic.rtsf
+        2. Extração estruturada
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Versão / commit
+      placeholder: v0.1.0 ou hash do commit
+  - type: input
+    id: os
+    attributes:
+      label: Sistema operacional
+      placeholder: macOS 15 (arm64) / Windows 11 / Ubuntu 24.04
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs relevantes
+      description: Saída do terminal (`RUST_LOG=debug pnpm dev`). Sem paths pessoais/API keys.
+      render: text

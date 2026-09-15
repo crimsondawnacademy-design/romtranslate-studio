@@ -1,0 +1,41 @@
+name: Adapter request
+description: Pedir suporte a uma plataforma/formato/engine
+labels: [adapter]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Adapters novos seguem [docs/ADAPTERS.md](../../blob/main/docs/ADAPTERS.md).
+        Quanto mais documentação técnica do formato você trouxer, mais viável fica.
+        **Nunca anexe ROMs, BIOS ou keys.**
+  - type: input
+    id: platform
+    attributes:
+      label: Plataforma / formato
+      placeholder: "ex.: Game Boy Color, ou engine específica de um jogo"
+    validations:
+      required: true
+  - type: textarea
+    id: format_docs
+    attributes:
+      label: Documentação do formato
+      description: Links para documentação técnica (estilo GBATEK), ferramentas existentes da cena, notas de estrutura (offsets, tabelas de ponteiros, compressão).
+    validations:
+      required: true
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Escopo desejado
+      options:
+        - Só detecção
+        - Detecção + extração
+        - Ciclo completo (extração + reinserção + patch)
+    validations:
+      required: true
+  - type: checkboxes
+    id: help
+    attributes:
+      label: Disponibilidade
+      options:
+        - label: Posso ajudar a implementar
+        - label: Posso testar com jogos que possuo legalmente

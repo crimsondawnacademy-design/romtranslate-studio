@@ -22,6 +22,7 @@ motivo: fim-de-feature
 | Editor + validação | pronto (tokens/bytes/statuses/filtros) | `crates/core/src/validate.rs` + ProjectView | — |
 | Reinserção (RTSF + GBA conservador) | pronto (round-trip testado) | `crates/core/src/{adapters/{rtsf,gba},reinsert}.rs` | NES/SNES no mesmo padrão |
 | Patch export IPS + manifest | pronto (DoD testado) | `crates/core/src/patch.rs` | BPS p/ >16 MiB/truncate |
+| Comunidade (Sprint 7) | pronto | `docs/ADAPTERS.md`, README matrix, `.github/` templates | repo público qdo Rhuan decidir |
 
 ## 1. Arquitetura técnica
 - **Patch (Sprint 6)**: `patch::create_ips/apply_ips` (Rust puro; apply lê RLE + truncate extension; create desvia do offset 0x454F46 e funde gaps <6B; limite 16 MiB com erro claro). `patch::export_patch(dir)` exige working copy, roda round-trip interno (apply==working senão aborta) e grava `exports/<stem>.<lang>.{ips,manifest.json,translations.csv}`; manifest snake_case (artefato público, spec §16).

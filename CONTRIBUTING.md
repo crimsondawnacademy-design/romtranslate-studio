@@ -20,18 +20,16 @@
 
 ## Criando um adapter de plataforma
 
-1. Novo módulo em `crates/core/src/adapters/` implementando `GameAdapter`
-   (`crates/core/src/adapter.rs`).
-2. Regras inegociáveis:
-   - `probe()` **nunca** panica com input malformado — todo acesso a bytes com
-     bounds check; devolva `confidence: 0.0` quando não reconhecer;
-   - declare `AdapterCapabilities` honestas (não anuncie `reinsert` sem round-trip
-     testado);
-   - `evidence` legível por humanos explicando a confiança.
-3. Registre em `adapters::all()`.
-4. Fixture sintética em `synth.rs` + testes: positivo, negativo (bytes aleatórios),
-   truncado e vazio. **Nunca** commite ROM comercial, BIOS, keys ou headers
-   copiados de jogos reais.
+O guia completo (contrato, regras, fixtures, testes obrigatórios e esqueleto)
+está em **[docs/ADAPTERS.md](docs/ADAPTERS.md)** — leia antes de escrever
+qualquer parser. Resumo do que não se negocia:
+
+- parser **nunca** panica com input malformado (bounds check em tudo; testes
+  com truncados/headers mentirosos são obrigatórios);
+- `AdapterCapabilities` honestas — `reinsert: true` só com round-trip testado;
+- fixtures 100% sintéticas em `synth.rs`; **nunca** commite ROM, BIOS, keys ou
+  bytes copiados de jogos reais;
+- adapter com reinserção atualiza a matriz de compatibilidade do README.
 
 ## Testes
 

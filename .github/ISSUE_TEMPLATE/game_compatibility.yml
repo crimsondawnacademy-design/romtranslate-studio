@@ -1,0 +1,48 @@
+name: Game compatibility report
+description: Relatar como um jogo se comportou (funcionou ou não)
+labels: [compatibility]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Relate o resultado com um jogo que você possui legalmente.
+        **Nunca anexe a ROM** — o hash SHA-256 (mostrado na tela de detecção)
+        identifica o dump sem distribuí-lo.
+  - type: input
+    id: game
+    attributes:
+      label: Jogo e região
+      placeholder: "ex.: Jogo X (USA) (Rev 1)"
+    validations:
+      required: true
+  - type: input
+    id: sha256
+    attributes:
+      label: SHA-256 do arquivo
+      description: Copie da tela de detecção do app.
+    validations:
+      required: true
+  - type: input
+    id: adapter
+    attributes:
+      label: Adapter usado
+      placeholder: gba.generic
+    validations:
+      required: true
+  - type: dropdown
+    id: result
+    attributes:
+      label: Resultado
+      options:
+        - Funcionou (traduzido, reinserido e rodando)
+        - Parcial (algumas strings ok, outras não)
+        - Extraiu mas não reinseriu
+        - Detecção errada / não detectou
+        - Corrompeu no emulador
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: Detalhes
+      description: Quantas strings, o que ficou de fora (menus? diálogos?), emulador testado, prints do jogo rodando.
