@@ -10,7 +10,9 @@ em vez de cópias modificadas.
 detecção → extração → tradução com IA → validação/revisão → reinserção em
 cópia de trabalho → **patch IPS** com manifest.
 
-<!-- TODO: screenshot da tela do projeto quando a UI estabilizar -->
+![Tela de projeto do RomTranslate Studio: extração de strings de um ISO de PS2 com traduções, statuses e validação](docs/assets/screenshot.png)
+
+*Projeto fictício de demonstração — nenhum dado de jogo real.*
 
 ## O que funciona hoje
 
