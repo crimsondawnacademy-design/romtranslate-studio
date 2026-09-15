@@ -194,3 +194,11 @@
 **Consequencias:** GC e a sexta plataforma com ciclo completo; patch de ISO real sai como BPS (auto). Wii segue detect-only (cifrado).
 
 **Driver:** rhuan (pediu o FST) + claude.
+
+## [2026-09-15] TM global: cascata com prioridade do projeto; sempre ligada
+
+**Contexto:** a decisao de 14/09 previa a TM global como segundo banco consultado em cascata. Implementada como `global_tm.sqlite` no config dir do app.
+
+**Decisao:** lookup consulta o PROJETO primeiro (traducao revisada daquele jogo vence) e a global como fallback; TODA traducao nova (provider ou edicao manual) grava nas duas. Sem toggle de configuracao — sempre ligada (config para valor que ninguem muda e ruido); falha ao abrir a global degrada com warn, nunca bloqueia. Glossario global fica de fora ate haver demanda.
+
+**Driver:** rhuan (pediu a TM global) + claude (ponytail no sem-toggle).

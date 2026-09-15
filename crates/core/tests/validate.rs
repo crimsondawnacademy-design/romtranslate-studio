@@ -94,7 +94,8 @@ fn manual_edit_feeds_tm_and_flags_errors() {
         .unwrap();
 
     // Edicao valida: TM alimentada, sem issues.
-    let issues = apply_manual_translation(&mut db, "a", "Use {0} ja!", "en-US", "pt-BR").unwrap();
+    let issues =
+        apply_manual_translation(&mut db, None, "a", "Use {0} ja!", "en-US", "pt-BR").unwrap();
     assert!(issues.is_empty(), "{issues:?}");
     assert_eq!(
         db.tm_lookup("Use the {0} now!", "en-US", "pt-BR")
@@ -104,7 +105,7 @@ fn manual_edit_feeds_tm_and_flags_errors() {
     );
 
     // Edicao que quebra placeholder: issue Error e status Error.
-    let issues = apply_manual_translation(&mut db, "a", "Use ja!", "en-US", "pt-BR").unwrap();
+    let issues = apply_manual_translation(&mut db, None, "a", "Use ja!", "en-US", "pt-BR").unwrap();
     assert!(issues.iter().any(|i| i.severity == Severity::Error));
     assert_eq!(
         db.get_entry("a").unwrap().unwrap().status,
@@ -112,7 +113,7 @@ fn manual_edit_feeds_tm_and_flags_errors() {
     );
 
     // Entry inexistente: erro claro.
-    assert!(apply_manual_translation(&mut db, "nope", "x", "", "pt-BR").is_err());
+    assert!(apply_manual_translation(&mut db, None, "nope", "x", "", "pt-BR").is_err());
 }
 
 #[test]

@@ -10,7 +10,7 @@ use chrono::Utc;
 use serde::Serialize;
 use tracing::{info, warn};
 
-use crate::db::ProjectDb;
+use crate::db::{GlobalTm, ProjectDb};
 use crate::error::Result;
 use crate::provider::{BatchItem, GlossaryTerm, TranslationProvider, TranslationRequest};
 use crate::types::{TextEntry, TranslationStatus};
@@ -58,6 +58,7 @@ pub struct Progress {
 /// `cancel` interrompe entre batches; progresso via callback.
 pub async fn run_translation(
     db: &mut ProjectDb,
+    mut global_tm: Option<&mut GlobalTm>,
     provider: &dyn TranslationProvider,
     model_label: &str,
     opts: &TranslateOptions,
@@ -83,10 +84,16 @@ pub async fn run_translation(
         return Ok(summary);
     }
 
-    // Fase 1 — translation memory.
+    // Fase 1 — translation memory em cascata: projeto primeiro, global depois.
     let mut remaining: Vec<TextEntry> = Vec::new();
     for entry in pending {
-        if let Some(hit) = db.tm_lookup(&entry.source_text, &src_lang, &opts.target_language)? {
+        let mut hit = db.tm_lookup(&entry.source_text, &src_lang, &opts.target_language)?;
+        if hit.is_none() {
+            if let Some(global) = global_tm.as_deref_mut() {
+                hit = global.tm_lookup(&entry.source_text, &src_lang, &opts.target_language)?;
+            }
+        }
+        if let Some(hit) = hit {
             db.update_translation(&entry.id, &hit, TranslationStatus::Machine)?;
             summary.tm_hits += 1;
         } else {
@@ -139,6 +146,14 @@ pub async fn run_translation(
                         &opts.target_language,
                         &item.translation,
                     )?;
+                    if let Some(global) = global_tm.as_deref_mut() {
+                        global.tm_store(
+                            &entry.source_text,
+                            &src_lang,
+                            &opts.target_language,
+                            &item.translation,
+                        )?;
+                    }
                     summary.translated += 1;
                 }
                 let missing = batch.len()

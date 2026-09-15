@@ -6,6 +6,7 @@
 
 | data | maquina | ferramenta | modelo | o_que_fez | arquivos_tocados |
 |---|---|---|---|---|---|
+| 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | TM global cross-projeto: GlobalTm no config dir, cascata projeto→global, alimentação dupla (máquina+manual) | `crates/core/src/db.rs`, `crates/core/src/pipeline.rs`, `crates/core/tests/global_tm.rs` |
 | 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | Modo avançado na UI (checkbox allow_errors com aviso + forcedErrors no resultado) | `apps/desktop/src/ProjectView.tsx`, `apps/desktop/src/i18n.ts` |
 | 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | Repo aberto ao PÚBLICO: gitleaks limpo, histórico reescrito sem termos da infra de trabalho (filter-repo em cópia), repo velho preservado como romtranslate-prehistory | `.ctx/*` |
 | 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | GameCube completo: FST (confirmado no Dolphin), extração por arquivo, in-place, fixture com subdir; IN_MEMORY_MAX 2GiB | `crates/core/src/adapters/gamecube.rs`, `crates/core/tests/gc_fst.rs` |

@@ -193,6 +193,7 @@ async fn full_flow_translates_saves_and_hits_tm_on_rerun() {
     let cancel = AtomicBool::new(false);
     let summary = run_translation(
         &mut db,
+        None,
         &provider,
         "mock-model",
         &opts(),
@@ -223,6 +224,7 @@ async fn full_flow_translates_saves_and_hits_tm_on_rerun() {
     let provider2 = MockProvider::new(0);
     let summary2 = run_translation(
         &mut db,
+        None,
         &provider2,
         "mock-model",
         &opts(),
@@ -245,9 +247,17 @@ async fn retry_recovers_and_exhaustion_counts_failed() {
     // Falha 2x, opts permite 3 tentativas -> sucesso.
     let provider = MockProvider::new(2);
     let cancel = AtomicBool::new(false);
-    let summary = run_translation(&mut db, &provider, "m", &opts(), &cancel, &no_progress())
-        .await
-        .unwrap();
+    let summary = run_translation(
+        &mut db,
+        None,
+        &provider,
+        "m",
+        &opts(),
+        &cancel,
+        &no_progress(),
+    )
+    .await
+    .unwrap();
     assert_eq!(summary.translated, 1);
     assert_eq!(provider.calls.load(Ordering::SeqCst), 3);
 
@@ -256,9 +266,17 @@ async fn retry_recovers_and_exhaustion_counts_failed() {
     let mut db2 = ProjectDb::open(&tmp2.0).unwrap();
     db2.upsert_entries(&[entry("b", "ALWAYS FAILS")]).unwrap();
     let provider2 = MockProvider::new(99);
-    let summary2 = run_translation(&mut db2, &provider2, "m", &opts(), &cancel, &no_progress())
-        .await
-        .unwrap();
+    let summary2 = run_translation(
+        &mut db2,
+        None,
+        &provider2,
+        "m",
+        &opts(),
+        &cancel,
+        &no_progress(),
+    )
+    .await
+    .unwrap();
     assert_eq!(summary2.failed, 1);
     assert_eq!(summary2.translated, 0);
     assert!(db2.load_entries().unwrap()[0].translated_text.is_none());
@@ -289,9 +307,17 @@ async fn glossary_reaches_prompt_only_when_relevant() {
 
     let provider = MockProvider::new(0);
     let cancel = AtomicBool::new(false);
-    run_translation(&mut db, &provider, "m", &opts(), &cancel, &no_progress())
-        .await
-        .unwrap();
+    run_translation(
+        &mut db,
+        None,
+        &provider,
+        "m",
+        &opts(),
+        &cancel,
+        &no_progress(),
+    )
+    .await
+    .unwrap();
 
     let requests = provider.requests.lock().unwrap();
     assert_eq!(requests.len(), 1);
@@ -312,7 +338,7 @@ async fn cancel_stops_between_batches() {
     let provider = MockProvider::new(0);
     let cancel = AtomicBool::new(false);
     // Cancela assim que o primeiro progresso de traducao chegar.
-    let summary = run_translation(&mut db, &provider, "m", &opts(), &cancel, &|p| {
+    let summary = run_translation(&mut db, None, &provider, "m", &opts(), &cancel, &|p| {
         if p.phase == "translate" {
             cancel.store(true, Ordering::SeqCst);
         }
@@ -356,7 +382,7 @@ async fn real_ollama_translates_synthetic_strings() {
     let cancel = AtomicBool::new(false);
     let mut o = TranslateOptions::new("pt-BR");
     o.source_language = Some("en-US".into());
-    let summary = run_translation(&mut db, &provider, &model, &o, &cancel, &|p| {
+    let summary = run_translation(&mut db, None, &provider, &model, &o, &cancel, &|p| {
         eprintln!("progress: {}/{} ({})", p.done, p.total, p.phase);
     })
     .await

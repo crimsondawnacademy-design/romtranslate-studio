@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::db::ProjectDb;
+use crate::db::{GlobalTm, ProjectDb};
 use crate::error::Result;
 use crate::types::{TextEncoding, TextEntry, TranslationStatus};
 
@@ -271,6 +271,7 @@ pub fn validate_project_db(db: &mut ProjectDb) -> Result<ValidationReport> {
 /// Se a validacao tiver Error, o status vira `Error`. Retorna as issues.
 pub fn apply_manual_translation(
     db: &mut ProjectDb,
+    global_tm: Option<&mut GlobalTm>,
     id: &str,
     translation: &str,
     source_language: &str,
@@ -288,6 +289,14 @@ pub fn apply_manual_translation(
         target_language,
         translation,
     )?;
+    if let Some(global) = global_tm {
+        global.tm_store(
+            &entry.source_text,
+            source_language,
+            target_language,
+            translation,
+        )?;
+    }
     let issues = validate_entry(&entry);
     if issues.iter().any(|i| i.severity == Severity::Error) {
         db.set_status(id, TranslationStatus::Error)?;

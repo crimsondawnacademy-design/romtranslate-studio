@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use romtranslate_core::db::ProjectDb;
+use romtranslate_core::db::{GlobalTm, ProjectDb};
 use romtranslate_core::detect::{inspect, InspectionReport};
 use romtranslate_core::export;
 use romtranslate_core::pipeline::{run_translation, TranslateOptions, TranslateSummary};
@@ -185,16 +185,20 @@ async fn export_patch(
 
 #[tauri::command]
 async fn update_entry(
+    app: AppHandle,
     project_dir: String,
     id: String,
     translation: String,
 ) -> Result<Vec<validate::ValidationIssue>, String> {
+    let cfg_dir = config_dir(&app)?;
     blocking(move || {
         let dir = PathBuf::from(&project_dir);
         let game = project::load_project(&dir)?;
         let mut db = ProjectDb::open(&dir)?;
+        let mut global = open_global_tm(&cfg_dir);
         validate::apply_manual_translation(
             &mut db,
+            global.as_mut(),
             &id,
             &translation,
             game.source_language.as_deref().unwrap_or(""),
@@ -202,6 +206,17 @@ async fn update_entry(
         )
     })
     .await
+}
+
+/// TM global no config dir; falha ao abrir nao bloqueia traducao (e cache).
+fn open_global_tm(cfg_dir: &PathBuf) -> Option<GlobalTm> {
+    match GlobalTm::open(&cfg_dir.join("global_tm.sqlite")) {
+        Ok(g) => Some(g),
+        Err(e) => {
+            tracing::warn!(error = %e, "TM global indisponivel; seguindo sem ela");
+            None
+        }
+    }
 }
 
 #[tauri::command]

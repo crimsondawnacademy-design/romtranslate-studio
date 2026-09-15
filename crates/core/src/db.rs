@@ -174,19 +174,7 @@ impl ProjectDb {
         source_language: &str,
         target_language: &str,
     ) -> Result<Option<String>> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT translation FROM tm
-                 WHERE normalized=?1 AND source_language=?2 AND target_language=?3",
-                params![
-                    normalize_source(source_text),
-                    source_language,
-                    target_language
-                ],
-                |row| row.get(0),
-            )
-            .optional()?)
+        tm_lookup_conn(&self.conn, source_text, source_language, target_language)
     }
 
     pub fn tm_store(
@@ -196,20 +184,13 @@ impl ProjectDb {
         target_language: &str,
         translation: &str,
     ) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO tm (normalized, source_language, target_language, translation, updated_at)
-             VALUES (?1,?2,?3,?4,?5)
-             ON CONFLICT(normalized, source_language, target_language)
-             DO UPDATE SET translation=excluded.translation, updated_at=excluded.updated_at",
-            params![
-                normalize_source(source_text),
-                source_language,
-                target_language,
-                translation,
-                Utc::now().to_rfc3339(),
-            ],
-        )?;
-        Ok(())
+        tm_store_conn(
+            &self.conn,
+            source_text,
+            source_language,
+            target_language,
+            translation,
+        )
     }
 
     // ---- Glossario ----
@@ -290,6 +271,103 @@ impl ProjectDb {
             ],
         )?;
         Ok(())
+    }
+}
+
+fn tm_lookup_conn(
+    conn: &Connection,
+    source_text: &str,
+    source_language: &str,
+    target_language: &str,
+) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT translation FROM tm
+             WHERE normalized=?1 AND source_language=?2 AND target_language=?3",
+            params![
+                normalize_source(source_text),
+                source_language,
+                target_language
+            ],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+fn tm_store_conn(
+    conn: &Connection,
+    source_text: &str,
+    source_language: &str,
+    target_language: &str,
+    translation: &str,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO tm (normalized, source_language, target_language, translation, updated_at)
+         VALUES (?1,?2,?3,?4,?5)
+         ON CONFLICT(normalized, source_language, target_language)
+         DO UPDATE SET translation=excluded.translation, updated_at=excluded.updated_at",
+        params![
+            normalize_source(source_text),
+            source_language,
+            target_language,
+            translation,
+            Utc::now().to_rfc3339(),
+        ],
+    )?;
+    Ok(())
+}
+
+/// Translation memory GLOBAL (cross-projeto), no config dir do app.
+/// Consultada em cascata DEPOIS da TM do projeto; alimentada por toda
+/// traducao nova (maquina ou manual). Mesma chave/normalizacao da TM local.
+pub struct GlobalTm {
+    conn: Connection,
+}
+
+impl GlobalTm {
+    pub fn open(path: &Path) -> Result<Self> {
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| CoreError::io(dir, e))?;
+        }
+        let conn = Connection::open(path)?;
+        conn.pragma_update(None, "journal_mode", "WAL")?;
+        // Mesma DDL da tabela `tm` do ProjectDb.
+        conn.execute_batch(
+            "CREATE TABLE IF NOT EXISTS tm (
+                normalized TEXT NOT NULL,
+                source_language TEXT NOT NULL,
+                target_language TEXT NOT NULL,
+                translation TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                PRIMARY KEY (normalized, source_language, target_language)
+            );",
+        )?;
+        Ok(GlobalTm { conn })
+    }
+
+    pub fn tm_lookup(
+        &self,
+        source_text: &str,
+        source_language: &str,
+        target_language: &str,
+    ) -> Result<Option<String>> {
+        tm_lookup_conn(&self.conn, source_text, source_language, target_language)
+    }
+
+    pub fn tm_store(
+        &mut self,
+        source_text: &str,
+        source_language: &str,
+        target_language: &str,
+        translation: &str,
+    ) -> Result<()> {
+        tm_store_conn(
+            &self.conn,
+            source_text,
+            source_language,
+            target_language,
+            translation,
+        )
     }
 }
 
