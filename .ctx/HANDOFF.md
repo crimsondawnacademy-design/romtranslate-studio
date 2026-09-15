@@ -22,6 +22,7 @@ motivo: fim-de-feature
 | Editor + validação | pronto (tokens/bytes/statuses/filtros) | `crates/core/src/validate.rs` + ProjectView | — |
 | Reinserção (RTSF, GBA, NDS, NES, SNES) | pronto (round-trips testados; SNES recalcula soma canônica) | `crates/core/src/adapters/` + `reinsert.rs` | — |
 | Patch export IPS + BPS + manifest | pronto (DoD testado; BPS valida CRC triplo) | `crates/core/src/patch.rs` | delta-create BPS so se precisar de patch menor |
+| CI (core + desktop + frontend) | pronto (desktop compila/testa no ubuntu) | `.github/workflows/ci.yml` | bundles de release por SO |
 | Comunidade (Sprint 7) | pronto | `docs/ADAPTERS.md`, README matrix, `.github/` templates | repo público qdo Rhuan decidir |
 | NDS (Sprint 8) | pronto (Experimental: FS + in-place; patch via BPS) | `crates/core/src/adapters/nds.rs` | — |
 | GameCube (FST) | pronto (Experimental: FS + in-place; BPS p/ ISO real) | `adapters/gamecube.rs` | — |
