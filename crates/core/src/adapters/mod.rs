@@ -6,6 +6,7 @@ pub mod nes;
 pub mod rtsf;
 pub mod snes;
 pub mod wii;
+pub mod wiiu;
 
 use crate::adapter::GameAdapter;
 
@@ -17,6 +18,7 @@ pub fn all() -> Vec<Box<dyn GameAdapter>> {
         Box::new(nds::NdsAdapter),
         Box::new(gamecube::GameCubeAdapter),
         Box::new(wii::WiiAdapter),
+        Box::new(wiiu::WiiUAdapter),
         Box::new(nes::NesAdapter),
         Box::new(gba::GbaAdapter),
         Box::new(snes::SnesAdapter),

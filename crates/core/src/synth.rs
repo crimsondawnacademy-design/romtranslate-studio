@@ -212,6 +212,33 @@ pub fn make_wii_disc_header() -> Vec<u8> {
     disc
 }
 
+/// Header sintetico WUX (WudCompress/Cemu): magic dupla + sectorSize 32 KiB +
+/// uncompressedSize de uma imagem de disco tipica.
+pub fn make_wux_header() -> Vec<u8> {
+    use crate::adapters::wiiu::{WUX_MAGIC0, WUX_MAGIC1};
+    let mut data = vec![0u8; 4096];
+    data[0..4].copy_from_slice(WUX_MAGIC0);
+    data[4..8].copy_from_slice(&WUX_MAGIC1.to_le_bytes());
+    data[8..12].copy_from_slice(&0x8000u32.to_le_bytes()); // 32 KiB por setor
+    data[0x0C..0x14].copy_from_slice(&(23u64 * 1024 * 1024 * 1024).to_le_bytes());
+    data
+}
+
+/// Header sintetico RPX: ELF 32-bit big-endian PowerPC com OSABI/versao "CAFE".
+pub fn make_rpx_header() -> Vec<u8> {
+    use crate::adapters::wiiu::{CAFE_ABI_VERSION, CAFE_OSABI};
+    let mut data = vec![0u8; 4096];
+    data[0..4].copy_from_slice(b"\x7FELF");
+    data[4] = 1; // ELFCLASS32
+    data[5] = 2; // big-endian
+    data[6] = 1; // EV_CURRENT
+    data[7] = CAFE_OSABI;
+    data[8] = CAFE_ABI_VERSION;
+    data[0x10..0x12].copy_from_slice(&0xFE01u16.to_be_bytes()); // e_type Cafe RPL
+    data[0x12..0x14].copy_from_slice(&20u16.to_be_bytes()); // EM_PPC
+    data
+}
+
 /// Bytes pseudo-aleatorios deterministicos (xorshift), p/ testes negativos.
 pub fn make_random(len: usize, seed: u64) -> Vec<u8> {
     let mut state = seed.max(1);

@@ -46,7 +46,7 @@ universal**. O que cada plataforma tem hoje:
 | Super Nintendo | ✅ | ✅ | ⚠️ experimental (in-place) | ⚠️ experimental (in-place, checksum interno recalculado) | ✅ |
 | GameCube | ✅ (magic + título) | — | — | — | — |
 | Wii | ✅ (ISO e WBFS) | — | — | — | — |
-| Wii U | planejado | — | — | — | — |
+| Wii U | ✅ (WUX e RPX/RPL) | — | — | — | — |
 
 O export escolhe o formato sozinho: **IPS** quando cabe (máxima
 compatibilidade) e **BPS** para arquivos maiores ou que encolhem — o BPS ainda

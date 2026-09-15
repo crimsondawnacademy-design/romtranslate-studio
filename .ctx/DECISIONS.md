@@ -176,3 +176,11 @@
 **Consequencias:** working copy de SNES sai com checksum que emulador/hardware aceitam; NES nao tem checksum de header (iNES) — finalize e noop.
 
 **Driver:** rhuan (pediu NES/SNES) + claude.
+
+## [2026-09-15] Wii U: WUX e RPX verificados; WUD bruto fora; e_type nao e evidencia
+
+**Contexto:** o probe estava adiado ate verificar formato em fonte confiavel. Verificado: WUX no wud.h do WudCompress (cemu-project) — "WUX0" + 0x1099D02E + sectorSize u32 + uncompressedSize u64; RPX/RPL no cafe_loader_rpl.h do decaf-emu — EABI_CAFE=0xCA, EABI_VERSION_CAFE=0xFE, EM_PPC=20, SHF_DEFLATED=0x08000000.
+
+**Decisao:** probe detecta WUX (magic dupla + sanidade do sectorSize) e RPX/RPL (ELF32 BE PPC + OSABI/versao CA FE — ELF comum rejeitado). e_type ficou FORA das evidencias: fontes divergem (0xFE01 no wiiubrew vs 0xFF01 no elf2rpl do wut). WUD bruto fora: sem magic documentado confiavel no offset 0, e na pratica dumps circulam como WUX. Detect-only: disco cifrado (keys fora do projeto) e secoes RPX deflated.
+
+**Driver:** rhuan (pediu Wii U) + claude (verificacao antes de codar).

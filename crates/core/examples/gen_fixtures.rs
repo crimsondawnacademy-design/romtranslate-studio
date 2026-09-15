@@ -10,7 +10,9 @@ fn main() -> std::io::Result<()> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/generated");
     fs::create_dir_all(&dir)?;
 
-    let files: [(&str, Vec<u8>); 9] = [
+    let files: [(&str, Vec<u8>); 11] = [
+        ("synthetic.wux", synth::make_wux_header()),
+        ("synthetic.rpx", synth::make_rpx_header()),
         ("synthetic.nds", synth::make_nds_rom()),
         ("synthetic_gc.iso", synth::make_gc_disc_header()),
         ("synthetic_wii.iso", synth::make_wii_disc_header()),
