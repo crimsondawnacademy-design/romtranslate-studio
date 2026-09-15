@@ -146,3 +146,13 @@
 **Consequencias:** menus/textos curtos de muitos jogos GBA traduziveis hoje, marcado Experimental (sem promessa universal, spec §26). Textos com ponteiros/compressao ficam para adapters por-jogo/engine.
 
 **Driver:** rhuan (pediu o caminho pro emulador) + claude.
+
+## [2026-09-15] Sprint 8: NDS por CRC documentado; Wii sem extracao; Wii U adiado
+
+**Contexto:** spec §5 manda comecar plataformas de disco/container por inspecao+filesystem. NDS e o alvo de maior valor (cartucho plaintext, UTF-16 comum). Wii cifra particoes (extracao exigiria keys — proibido pela spec §23). Formato Wii U (WUD/WUX/RPX) nao foi verificado com fonte confiavel.
+
+**Decisao:** NDS ganhou o ciclo completo conservador (probe por CRC-16 do header + CAMPO do logo CRC 0xCF56 — o bitmap do logo nao entra no repo; FNT/FAT com bounds e anti-ciclo; scan por arquivo; in-place). GC/Wii: probe-only com evidencias, Wii avisa na propria evidencia que particoes cifradas nao serao extraidas. Wii U ficou FORA ate verificar o formato — chute de magic numbers e pior que ausencia. Limites divididos: inspecao (probe+hash streaming) ate 16 GiB; extract/reinsert (arquivo em RAM) ate 512 MiB.
+
+**Consequencias:** NDS traduzivel hoje no fluxo inteiro (fixture; ROM real >16 MiB esbarra no IPS — BPS e o proximo); helper `inplace.rs` unifica GBA/NDS e ganha UTF-16 de graca.
+
+**Driver:** claude (ponytail + spec §5/§23).

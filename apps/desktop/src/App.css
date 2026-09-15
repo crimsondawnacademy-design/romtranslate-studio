@@ -580,3 +580,10 @@ table.strings tr.warning td:first-child {
   border-color: #e8b34b;
   background: rgba(232, 179, 75, 0.1);
 }
+
+.resource {
+  color: var(--muted);
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

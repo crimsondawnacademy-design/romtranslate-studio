@@ -8,7 +8,7 @@
 //! mexer em ponteiros — cobre menus/textos curtos de muitos jogos. O header
 //! checksum e recalculado (traduzir o titulo em 0xA0 o afetaria).
 
-use crate::adapter::{AppliedImage, ApplyReport, GameAdapter, GameInput, VerificationReport};
+use crate::adapter::{AppliedImage, GameAdapter, GameInput, VerificationReport};
 use crate::error::{CoreError, Result};
 use crate::scan::{scan_bytes, ScanConfig, ScanEncoding};
 use crate::types::{AdapterCapabilities, Platform, ProbeResult, SupportLevel, TextEntry};
@@ -126,79 +126,17 @@ impl GameAdapter for GbaAdapter {
         Ok(entries)
     }
 
-    /// Escreve cada traducao EXATAMENTE sobre os bytes da string original
-    /// (sanity check anti-drift), preenchendo a sobra com o padding adequado,
-    /// e recalcula o header checksum. All-or-nothing.
+    /// Reinsercao in-place compartilhada (`adapters::inplace`), recalculando o
+    /// header checksum no final (traducao do titulo em 0xA0 o afetaria).
     fn apply_text(&self, data: &[u8], entries: &[TextEntry]) -> Result<AppliedImage> {
         if data.len() < HEADER_LEN {
             return Err(CoreError::Project(
                 "gba: arquivo menor que o header do cartucho".to_string(),
             ));
         }
-        let mut out = data.to_vec();
-        let mut report = ApplyReport {
-            applied: 0,
-            kept_original: 0,
-            ignored_generic: 0,
-        };
-
-        for entry in entries {
-            let Some(offset) = entry.offset.map(|o| o as usize) else {
-                report.ignored_generic += 1;
-                continue;
-            };
-            let slot = entry.original_bytes.len();
-            let Some(translation) = entry.translated_text.as_deref() else {
-                report.kept_original += 1;
-                continue;
-            };
-            let end = offset
-                .checked_add(slot)
-                .filter(|&e| e <= out.len())
-                .ok_or_else(|| {
-                    CoreError::Project(format!(
-                        "gba: entry {} aponta para fora do arquivo (0x{offset:X})",
-                        entry.id
-                    ))
-                })?;
-            if out[offset..end] != entry.original_bytes[..] {
-                return Err(CoreError::Project(format!(
-                    "gba: bytes em 0x{offset:X} nao batem com a entry {} — arquivo diferente \
-                     do que foi extraido? Re-extraia antes de reinserir",
-                    entry.id
-                )));
-            }
-            if !translation.is_ascii() {
-                return Err(CoreError::Project(format!(
-                    "gba: entry {}: traducao tem caracteres fora de ASCII",
-                    entry.id
-                )));
-            }
-            let bytes = translation.as_bytes();
-            if bytes.len() > slot {
-                return Err(CoreError::Project(format!(
-                    "gba: entry {}: traducao ocupa {} bytes; o espaco original tem {slot} — \
-                     encurte o texto (reinsercao conservadora nao realoca)",
-                    entry.id,
-                    bytes.len()
-                )));
-            }
-            // Sobra do slot: 0x00 se a string original era null-terminated
-            // (leitores por terminador param antes); espaco se era fixed-width.
-            let terminated = entry
-                .metadata
-                .get("terminated")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(true);
-            out[offset..end].fill(if terminated { 0x00 } else { 0x20 });
-            out[offset..offset + bytes.len()].copy_from_slice(bytes);
-            report.applied += 1;
-        }
-
-        // Traducao do titulo (0xA0..0xAC) muda o header checksum: recalcula sempre.
-        out[CHECKSUM_OFFSET] = header_checksum(&out);
-
-        Ok(AppliedImage { bytes: out, report })
+        super::inplace::apply_in_place(data, entries, |out| {
+            out[CHECKSUM_OFFSET] = header_checksum(out);
+        })
     }
 
     fn verify(&self, data: &[u8]) -> Result<VerificationReport> {

@@ -9,9 +9,14 @@ use crate::types::{AdapterCapabilities, Platform, ProbeResult};
 /// NES (16 B), GBA (192 B) e SNES (0xFFC0 + 512 de copier header < 128 KiB).
 pub const PROBE_HEAD_LEN: usize = 128 * 1024;
 
-// ponytail: limite fixo de 512 MiB cobre cartucho (GBA max 32 MiB, SNES 6 MiB);
-// vira config quando entrarem plataformas de disco (GC/Wii/WiiU).
-pub const MAX_FILE_SIZE: u64 = 512 * 1024 * 1024;
+/// Limite de INSPECAO (probe + hash streaming): cobre discos GC (1.4 GiB) e
+/// Wii (4.7-8.5 GiB). Hash de arquivos grandes roda em spawn_blocking.
+pub const MAX_FILE_SIZE: u64 = 16 * 1024 * 1024 * 1024;
+
+// ponytail: extracao/reinsercao carregam o arquivo INTEIRO em RAM; 512 MiB
+// cobre qualquer cartucho (NDS max real = 512 MiB). Streaming por recurso
+// entra quando um adapter de disco extrair de verdade.
+pub const IN_MEMORY_MAX: u64 = 512 * 1024 * 1024;
 
 /// Entrada de probing: caminho, tamanho e os primeiros bytes do arquivo.
 /// Probes leem SOMENTE de `head`, sempre com bounds check.
@@ -104,6 +109,11 @@ pub trait GameAdapter: Send + Sync {
 
     /// Nunca panica com input malformado; retorna confidence 0.0 quando nao reconhece.
     fn probe(&self, input: &GameInput) -> ProbeResult;
+
+    /// Lista os recursos internos de um container (filesystem de cartucho/disco).
+    fn list_resources(&self, _data: &[u8]) -> Result<Vec<crate::types::ResourceDescriptor>> {
+        unsupported(self.id(), "listagem de recursos")
+    }
 
     /// Extracao estruturada (offsets/ponteiros/limites reais) — Camada B.
     fn extract_structured(&self, _data: &[u8]) -> Result<Vec<TextEntry>> {

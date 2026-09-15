@@ -147,10 +147,10 @@ async fn extract_structured(project_dir: String) -> Result<usize, String> {
         let size = std::fs::metadata(&game.source_path)
             .map_err(|e| romtranslate_core::CoreError::io(&game.source_path, e))?
             .len();
-        if size > romtranslate_core::adapter::MAX_FILE_SIZE {
+        if size > romtranslate_core::adapter::IN_MEMORY_MAX {
             return Err(romtranslate_core::CoreError::FileTooLarge {
                 size,
-                limit: romtranslate_core::adapter::MAX_FILE_SIZE,
+                limit: romtranslate_core::adapter::IN_MEMORY_MAX,
             });
         }
         let data = std::fs::read(&game.source_path)

@@ -124,6 +124,86 @@ pub fn make_rtsf_fixture() -> Vec<u8> {
     data
 }
 
+/// NDS sintetico: header com CRC-16 valido e campo do logo = 0xCF56, filesystem
+/// FNT/FAT com 2 arquivos na raiz — um com strings ASCII, outro com UTF-16LE.
+pub fn make_nds_rom() -> Vec<u8> {
+    use crate::adapters::nds::{crc16, LOGO_CRC_EXPECTED};
+
+    let fnt_offset = 0x200usize;
+    let fat_offset = 0x220usize;
+    let file1_offset = 0x240usize;
+    let file2_offset = 0x280usize;
+
+    let file1: Vec<u8> = b"WELCOME TO THE SYNTH DS!\0PRESS START BUTTON\0".to_vec();
+    let mut file2: Vec<u8> = Vec::new();
+    for text in ["START GAME", "OPTIONS MENU"] {
+        for u in text.encode_utf16() {
+            file2.extend_from_slice(&u.to_le_bytes());
+        }
+        file2.extend_from_slice(&[0, 0]);
+    }
+
+    let mut rom = vec![0u8; 0x300];
+    rom[0..7].copy_from_slice(b"SYNTHDS");
+    rom[0x0C..0x10].copy_from_slice(b"ASYP");
+    rom[0x10..0x12].copy_from_slice(b"01");
+
+    // FNT: main table da raiz (subtable em +8, first file id 0, 1 diretorio).
+    let mut fnt = Vec::new();
+    fnt.extend_from_slice(&8u32.to_le_bytes());
+    fnt.extend_from_slice(&0u16.to_le_bytes());
+    fnt.extend_from_slice(&1u16.to_le_bytes());
+    for name in ["intro.txt", "menu.bin"] {
+        fnt.push(name.len() as u8);
+        fnt.extend_from_slice(name.as_bytes());
+    }
+    fnt.push(0);
+
+    let mut fat = Vec::new();
+    for (start, len) in [(file1_offset, file1.len()), (file2_offset, file2.len())] {
+        fat.extend_from_slice(&(start as u32).to_le_bytes());
+        fat.extend_from_slice(&((start + len) as u32).to_le_bytes());
+    }
+
+    rom[0x40..0x44].copy_from_slice(&(fnt_offset as u32).to_le_bytes());
+    rom[0x44..0x48].copy_from_slice(&(fnt.len() as u32).to_le_bytes());
+    rom[0x48..0x4C].copy_from_slice(&(fat_offset as u32).to_le_bytes());
+    rom[0x4C..0x50].copy_from_slice(&(fat.len() as u32).to_le_bytes());
+    rom[0x15C..0x15E].copy_from_slice(&LOGO_CRC_EXPECTED.to_le_bytes());
+
+    rom[fnt_offset..fnt_offset + fnt.len()].copy_from_slice(&fnt);
+    rom[fat_offset..fat_offset + fat.len()].copy_from_slice(&fat);
+    rom[file1_offset..file1_offset + file1.len()].copy_from_slice(&file1);
+    rom[file2_offset..file2_offset + file2.len()].copy_from_slice(&file2);
+
+    // CRC do header por ultimo (cobre 0x000..0x15E, incluindo o campo do logo).
+    let crc = crc16(&rom[..0x15E]);
+    rom[0x15E..0x160].copy_from_slice(&crc.to_le_bytes());
+    rom
+}
+
+/// Header sintetico de disco GameCube (magic em 0x1C + game code + titulo).
+pub fn make_gc_disc_header() -> Vec<u8> {
+    use crate::adapters::gamecube::{MAGIC, MAGIC_OFFSET};
+    let mut disc = vec![0u8; 4096];
+    disc[0..6].copy_from_slice(b"GSYP01");
+    disc[MAGIC_OFFSET..MAGIC_OFFSET + 4].copy_from_slice(&MAGIC);
+    let title = b"SYNTHETIC GC ADVENTURE";
+    disc[0x20..0x20 + title.len()].copy_from_slice(title);
+    disc
+}
+
+/// Header sintetico de disco Wii (magic em 0x18 + titulo).
+pub fn make_wii_disc_header() -> Vec<u8> {
+    use crate::adapters::wii::{MAGIC, MAGIC_OFFSET};
+    let mut disc = vec![0u8; 4096];
+    disc[0..6].copy_from_slice(b"RSYP01");
+    disc[MAGIC_OFFSET..MAGIC_OFFSET + 4].copy_from_slice(&MAGIC);
+    let title = b"SYNTHETIC WII QUEST";
+    disc[0x20..0x20 + title.len()].copy_from_slice(title);
+    disc
+}
+
 /// Bytes pseudo-aleatorios deterministicos (xorshift), p/ testes negativos.
 pub fn make_random(len: usize, seed: u64) -> Vec<u8> {
     let mut state = seed.max(1);

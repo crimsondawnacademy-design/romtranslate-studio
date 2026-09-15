@@ -39,10 +39,17 @@ universal**. O que cada plataforma tem hoje:
 | Plataforma | Detecção | Scan genérico | Extração estruturada | Reinserção | Patch IPS |
 |---|---|---|---|---|---|
 | Fixture RTSF (demo) | ✅ | ✅ | ✅ completa | ✅ com relocação + ponteiros | ✅ |
-| Game Boy Advance | ✅ | ✅ | ⚠️ experimental (in-place) | ⚠️ experimental (in-place, sem relocação) | ✅ |
+| Game Boy Advance | ✅ | ✅ | ⚠️ experimental (in-place) | ⚠️ experimental (in-place) | ✅ |
+| Nintendo DS | ✅ (CRC do header) | ✅ | ⚠️ experimental (por arquivo do filesystem, ASCII + UTF-16) | ⚠️ experimental (in-place) | ✅ até 16 MiB* |
 | NES | ✅ | ✅ | — | — | — |
 | Super Nintendo | ✅ | ✅ | — | — | — |
-| NDS · GameCube · Wii · Wii U | planejado | — | — | — | — |
+| GameCube | ✅ (magic + título) | — | — | — | — |
+| Wii | ✅ (ISO e WBFS) | — | — | — | — |
+| Wii U | planejado | — | — | — | — |
+
+\* ROMs NDS reais costumam passar de 16 MiB — o limite do formato IPS; o
+backend BPS está no roadmap. Partições de disco Wii são cifradas: extração
+exigiria keys, que este projeto não inclui.
 
 **"In-place" (GBA)**: cada string traduzida ocupa o espaço da original (mesmo
 tamanho ou menor) — cobre menus e textos curtos de muitos jogos; textos com

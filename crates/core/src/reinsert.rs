@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tracing::info;
 
-use crate::adapter::{ApplyReport, VerificationReport, MAX_FILE_SIZE};
+use crate::adapter::{ApplyReport, VerificationReport, IN_MEMORY_MAX};
 use crate::adapters;
 use crate::db::ProjectDb;
 use crate::error::{CoreError, Result};
@@ -76,10 +76,10 @@ pub fn reinsert_project(project_dir: &Path, allow_errors: bool) -> Result<Reinse
     let size = fs::metadata(&project.source_path)
         .map_err(|e| CoreError::io(&project.source_path, e))?
         .len();
-    if size > MAX_FILE_SIZE {
+    if size > IN_MEMORY_MAX {
         return Err(CoreError::FileTooLarge {
             size,
-            limit: MAX_FILE_SIZE,
+            limit: IN_MEMORY_MAX,
         });
     }
     let original =

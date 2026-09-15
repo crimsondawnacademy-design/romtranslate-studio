@@ -402,6 +402,7 @@ export default function ProjectView({
   );
   const shown = filtered.slice(0, RENDER_CAP);
   const selected = selectedId ? entries.find((e) => e.id === selectedId) : undefined;
+  const hasResources = entries.some((e) => e.resourcePath);
   const endpoint = settings
     ? settings.provider === "ollama"
       ? settings.ollama
@@ -528,6 +529,7 @@ export default function ProjectView({
               <thead>
                 <tr>
                   <th>{t("extract.offset")}</th>
+                  {hasResources && <th>{t("table.resource")}</th>}
                   <th>{t("extract.text")}</th>
                   <th>{t("table.translation")}</th>
                   <th></th>
@@ -548,6 +550,9 @@ export default function ProjectView({
                       onClick={() => selectEntry(e)}
                     >
                       <td className="mono">{formatOffset(e.offset)}</td>
+                      {hasResources && (
+                        <td className="mono resource">{e.resourcePath ?? ""}</td>
+                      )}
                       <td className="text-cell">{e.sourceText}</td>
                       <td className="text-cell">{e.translatedText ?? ""}</td>
                       <td>

@@ -107,6 +107,16 @@ impl AdapterCapabilities {
     }
 }
 
+/// Recurso interno de um container (arquivo num filesystem de cartucho/disco).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResourceDescriptor {
+    pub path: String,
+    /// Offset absoluto do recurso dentro da imagem.
+    pub offset: u64,
+    pub size: u64,
+}
+
 /// Resultado de um probe. `confidence` em [0.0, 1.0]; `evidence` explica o porque.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
