@@ -25,7 +25,7 @@ App desktop open source (Tauri 2 + React + Rust) pra tradução de ROMs com IA, 
 
 ## Bloqueios / Pendências
 - [ ] Nenhum bloqueio. Repo PÚBLICO desde 15/09 (github.com/crimsondawnacademy-design/romtranslate-studio).
-- ⚠️ HISTÓRICO REESCRITO em 15/09 (sanitização antes de abrir): SHAs mudaram. Na OUTRA máquina, se houver clone antigo, apague e clone de novo — não faça pull por cima. Backups do histórico velho: repo privado `romtranslate-prehistory` no GitHub, `~/Desktop/romtranslate-prehistory-local` e `~/Desktop/rts-backup-pre-rewrite.bundle` nesta máquina.
+- ⚠️ HISTÓRICO REESCRITO em 15/09 (sanitização antes de abrir): SHAs mudaram. Na OUTRA máquina, se houver clone antigo, apague e clone de novo — não faça pull por cima. Backup do histórico velho: repo privado `romtranslate-prehistory` no GitHub (backups locais apagados em 15/09 a pedido do Rhuan).
 
 ## Caminhos críticos
 - Providers: `crates/core/src/provider.rs` (trait+prompt+parse) + `crates/core/src/providers/{ollama,openai_compat}.rs`
