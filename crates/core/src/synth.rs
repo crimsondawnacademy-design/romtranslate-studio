@@ -190,14 +190,48 @@ pub fn make_nds_rom() -> Vec<u8> {
     rom
 }
 
-/// Header sintetico de disco GameCube (magic em 0x1C + game code + titulo).
-pub fn make_gc_disc_header() -> Vec<u8> {
-    use crate::adapters::gamecube::{MAGIC, MAGIC_OFFSET};
-    let mut disc = vec![0u8; 4096];
+/// Disco GameCube sintetico: header (magic 0x1C, fst_offset/size BE em
+/// 0x424/0x428) + FST com raiz, um arquivo solto, um subdiretorio "data/" e
+/// strings ASCII plantadas nos arquivos.
+pub fn make_gc_disc() -> Vec<u8> {
+    use crate::adapters::gamecube::{FST_OFFSET_FIELD, FST_SIZE_FIELD, MAGIC, MAGIC_OFFSET};
+
+    let fst_offset = 0x1000usize;
+    let file1_offset = 0x2000usize;
+    let file2_offset = 0x2400usize;
+    let file1: Vec<u8> = b"WELCOME TO GAMECUBE ISLAND!\0PRESS THE A BUTTON\0".to_vec();
+    let mut file2: Vec<u8> = vec![0xFF; 8];
+    file2.extend_from_slice(b"SOUND OPTIONS\0");
+
+    let mut disc = vec![0u8; 0x3000];
     disc[0..6].copy_from_slice(b"GSYP01");
     disc[MAGIC_OFFSET..MAGIC_OFFSET + 4].copy_from_slice(&MAGIC);
     let title = b"SYNTHETIC GC ADVENTURE";
     disc[0x20..0x20 + title.len()].copy_from_slice(title);
+
+    // String table: offsets 0="opening.txt", 12="data", 17="config.bin".
+    let names = b"opening.txt\0data\0config.bin\0";
+    // Entries (3x u32 BE): raiz + arquivo + dir "data" (filhos ate 4) + arquivo.
+    let entries: [(u32, u32, u32); 4] = [
+        (0x0100_0000, 0, 4),                           // raiz: total=4
+        (0, file1_offset as u32, file1.len() as u32),  // opening.txt
+        (0x0100_0000 | 12, 0, 4),                      // dir data/, next=4
+        (17, file2_offset as u32, file2.len() as u32), // data/config.bin
+    ];
+    let mut fst = Vec::new();
+    for (a, b, c) in entries {
+        fst.extend_from_slice(&a.to_be_bytes());
+        fst.extend_from_slice(&b.to_be_bytes());
+        fst.extend_from_slice(&c.to_be_bytes());
+    }
+    fst.extend_from_slice(names);
+
+    disc[FST_OFFSET_FIELD..FST_OFFSET_FIELD + 4]
+        .copy_from_slice(&(fst_offset as u32).to_be_bytes());
+    disc[FST_SIZE_FIELD..FST_SIZE_FIELD + 4].copy_from_slice(&(fst.len() as u32).to_be_bytes());
+    disc[fst_offset..fst_offset + fst.len()].copy_from_slice(&fst);
+    disc[file1_offset..file1_offset + file1.len()].copy_from_slice(&file1);
+    disc[file2_offset..file2_offset + file2.len()].copy_from_slice(&file2);
     disc
 }
 

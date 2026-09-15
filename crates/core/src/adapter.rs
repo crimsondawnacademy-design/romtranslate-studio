@@ -13,10 +13,10 @@ pub const PROBE_HEAD_LEN: usize = 128 * 1024;
 /// Wii (4.7-8.5 GiB). Hash de arquivos grandes roda em spawn_blocking.
 pub const MAX_FILE_SIZE: u64 = 16 * 1024 * 1024 * 1024;
 
-// ponytail: extracao/reinsercao carregam o arquivo INTEIRO em RAM; 512 MiB
-// cobre qualquer cartucho (NDS max real = 512 MiB). Streaming por recurso
-// entra quando um adapter de disco extrair de verdade.
-pub const IN_MEMORY_MAX: u64 = 512 * 1024 * 1024;
+// ponytail: extracao/reinsercao carregam o arquivo INTEIRO em RAM; 2 GiB
+// cobre cartuchos e disco GameCube (1.46 GiB) — o apply clona o buffer, entao
+// o pico chega a ~2x o arquivo. Streaming por recurso se isso doer na pratica.
+pub const IN_MEMORY_MAX: u64 = 2 * 1024 * 1024 * 1024;
 
 /// Entrada de probing: caminho, tamanho e os primeiros bytes do arquivo.
 /// Probes leem SOMENTE de `head`, sempre com bounds check.

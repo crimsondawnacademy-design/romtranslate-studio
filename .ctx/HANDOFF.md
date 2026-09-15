@@ -24,7 +24,8 @@ motivo: fim-de-feature
 | Patch export IPS + BPS + manifest | pronto (DoD testado; BPS valida CRC triplo) | `crates/core/src/patch.rs` | delta-create BPS so se precisar de patch menor |
 | Comunidade (Sprint 7) | pronto | `docs/ADAPTERS.md`, README matrix, `.github/` templates | repo público qdo Rhuan decidir |
 | NDS (Sprint 8) | pronto (Experimental: FS + in-place; patch via BPS) | `crates/core/src/adapters/nds.rs` | — |
-| GC/Wii/Wii U probes | pronto (detect-only; WUX+RPX verificados) | `adapters/{gamecube,wii,wiiu}.rs` | FST do GC |
+| GameCube (FST) | pronto (Experimental: FS + in-place; BPS p/ ISO real) | `adapters/gamecube.rs` | — |
+| Wii/Wii U probes | pronto (detect-only; cifrado/WUX+RPX verificados) | `adapters/{wii,wiiu}.rs` | — |
 
 ## 1. Arquitetura técnica
 - **Patch (Sprint 6)**: `patch::create_ips/apply_ips` (Rust puro; apply lê RLE + truncate extension; create desvia do offset 0x454F46 e funde gaps <6B; limite 16 MiB com erro claro). `patch::export_patch(dir)` exige working copy, roda round-trip interno (apply==working senão aborta) e grava `exports/<stem>.<lang>.{ips,manifest.json,translations.csv}`; manifest snake_case (artefato público, spec §16).

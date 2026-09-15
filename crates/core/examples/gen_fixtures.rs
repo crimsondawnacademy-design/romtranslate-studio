@@ -14,7 +14,7 @@ fn main() -> std::io::Result<()> {
         ("synthetic.wux", synth::make_wux_header()),
         ("synthetic.rpx", synth::make_rpx_header()),
         ("synthetic.nds", synth::make_nds_rom()),
-        ("synthetic_gc.iso", synth::make_gc_disc_header()),
+        ("synthetic_gc.iso", synth::make_gc_disc()),
         ("synthetic_wii.iso", synth::make_wii_disc_header()),
         ("synthetic.gba", synth::make_gba_rom("SYNTHRPG")),
         ("synthetic.nes", synth::make_nes_rom()),

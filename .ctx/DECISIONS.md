@@ -184,3 +184,13 @@
 **Decisao:** probe detecta WUX (magic dupla + sanidade do sectorSize) e RPX/RPL (ELF32 BE PPC + OSABI/versao CA FE — ELF comum rejeitado). e_type ficou FORA das evidencias: fontes divergem (0xFE01 no wiiubrew vs 0xFF01 no elf2rpl do wut). WUD bruto fora: sem magic documentado confiavel no offset 0, e na pratica dumps circulam como WUX. Detect-only: disco cifrado (keys fora do projeto) e secoes RPX deflated.
 
 **Driver:** rhuan (pediu Wii U) + claude (verificacao antes de codar).
+
+## [2026-09-15] GameCube: ciclo completo via FST; limite em RAM sobe a 2 GiB
+
+**Contexto:** disco GC e plaintext (sem cifra, sem checksum de disco sobre dados) — o unico disco onde o padrao in-place funciona hoje. Formato confirmado no Dolphin: fst_offset/fst_size u32 BE em 0x424/0x428; FST = entries de 12 bytes (name_offset com flag de dir no byte alto, offset, size/next) + string table; GC usa offset_shift 0.
+
+**Decisao:** GameCube ganhou list_resources (walk com stack de ranges, bounds e caps), extracao por arquivo com resource_path e reinsercao in-place (finalize noop). IN_MEMORY_MAX subiu de 512 MiB para 2 GiB para a ISO real (1.46 GiB) passar — pico de RAM ~2x o arquivo no apply (clone); streaming por recurso se doer na pratica.
+
+**Consequencias:** GC e a sexta plataforma com ciclo completo; patch de ISO real sai como BPS (auto). Wii segue detect-only (cifrado).
+
+**Driver:** rhuan (pediu o FST) + claude.

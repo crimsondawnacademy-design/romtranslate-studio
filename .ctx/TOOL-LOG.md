@@ -6,6 +6,7 @@
 
 | data | maquina | ferramenta | modelo | o_que_fez | arquivos_tocados |
 |---|---|---|---|---|---|
+| 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | GameCube completo: FST (confirmado no Dolphin), extração por arquivo, in-place, fixture com subdir; IN_MEMORY_MAX 2GiB | `crates/core/src/adapters/gamecube.rs`, `crates/core/tests/gc_fst.rs` |
 | 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | Wii U probe (WUX + RPX) com formatos verificados em fonte primária (Cemu WudCompress, decaf-emu); fixtures + 2 testes | `crates/core/src/adapters/wiiu.rs` |
 | 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | NES/SNES conservadores: in-place via helper, snes_sum canônica c/ espelhamento, verify confere soma real, fixtures com strings plantadas | `crates/core/src/adapters/{nes,snes}.rs`, `crates/core/tests/inplace_consoles.rs` |
 | 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | BPS: create/apply completos (varint beat, CRC-32 triplo, 4 commands), formato auto/manual no export e na UI | `crates/core/src/patch.rs`, `crates/core/tests/bps.rs` |

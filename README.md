@@ -44,7 +44,7 @@ universal**. O que cada plataforma tem hoje:
 | Nintendo DS | ✅ (CRC do header) | ✅ | ⚠️ experimental (por arquivo do filesystem, ASCII + UTF-16) | ⚠️ experimental (in-place) | ✅ (BPS acima de 16 MiB) |
 | NES | ✅ | ✅ | ⚠️ experimental (in-place; jogos com tabela própria: use `.tbl`) | ⚠️ experimental (in-place) | ✅ |
 | Super Nintendo | ✅ | ✅ | ⚠️ experimental (in-place) | ⚠️ experimental (in-place, checksum interno recalculado) | ✅ |
-| GameCube | ✅ (magic + título) | — | — | — | — |
+| GameCube | ✅ (magic + FST) | — | ⚠️ experimental (por arquivo do filesystem FST) | ⚠️ experimental (in-place) | ✅ (BPS p/ ISO real) |
 | Wii | ✅ (ISO e WBFS) | — | — | — | — |
 | Wii U | ✅ (WUX e RPX/RPL) | — | — | — | — |
 

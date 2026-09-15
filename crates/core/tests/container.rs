@@ -195,7 +195,7 @@ fn gamecube_and_wii_probes_detect_discs() {
     let tmp = TempDir::new("disc");
 
     let gc_path = tmp.0.join("game.iso");
-    fs::write(&gc_path, synth::make_gc_disc_header()).unwrap();
+    fs::write(&gc_path, synth::make_gc_disc()).unwrap();
     let report = inspect(&gc_path).unwrap();
     let best = report.best.expect("gc detectado");
     assert_eq!(best.platform, Platform::GameCube);
@@ -219,10 +219,4 @@ fn gamecube_and_wii_probes_detect_discs() {
     fs::write(&wbfs_path, &wbfs).unwrap();
     let report = inspect(&wbfs_path).unwrap();
     assert_eq!(report.best.expect("wbfs detectado").platform, Platform::Wii);
-
-    // Probes de disco nao suportam extracao estruturada.
-    use romtranslate_core::adapters::gamecube::GameCubeAdapter;
-    assert!(GameCubeAdapter
-        .extract_structured(&synth::make_gc_disc_header())
-        .is_err());
 }

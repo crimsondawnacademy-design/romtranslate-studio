@@ -241,9 +241,9 @@ fn reinsert_flow_blocks_errors_and_never_touches_original() {
 
 #[test]
 fn probe_only_adapters_refuse_structured_calls() {
-    use romtranslate_core::adapters::gamecube::GameCubeAdapter;
-    let data = synth::make_gc_disc_header();
-    assert!(GameCubeAdapter.extract_structured(&data).is_err());
-    assert!(GameCubeAdapter.apply_text(&data, &[]).is_err());
-    assert!(GameCubeAdapter.verify(&data).is_err());
+    use romtranslate_core::adapters::wii::WiiAdapter;
+    let data = synth::make_wii_disc_header();
+    assert!(WiiAdapter.extract_structured(&data).is_err());
+    assert!(WiiAdapter.apply_text(&data, &[]).is_err());
+    assert!(WiiAdapter.verify(&data).is_err());
 }
