@@ -3,7 +3,7 @@
 > Local-first, AI-assisted game translation toolkit.
 
 Ferramenta desktop open source para extrair, traduzir, revisar e reaplicar textos em
-jogos compatíveis, com IA local (Ollama) ou APIs configuráveis, gerando **patches**
+jogos compatíveis, com IA local (Ollama) ou APIs configuráveis, gerando **patches** (IPS/BPS)
 em vez de cópias modificadas.
 
 **Status: alpha.** O pipeline completo funciona de ponta a ponta:
@@ -27,29 +27,31 @@ cópia de trabalho → **patch IPS** com manifest.
   encoding destino, editor com filtros e statuses; erros bloqueiam a reinserção;
 - **Reinserção** em working copy verificada — o arquivo original **nunca** é
   modificado;
-- **Patch IPS** + `manifest.json` + CSV de traduções, com round-trip interno
-  conferido antes de exportar. Compatível com Lunar IPS, Floating IPS,
-  RetroArch e afins.
+- **Patch IPS ou BPS** + `manifest.json` + CSV de traduções, com round-trip
+  interno conferido antes de exportar. Compatível com Lunar IPS, Floating IPS,
+  beat, RetroArch e afins; o BPS valida por CRC que o patch é para o arquivo
+  certo e suporta qualquer tamanho.
 
 ## Matriz de compatibilidade
 
 Jogos usam engines, compressões e tabelas diferentes — **não prometemos suporte
 universal**. O que cada plataforma tem hoje:
 
-| Plataforma | Detecção | Scan genérico | Extração estruturada | Reinserção | Patch IPS |
+| Plataforma | Detecção | Scan genérico | Extração estruturada | Reinserção | Patch |
 |---|---|---|---|---|---|
 | Fixture RTSF (demo) | ✅ | ✅ | ✅ completa | ✅ com relocação + ponteiros | ✅ |
 | Game Boy Advance | ✅ | ✅ | ⚠️ experimental (in-place) | ⚠️ experimental (in-place) | ✅ |
-| Nintendo DS | ✅ (CRC do header) | ✅ | ⚠️ experimental (por arquivo do filesystem, ASCII + UTF-16) | ⚠️ experimental (in-place) | ✅ até 16 MiB* |
+| Nintendo DS | ✅ (CRC do header) | ✅ | ⚠️ experimental (por arquivo do filesystem, ASCII + UTF-16) | ⚠️ experimental (in-place) | ✅ (BPS acima de 16 MiB) |
 | NES | ✅ | ✅ | — | — | — |
 | Super Nintendo | ✅ | ✅ | — | — | — |
 | GameCube | ✅ (magic + título) | — | — | — | — |
 | Wii | ✅ (ISO e WBFS) | — | — | — | — |
 | Wii U | planejado | — | — | — | — |
 
-\* ROMs NDS reais costumam passar de 16 MiB — o limite do formato IPS; o
-backend BPS está no roadmap. Partições de disco Wii são cifradas: extração
-exigiria keys, que este projeto não inclui.
+O export escolhe o formato sozinho: **IPS** quando cabe (máxima
+compatibilidade) e **BPS** para arquivos maiores ou que encolhem — o BPS ainda
+valida por CRC-32 que o patch está sendo aplicado no arquivo certo. Partições
+de disco Wii são cifradas: extração exigiria keys, que este projeto não inclui.
 
 **"In-place" (GBA)**: cada string traduzida ocupa o espaço da original (mesmo
 tamanho ou menor) — cobre menus e textos curtos de muitos jogos; textos com
@@ -102,7 +104,7 @@ crates/core/         # tudo testável sem UI
   src/db.rs          # entries + TM + glossário (SQLite por projeto)
   src/validate.rs    # placeholders/bytes/statuses
   src/reinsert.rs    # working copy + verify
-  src/patch.rs       # IPS create/apply + manifest
+  src/patch.rs       # IPS + BPS create/apply + manifest
 ```
 
 ## Contribuindo

@@ -21,9 +21,9 @@ motivo: fim-de-feature
 | UI tradução | pronto (config/progresso/cancel/glossário) | `apps/desktop/src/ProjectView.tsx` | — |
 | Editor + validação | pronto (tokens/bytes/statuses/filtros) | `crates/core/src/validate.rs` + ProjectView | — |
 | Reinserção (RTSF + GBA conservador) | pronto (round-trip testado) | `crates/core/src/{adapters/{rtsf,gba},reinsert}.rs` | NES/SNES no mesmo padrão |
-| Patch export IPS + manifest | pronto (DoD testado) | `crates/core/src/patch.rs` | BPS p/ >16 MiB/truncate |
+| Patch export IPS + BPS + manifest | pronto (DoD testado; BPS valida CRC triplo) | `crates/core/src/patch.rs` | delta-create BPS so se precisar de patch menor |
 | Comunidade (Sprint 7) | pronto | `docs/ADAPTERS.md`, README matrix, `.github/` templates | repo público qdo Rhuan decidir |
-| NDS (Sprint 8) | pronto (Experimental: FS + in-place) | `crates/core/src/adapters/nds.rs` | BPS p/ ROM real >16 MiB |
+| NDS (Sprint 8) | pronto (Experimental: FS + in-place; patch via BPS) | `crates/core/src/adapters/nds.rs` | — |
 | GC/Wii probes | pronto (detect-only; Wii cifrado) | `adapters/{gamecube,wii}.rs` | FST do GC; Wii U após verificar formato |
 
 ## 1. Arquitetura técnica

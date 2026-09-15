@@ -121,12 +121,15 @@ const messages = {
     "reinsert.running": "Reinserindo...",
     "reinsert.done": "Cópia de trabalho gerada e verificada: {path}",
     "reinsert.applied": "{applied} traduções aplicadas · {kept} mantidas no original",
-    "patch.export": "Exportar patch (IPS)",
+    "patch.export": "Exportar patch",
     "patch.exporting": "Gerando patch...",
     "patch.done":
-      "Patch gerado ({size} bytes) e conferido por round-trip. Distribua o patch — nunca a ROM.",
+      "Patch {format} gerado ({size} bytes) e conferido por round-trip. Distribua o patch — nunca a ROM.",
     "patch.hint":
-      "Exige a reinserção feita. Gera .ips + manifest.json + CSV das traduções em exports/.",
+      "Exige a reinserção feita. Gera o patch + manifest.json + CSV das traduções em exports/.",
+    "patch.formatAuto": "Formato: auto",
+    "patch.formatHint":
+      "Auto: IPS quando cabe (até 16 MiB, sem encolher — máxima compatibilidade); senão BPS (qualquer tamanho, valida CRC do arquivo certo).",
     "common.back": "Voltar",
     "common.error": "Erro",
   },
@@ -246,12 +249,15 @@ const messages = {
     "reinsert.running": "Reinserting...",
     "reinsert.done": "Working copy written and verified: {path}",
     "reinsert.applied": "{applied} translations applied · {kept} kept original",
-    "patch.export": "Export patch (IPS)",
+    "patch.export": "Export patch",
     "patch.exporting": "Building patch...",
     "patch.done":
-      "Patch built ({size} bytes) and round-trip checked. Distribute the patch — never the ROM.",
+      "{format} patch built ({size} bytes) and round-trip checked. Distribute the patch — never the ROM.",
     "patch.hint":
-      "Requires a completed reinsertion. Writes .ips + manifest.json + translations CSV into exports/.",
+      "Requires a completed reinsertion. Writes the patch + manifest.json + translations CSV into exports/.",
+    "patch.formatAuto": "Format: auto",
+    "patch.formatHint":
+      "Auto: IPS when it fits (up to 16 MiB, no shrinking — maximum compatibility); otherwise BPS (any size, validates the right source via CRC).",
     "common.back": "Back",
     "common.error": "Error",
   },

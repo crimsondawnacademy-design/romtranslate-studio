@@ -156,3 +156,13 @@
 **Consequencias:** NDS traduzivel hoje no fluxo inteiro (fixture; ROM real >16 MiB esbarra no IPS — BPS e o proximo); helper `inplace.rs` unifica GBA/NDS e ganha UTF-16 de graca.
 
 **Driver:** claude (ponytail + spec §5/§23).
+
+## [2026-09-15] BPS: apply completo, create linear; formato auto no export
+
+**Contexto:** IPS nao representa truncamento nem offsets >16 MiB (NDS real). O beat/BPS resolve os dois e valida CRC-32 do source (patch nao aplica em arquivo errado).
+
+**Decisao:** `apply_bps` implementa o formato INTEIRO (4 commands, varint canonico com +1, metadata, CRC triplo) — patches de terceiros aplicam. `create_bps` emite so SourceRead/TargetRead (modo linear): para diffs localizados de traducao e praticamente otimo; delta com suffix array (SourceCopy/TargetCopy no create) so se alguem precisar de patch menor. Export: auto escolhe IPS quando cabe (compatibilidade com ferramentas antigas) e BPS caso contrario; usuario pode forcar na UI.
+
+**Consequencias:** NDS real e truncamentos exportaveis; zero deps novas; patch BPS recusa arquivo errado com mensagem clara (CRCs nomeados).
+
+**Driver:** rhuan (pediu o BPS) + claude (ponytail no create linear).

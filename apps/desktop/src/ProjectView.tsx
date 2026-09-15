@@ -88,6 +88,7 @@ export default function ProjectView({
   const [reinsertOutcome, setReinsertOutcome] = useState<ReinsertOutcome | null>(null);
   const [patching, setPatching] = useState(false);
   const [patchOutcome, setPatchOutcome] = useState<PatchExportOutcome | null>(null);
+  const [patchFormat, setPatchFormat] = useState<"auto" | "ips" | "bps">("auto");
 
   const [issuesByEntry, setIssuesByEntry] = useState<
     Record<string, ValidationIssue[]>
@@ -208,7 +209,10 @@ export default function ProjectView({
     setPatchOutcome(null);
     setPatching(true);
     try {
-      const outcome = await invoke<PatchExportOutcome>("export_patch", { projectDir });
+      const outcome = await invoke<PatchExportOutcome>("export_patch", {
+        projectDir,
+        format: patchFormat === "auto" ? null : patchFormat,
+      });
       setPatchOutcome(outcome);
     } catch (e) {
       setError(String(e));
@@ -691,6 +695,15 @@ export default function ProjectView({
           <h3>{t("reinsert.title")}</h3>
           <p className="hint left">{t("reinsert.hint")}</p>
           <div className="actions">
+            <select
+              value={patchFormat}
+              onChange={(e) => setPatchFormat(e.target.value as typeof patchFormat)}
+              title={t("patch.formatHint")}
+            >
+              <option value="auto">{t("patch.formatAuto")}</option>
+              <option value="ips">IPS</option>
+              <option value="bps">BPS</option>
+            </select>
             <button
               onClick={runPatchExport}
               disabled={patching || reinserting || sourceBroken}
@@ -725,7 +738,7 @@ export default function ProjectView({
           )}
           {patchOutcome && (
             <div className="ok">
-              {t("patch.done", { size: patchOutcome.patchSize })}
+              {t("patch.done", { size: patchOutcome.patchSize, format: patchOutcome.patchFormat })}
               <br />
               <span className="path">{patchOutcome.patchPath}</span>
               <span className="path">{patchOutcome.manifestPath}</span>

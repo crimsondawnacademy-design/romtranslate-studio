@@ -140,7 +140,7 @@ fn export_patch_rtsf_dod_roundtrip_and_manifest() {
     .unwrap();
 
     // Sem working copy: export recusa com orientacao.
-    let err = export_patch(&project_dir).unwrap_err();
+    let err = export_patch(&project_dir, None).unwrap_err();
     assert!(err.to_string().contains("reinsercao"), "{err}");
 
     let mut db = ProjectDb::open(&project_dir).unwrap();
@@ -160,7 +160,7 @@ fn export_patch_rtsf_dod_roundtrip_and_manifest() {
     drop(db);
 
     reinsert_project(&project_dir, false).unwrap();
-    let outcome = export_patch(&project_dir).unwrap();
+    let outcome = export_patch(&project_dir, None).unwrap();
 
     // DoD: aplicar o patch exportado ao original == working copy, byte a byte.
     let original = fs::read(&rom_path).unwrap();
@@ -252,7 +252,7 @@ fn gba_conservative_flow_extract_translate_reinsert_patch() {
     assert!(reinserted.verification.ok);
     assert_eq!(fs::read(&rom_path).unwrap(), rom, "original intacto");
 
-    let outcome = export_patch(&project_dir).unwrap();
+    let outcome = export_patch(&project_dir, None).unwrap();
     let working = fs::read(&reinserted.working_path).unwrap();
     let patch = fs::read(&outcome.patch_path).unwrap();
     assert_eq!(apply_ips(&rom, &patch).unwrap(), working);

@@ -183,7 +183,7 @@ fn nds_full_project_flow_reinsert_and_patch() {
     assert!(reinserted.verification.ok);
     assert_eq!(fs::read(&rom_path).unwrap(), rom, "original intacto");
 
-    let outcome = export_patch(&project_dir).unwrap();
+    let outcome = export_patch(&project_dir, None).unwrap();
     let working = fs::read(&reinserted.working_path).unwrap();
     let patch = fs::read(&outcome.patch_path).unwrap();
     assert_eq!(apply_ips(&rom, &patch).unwrap(), working);
