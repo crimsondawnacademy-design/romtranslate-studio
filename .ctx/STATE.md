@@ -24,7 +24,8 @@ App desktop open source (Tauri 2 + React + Rust) pra tradução de ROMs com IA, 
 1. [P2] FST do GameCube (plaintext, listável — offset 0x424); checkbox modo avançado; batches concorrentes; TM global; keychain; CI build Tauri por SO; screenshot no README; abrir o repo ao público.
 
 ## Bloqueios / Pendências
-- [ ] Nenhum bloqueio. Repo PRIVADO na conta crimsondawnacademy-design; tornar público quando Rhuan decidir.
+- [ ] Nenhum bloqueio. Repo PÚBLICO desde 15/09 (github.com/crimsondawnacademy-design/romtranslate-studio).
+- ⚠️ HISTÓRICO REESCRITO em 15/09 (sanitização antes de abrir): SHAs mudaram. Na OUTRA máquina, se houver clone antigo, apague e clone de novo — não faça pull por cima. Backups do histórico velho: repo privado `romtranslate-prehistory` no GitHub, `~/Desktop/romtranslate-prehistory-local` e `~/Desktop/rts-backup-pre-rewrite.bundle` nesta máquina.
 
 ## Caminhos críticos
 - Providers: `crates/core/src/provider.rs` (trait+prompt+parse) + `crates/core/src/providers/{ollama,openai_compat}.rs`

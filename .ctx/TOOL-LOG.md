@@ -6,6 +6,7 @@
 
 | data | maquina | ferramenta | modelo | o_que_fez | arquivos_tocados |
 |---|---|---|---|---|---|
+| 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | Repo aberto ao PÚBLICO: gitleaks limpo, histórico reescrito sem termos da infra de trabalho (filter-repo em cópia), repo velho preservado como romtranslate-prehistory | `.ctx/*` |
 | 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | GameCube completo: FST (confirmado no Dolphin), extração por arquivo, in-place, fixture com subdir; IN_MEMORY_MAX 2GiB | `crates/core/src/adapters/gamecube.rs`, `crates/core/tests/gc_fst.rs` |
 | 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | Wii U probe (WUX + RPX) com formatos verificados em fonte primária (Cemu WudCompress, decaf-emu); fixtures + 2 testes | `crates/core/src/adapters/wiiu.rs` |
 | 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | NES/SNES conservadores: in-place via helper, snes_sum canônica c/ espelhamento, verify confere soma real, fixtures com strings plantadas | `crates/core/src/adapters/{nes,snes}.rs`, `crates/core/tests/inplace_consoles.rs` |
