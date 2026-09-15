@@ -202,3 +202,13 @@
 **Decisao:** lookup consulta o PROJETO primeiro (traducao revisada daquele jogo vence) e a global como fallback; TODA traducao nova (provider ou edicao manual) grava nas duas. Sem toggle de configuracao — sempre ligada (config para valor que ninguem muda e ruido); falha ao abrir a global degrada com warn, nunca bloqueia. Glossario global fica de fora ate haver demanda.
 
 **Driver:** rhuan (pediu a TM global) + claude (ponytail no sem-toggle).
+
+## [2026-09-15] API key no keychain nativo; secrets.json vira fallback
+
+**Contexto:** decisao de 14/09 previa keyring "quando o app for distribuido". Implementado com keyring 4 (apple-native + stores default de Windows/Linux).
+
+**Decisao:** save grava no keychain e REMOVE qualquer secrets.json (nunca deixar copia plaintext quando o cofre aceitou); load consulta keychain primeiro e migra chave legada do arquivo automaticamente na primeira leitura; se o keychain nao estiver disponivel (ex.: Linux sem secret service), cai no arquivo 0600 com warn — degrada, nao bloqueia.
+
+**Aprendizado de processo (registrado junto):** o commit da TM global (8258114) nao compilava o crate desktop — a validacao rodou num pipeline em background onde o clippy falhou mas linhas subsequentes commitaram mesmo assim, e o CI so valida o core. Correcoes: validacao SEMPRE em foreground antes de commit; P2 do CI de build do desktop subiu de prioridade.
+
+**Driver:** rhuan (pediu o keychain) + claude.

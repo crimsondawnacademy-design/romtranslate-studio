@@ -209,7 +209,7 @@ async fn update_entry(
 }
 
 /// TM global no config dir; falha ao abrir nao bloqueia traducao (e cache).
-fn open_global_tm(cfg_dir: &PathBuf) -> Option<GlobalTm> {
+fn open_global_tm(cfg_dir: &std::path::Path) -> Option<GlobalTm> {
     match GlobalTm::open(&cfg_dir.join("global_tm.sqlite")) {
         Ok(g) => Some(g),
         Err(e) => {
@@ -348,9 +348,11 @@ async fn do_translate(
     opts.batch_size = cfg.batch_size.clamp(1, 50);
 
     let mut db = ProjectDb::open(&dir).map_err(|e| e.to_string())?;
+    let mut global = open_global_tm(&cfg_dir);
     let emitter = app.clone();
     run_translation(
         &mut db,
+        global.as_mut(),
         provider.as_ref(),
         &model,
         &opts,

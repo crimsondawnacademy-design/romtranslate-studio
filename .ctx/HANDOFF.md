@@ -17,7 +17,7 @@ motivo: fim-de-feature
 | Persistência entries | pronto (SQLite, preserva traduções) | `crates/core/src/db.rs` | — |
 | Tradução Ollama/OpenAI-compat | pronto, validado com Ollama REAL | `crates/core/src/{provider,providers,pipeline}.rs` | — |
 | TM + glossário | pronto (por projeto) | `crates/core/src/db.rs` | TM global depois |
-| Settings + secrets | pronto (toml + secrets 0600) | `apps/desktop/src-tauri/src/settings.rs` | keyring qdo distribuir |
+| Settings + secrets | pronto (toml + KEYCHAIN nativo, fallback 0600) | `apps/desktop/src-tauri/src/settings.rs` | — |
 | UI tradução | pronto (config/progresso/cancel/glossário) | `apps/desktop/src/ProjectView.tsx` | — |
 | Editor + validação | pronto (tokens/bytes/statuses/filtros) | `crates/core/src/validate.rs` + ProjectView | — |
 | Reinserção (RTSF, GBA, NDS, NES, SNES) | pronto (round-trips testados; SNES recalcula soma canônica) | `crates/core/src/adapters/` + `reinsert.rs` | — |
@@ -63,7 +63,7 @@ pnpm dev   # manual: synthetic.gba de fixtures/generated → criar projeto → e
 ## 4. Armadilhas conhecidas
 - Parsers/scanners nunca panicam; bounds check sempre (testes *_never_panic*).
 - `TextEntry.original_bytes` cruza a ponte como HEX string.
-- API key NUNCA em settings.toml, logs, .rtsproj ou repo — só secrets.json 0600.
+- API key NUNCA em settings.toml, logs, .rtsproj ou repo — vive no KEYCHAIN nativo (secrets.json 0600 só como fallback/legado; migração automática na primeira leitura).
 - Ollama: modelo tem que estar puxado (`ollama pull llama3.2:3b`); o campo modelo vazio dá erro claro.
 - llama3.2:3b traduz com escorregões de gramática ("À VILAREJO") — revisão é Sprint 4; pipeline está correto (placeholders/glossário preservados).
 - Máquina do trabalho provavelmente sem Rust/pnpm (rustup + `npm i -g pnpm`).
