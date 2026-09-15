@@ -55,11 +55,11 @@
 
 **Driver:** claude.
 
-## [2026-09-14] Projeto pessoal: nada na VPS da agência nem no assistente interno
+## [2026-09-14] Projeto pessoal: separado da infra de trabalho
 
-**Contexto:** o RomTranslate Studio é projeto PESSOAL do Rhuan. A infra da empresa (VPS [ip interno removido], agentes internos, RAG da empresa) é da agência.
+**Contexto:** o RomTranslate Studio é projeto PESSOAL do mantenedor; a infra de trabalho dele (servidores e agentes internos) pertence a outra operação.
 
-**Decisão:** nenhum deploy, automação, cron ou registro deste projeto vai para a VPS da empresa nem para o assistente interno. O projeto vive nas máquinas locais + repo privado GitHub. Se um dia precisar de automação agendada, é na infra pessoal (infra pessoal), nunca na da agência.
+**Decisão:** nenhum deploy, automação, cron ou registro deste projeto vai para infra de trabalho. O projeto vive nas máquinas locais + repositório GitHub próprio. Automação agendada, se um dia existir, fica em infra pessoal.
 
 **Driver:** rhuan (14/09/2026).
 

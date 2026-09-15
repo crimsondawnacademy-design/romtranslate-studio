@@ -67,4 +67,4 @@ pnpm dev   # manual: synthetic.gba de fixtures/generated → criar projeto → e
 - Ollama: modelo tem que estar puxado (`ollama pull llama3.2:3b`); o campo modelo vazio dá erro claro.
 - llama3.2:3b traduz com escorregões de gramática ("À VILAREJO") — revisão é Sprint 4; pipeline está correto (placeholders/glossário preservados).
 - Máquina do trabalho provavelmente sem Rust/pnpm (rustup + `npm i -g pnpm`).
-- PROJETO PESSOAL: nada vai pra infra de trabalho nem pro assistente interno (DECISIONS.md).
+- PROJETO PESSOAL: separado da infra de trabalho do mantenedor (DECISIONS.md).
