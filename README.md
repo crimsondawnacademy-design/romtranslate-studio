@@ -47,12 +47,13 @@ universal**. O que cada plataforma tem hoje:
 | GameCube | ✅ (magic + FST) | — | ⚠️ experimental (por arquivo do filesystem FST) | ⚠️ experimental (in-place) | ✅ (BPS p/ ISO real) |
 | Wii | ✅ (ISO e WBFS) | — | — | — | — |
 | Wii U | ✅ (WUX e RPX/RPL) | — | — | — | — |
-| PlayStation (PS1) | ✅ (ISO 9660 + SYSTEM.CNF) | ✅ | ⚠️ experimental (por arquivo; BIN raw por setor) | ⚠️ experimental (só ISO 2048)* | ✅ |
+| PlayStation (PS1) | ✅ (ISO 9660 + SYSTEM.CNF) | ✅ | ⚠️ experimental (por arquivo; BIN raw por setor) | ⚠️ experimental (in-place; BIN raw com EDC/ECC regenerado)* | ✅ |
 | PlayStation 2 | ✅ (BOOT2 no SYSTEM.CNF) | ✅ | ⚠️ experimental (por arquivo; imagens até 2 GiB) | ⚠️ experimental (in-place) | ✅ (BPS) |
 | PSP | ✅ (UMD + PARAM.SFO com título) | ✅ | ⚠️ experimental (por arquivo) | ⚠️ experimental (in-place) | ✅ (BPS) |
 
-\* BIN raw de PS1 (2352 bytes/setor): extração funciona; reinserção exigiria
-recalcular EDC/ECC de cada setor — converta para ISO 2048 e reinsira nela.
+\* BIN raw de PS1 (2352 bytes/setor): a reinserção regenera o EDC/ECC
+(ECMA-130) de cada setor alterado, e o verify confere o EDC da imagem inteira.
+Imagens multi-track (`.cue` com áudio) ainda não: use o track de dados.
 
 O export escolhe o formato sozinho: **IPS** quando cabe (máxima
 compatibilidade) e **BPS** para arquivos maiores ou que encolhem — o BPS ainda

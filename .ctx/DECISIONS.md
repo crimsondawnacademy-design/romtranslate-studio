@@ -220,3 +220,27 @@
 **Decisao:** um parser compartilhado (`iso9660.rs`) com SectorMap 2048/raw; extracao por REGIAO de setor no raw (offsets absolutos corretos; strings que cruzam fronteira de setor sao perdidas — documentado); reinsercao in-place so em 2048 — em raw, cada escrita invalidaria EDC/ECC do setor, entao recusa com orientacao (converter para ISO). EDC/ECC (ECMA-130) e o proximo P1 para reinsercao raw direta. Limite em RAM (2 GiB) cobre PS1/PSP/PS2-CD; DVD dual-layer real pede streaming (P2).
 
 **Driver:** rhuan (pediu PS1/PS2/PSP) + claude (verificacao kernel/psdevwiki antes de codar).
+
+## 2026-09-15 — EDC/ECC transcrito do ECM com golden values da referência compilada
+
+**Contexto:** reinserir em BIN raw 2352 exige regenerar EDC (CRC-32 poly
+0xD8018001) e ECC (RS P/Q sobre GF(2^8) poly 0x11D) de cada setor alterado.
+Algoritmo canônico da cena: ecm.c do Neill Corlett (domínio público, mesma
+base de cdrdao/mkpsxiso).
+
+**Decisão:** transcrever pra `adapters/cdrom.rs` e travar a transcrição
+compilando o ecm.c de referência NESTA máquina pra gerar golden values
+(EDC + bytes de paridade de setor determinístico), embutidos em teste.
+Regeneração só nos setores que o diff vs original mostrar alterados;
+Mode 2 usa header ZERADO no ECC (só Mode 1 inclui o real); Form 2 só
+recalcula EDC se o campo já era usado (é opcional).
+
+**Pegadinha registrada:** no C original `data` e `ecc` são ponteiros
+sobrepostos no mesmo setor — o passo Q lê a paridade P recém-escrita
+(índices até 0x8C8). Em Rust são dois passes com slices distintos; um
+`split_at_mut` ingênuo estoura índice no Q.
+
+**Consequência:** PS1 raw tem ciclo completo (9/9 plataformas); verify de
+PS1/PS2/PSP confere EDC da imagem raw inteira; fixtures raw do synth agora
+nascem com EDC/ECC válidos (subheader XA form 1). Multi-track (.cue com
+áudio) segue fora — usuário aponta o track de dados.

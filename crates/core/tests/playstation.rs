@@ -96,7 +96,7 @@ fn iso_walker_lists_files_in_plain_and_raw() {
 }
 
 #[test]
-fn ps1_raw_extract_finds_strings_across_sectors_but_refuses_reinsertion() {
+fn ps1_raw_extract_and_reinsert_with_edc_ecc_regeneration() {
     let bin = synth::make_ps1_bin();
     let entries = Ps1Adapter.extract_structured(&bin).unwrap();
     let texts: Vec<_> = entries.iter().map(|e| e.source_text.as_str()).collect();
@@ -112,15 +112,42 @@ fn ps1_raw_extract_finds_strings_across_sectors_but_refuses_reinsertion() {
     let off = coin.offset.unwrap() as usize;
     assert_eq!(&bin[off..off + 23], b"INSERT COIN TO CONTINUE");
 
-    // Reinsercao em raw: recusada com orientacao (EDC/ECC).
+    // O fixture ja nasce com EDC/ECC validos — o verify confere setor a setor.
+    let baseline = Ps1Adapter.verify(&bin).unwrap();
+    assert!(baseline.ok, "{:?}", baseline.problems);
+    assert!(
+        baseline.checks.iter().any(|c| c.contains("EDC integro")),
+        "{:?}",
+        baseline.checks
+    );
+
+    // Roundtrip em raw: escreve in-place e regenera EDC/ECC dos setores tocados.
     let mut translated = entries.clone();
     for e in translated.iter_mut() {
-        if e.source_text == "INSERT COIN TO CONTINUE" {
-            e.translated_text = Some("INSIRA FICHA".to_string());
+        match e.source_text.as_str() {
+            "INSERT COIN TO CONTINUE" => e.translated_text = Some("INSIRA FICHA".to_string()),
+            "MEMORY CARD NOT FOUND" => e.translated_text = Some("SEM MEMORY CARD".to_string()),
+            _ => {}
         }
     }
-    let err = Ps1Adapter.apply_text(&bin, &translated).unwrap_err();
-    assert!(err.to_string().contains("EDC/ECC"), "{err}");
+    let applied = Ps1Adapter.apply_text(&bin, &translated).unwrap();
+    assert_eq!(applied.report.applied, 2);
+    let verification = Ps1Adapter.verify(&applied.bytes).unwrap();
+    assert!(verification.ok, "{:?}", verification.problems);
+    let reread = Ps1Adapter.extract_structured(&applied.bytes).unwrap();
+    assert!(reread.iter().any(|e| e.source_text == "INSIRA FICHA"));
+    assert!(reread.iter().any(|e| e.source_text == "SEM MEMORY CARD"));
+
+    // Prova de que o EDC realmente foi recalculado: o mesmo texto escrito
+    // sem regenerar (patch byte a byte) tem que reprovar no verify.
+    let mut naive = bin.clone();
+    naive[off..off + 23].copy_from_slice(b"INSIRA FICHA\0\0\0\0\0\0\0\0\0\0\0");
+    let broken = Ps1Adapter.verify(&naive).unwrap();
+    assert!(
+        broken.problems.iter().any(|p| p.contains("EDC invalido")),
+        "{:?}",
+        broken.problems
+    );
 }
 
 #[test]

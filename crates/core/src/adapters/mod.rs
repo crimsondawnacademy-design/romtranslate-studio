@@ -1,3 +1,4 @@
+pub(crate) mod cdrom;
 pub mod gamecube;
 pub mod gba;
 pub(crate) mod inplace;

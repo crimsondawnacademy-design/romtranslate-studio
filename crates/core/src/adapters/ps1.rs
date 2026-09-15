@@ -1,7 +1,8 @@
 //! Adapter de PlayStation (PS1): BIN raw 2352 ou ISO 2048, ISO 9660 com
 //! system_id "PLAYSTATION" e SYSTEM.CNF com linha `BOOT =` (PS2 usa BOOT2 —
 //! e o discriminador canonico). Extracao por arquivo do filesystem; a
-//! reinsercao in-place funciona em 2048 (raw exigiria recalcular EDC/ECC).
+//! reinsercao e in-place nos dois formatos — no raw, cada setor alterado tem
+//! EDC/ECC regenerado (modulo `cdrom`, ECMA-130) e o verify confere o EDC.
 
 use super::iso9660::{
     self, apply_iso, detect_map, extract_ascii_by_file, identify_playstation, parse_pvd, walk,
@@ -32,7 +33,7 @@ impl GameAdapter for Ps1Adapter {
         AdapterCapabilities {
             detect: true,
             extract: true,
-            reinsert: true, // in-place em imagens 2048; raw 2352 recusa com orientacao
+            reinsert: true, // in-place; raw 2352 regenera EDC/ECC dos setores alterados
             patch: true,
             compression: false,
             pointer_relocation: false,
@@ -135,6 +136,14 @@ pub(super) fn verify_iso(
         match adapter.extract_structured(data) {
             Ok(entries) => checks.push(format!("{} strings re-extraidas", entries.len())),
             Err(e) => problems.push(format!("re-extracao falhou: {e}")),
+        }
+        if map == SectorMap::Raw2352 {
+            let (ok_count, bad) = iso9660::raw_edc_scan(data);
+            if bad == 0 {
+                checks.push(format!("EDC integro em {ok_count} setores"));
+            } else {
+                problems.push(format!("{bad} setores com EDC invalido"));
+            }
         }
     }
     Ok(VerificationReport {

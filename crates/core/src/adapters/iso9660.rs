@@ -276,21 +276,38 @@ pub fn extract_ascii_by_file(data: &[u8], map: SectorMap) -> Result<Vec<crate::t
     Ok(entries)
 }
 
-/// Reinsercao comum: in-place em imagens 2048; raw 2352 e recusado com
-/// orientacao (escrever dados exigiria recalcular EDC/ECC de cada setor).
+/// Reinsercao comum: in-place; em raw 2352 (BIN) cada setor alterado tem o
+/// EDC/ECC regenerado (ECMA-130, modulo `cdrom`) depois da escrita.
 pub fn apply_iso(
     data: &[u8],
     map: SectorMap,
     entries: &[crate::types::TextEntry],
 ) -> Result<crate::adapter::AppliedImage> {
+    let mut applied = super::inplace::apply_in_place(data, entries, |_| {})?;
     if map == SectorMap::Raw2352 {
-        return Err(err(
-            "reinsercao em imagem raw 2352 (BIN) ainda nao e suportada — cada setor \
-             tem EDC/ECC que precisariam ser recalculados. Converta a imagem para \
-             ISO 2048 e reinsira nela",
-        ));
+        let sectors = applied.bytes.as_chunks_mut::<SECTOR_RAW>().0;
+        for (i, sector) in sectors.iter_mut().enumerate() {
+            if sector[..] != data[i * SECTOR_RAW..(i + 1) * SECTOR_RAW] {
+                super::cdrom::regenerate_sector(sector)?;
+            }
+        }
     }
-    super::inplace::apply_in_place(data, entries, |_| {})
+    Ok(applied)
+}
+
+/// Confere o EDC de todos os setores de uma imagem raw 2352.
+/// Retorna (setores validos, setores invalidos); setores sem EDC nao contam.
+pub fn raw_edc_scan(data: &[u8]) -> (usize, usize) {
+    let mut ok = 0;
+    let mut bad = 0;
+    for sector in data.as_chunks::<SECTOR_RAW>().0 {
+        match super::cdrom::sector_edc_ok(sector) {
+            Some(true) => ok += 1,
+            Some(false) => bad += 1,
+            None => {}
+        }
+    }
+    (ok, bad)
 }
 
 pub fn identify_playstation(data: &[u8], map: SectorMap) -> Option<(PsKind, String)> {

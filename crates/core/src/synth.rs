@@ -374,8 +374,8 @@ fn build_iso9660(system_id: &str, volume_id: &str, files: &[(&str, Vec<u8>)]) ->
     image
 }
 
-/// Converte uma imagem 2048/setor em raw 2352 (Mode 2: sync + header + subheader;
-/// EDC/ECC zerados — nossos parsers nao os validam).
+/// Converte uma imagem 2048/setor em raw 2352 (Mode 2 Form 1: sync + header +
+/// subheader duplicado + EDC/ECC reais, como num BIN dumpado de verdade).
 fn wrap_raw_2352(plain: &[u8]) -> Vec<u8> {
     const SYNC: [u8; 12] = [
         0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00,
@@ -385,7 +385,12 @@ fn wrap_raw_2352(plain: &[u8]) -> Vec<u8> {
         let mut sector = vec![0u8; 2352];
         sector[..12].copy_from_slice(&SYNC);
         sector[15] = 2; // Mode 2
+                        // Subheader XA duplicado (4+4): submode 0x08 = data, Form 1.
+        sector[18] = 0x08;
+        sector[22] = 0x08;
         sector[24..24 + chunk.len()].copy_from_slice(chunk);
+        crate::adapters::cdrom::regenerate_sector(&mut sector)
+            .expect("synth: setor sintetico sempre regeneravel");
         out.extend_from_slice(&sector);
     }
     out
