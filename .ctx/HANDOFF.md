@@ -27,6 +27,7 @@ motivo: fim-de-feature
 | NDS (Sprint 8) | pronto (Experimental: FS + in-place; patch via BPS) | `crates/core/src/adapters/nds.rs` | — |
 | GameCube (FST) | pronto (Experimental: FS + in-place; BPS p/ ISO real) | `adapters/gamecube.rs` | — |
 | Wii/Wii U probes | pronto (detect-only; cifrado/WUX+RPX verificados) | `adapters/{wii,wiiu}.rs` | — |
+| PS1/PS2/PSP (ISO 9660) | pronto (Experimental; PS1 raw só extrai) | `adapters/{iso9660,ps1,ps2,psp}.rs` | EDC/ECC p/ reinserir em BIN raw |
 
 ## 1. Arquitetura técnica
 - **Patch (Sprint 6)**: `patch::create_ips/apply_ips` (Rust puro; apply lê RLE + truncate extension; create desvia do offset 0x454F46 e funde gaps <6B; limite 16 MiB com erro claro). `patch::export_patch(dir)` exige working copy, roda round-trip interno (apply==working senão aborta) e grava `exports/<stem>.<lang>.{ips,manifest.json,translations.csv}`; manifest snake_case (artefato público, spec §16).

@@ -8,6 +8,9 @@ export type Platform =
   | "game_cube"
   | "wii"
   | "wii_u"
+  | "ps1"
+  | "ps2"
+  | "psp"
   | "synthetic"
   | "unknown";
 
@@ -164,6 +167,9 @@ export const PLATFORM_NAMES: Record<Platform, string> = {
   game_cube: "GameCube",
   wii: "Wii",
   wii_u: "Wii U",
+  ps1: "PlayStation",
+  ps2: "PlayStation 2",
+  psp: "PSP",
   synthetic: "Fixture sintética (RTSF)",
   unknown: "?",
 };

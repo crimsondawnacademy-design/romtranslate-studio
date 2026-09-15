@@ -6,6 +6,7 @@
 
 | data | maquina | ferramenta | modelo | o_que_fez | arquivos_tocados |
 |---|---|---|---|---|---|
+| 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | PS1/PS2/PSP: parser ISO 9660 compartilhado (2048+raw), BOOT/BOOT2, SFO; extração por arquivo e in-place em 2048; fixtures ISO sintéticas | `crates/core/src/adapters/{iso9660,ps1,ps2,psp}.rs`, `crates/core/tests/playstation.rs` |
 | 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | CI job desktop: clippy+test do crate Tauri no ubuntu (deps oficiais Tauri 2) — fecha o furo do core-only | `.github/workflows/ci.yml` |
 | 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | Keychain nativo p/ API key (migração automática + fallback 0600) + fix: do_translate ligado na TM global | `apps/desktop/src-tauri/src/settings.rs`, `apps/desktop/src-tauri/src/lib.rs` |
 | 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | TM global cross-projeto: GlobalTm no config dir, cascata projeto→global, alimentação dupla (máquina+manual) | `crates/core/src/db.rs`, `crates/core/src/pipeline.rs`, `crates/core/tests/global_tm.rs` |

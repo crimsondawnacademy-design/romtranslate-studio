@@ -212,3 +212,11 @@
 **Aprendizado de processo (registrado junto):** o commit da TM global (8258114) nao compilava o crate desktop — a validacao rodou num pipeline em background onde o clippy falhou mas linhas subsequentes commitaram mesmo assim, e o CI so valida o core. Correcoes: validacao SEMPRE em foreground antes de commit; P2 do CI de build do desktop subiu de prioridade.
 
 **Driver:** rhuan (pediu o keychain) + claude.
+
+## [2026-09-15] PlayStation: ISO 9660 unico p/ PS1/PS2/PSP; raw 2352 extrai mas nao reinsere
+
+**Contexto:** as tres plataformas usam ISO 9660 (layout confirmado no iso_fs.h do kernel Linux). PS1 circula como BIN raw 2352 (setores com sync/header/EDC/ECC); PS2/PSP como ISO 2048. SYSTEM.CNF discrimina PS1 (BOOT=) de PS2 (BOOT2=) — metodo canonico; PSP identifica por UMD_DATA.BIN + PSP_GAME/PARAM.SFO (SFO parseado, psdevwiki).
+
+**Decisao:** um parser compartilhado (`iso9660.rs`) com SectorMap 2048/raw; extracao por REGIAO de setor no raw (offsets absolutos corretos; strings que cruzam fronteira de setor sao perdidas — documentado); reinsercao in-place so em 2048 — em raw, cada escrita invalidaria EDC/ECC do setor, entao recusa com orientacao (converter para ISO). EDC/ECC (ECMA-130) e o proximo P1 para reinsercao raw direta. Limite em RAM (2 GiB) cobre PS1/PSP/PS2-CD; DVD dual-layer real pede streaming (P2).
+
+**Driver:** rhuan (pediu PS1/PS2/PSP) + claude (verificacao kernel/psdevwiki antes de codar).

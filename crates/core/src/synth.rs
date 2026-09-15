@@ -273,6 +273,219 @@ pub fn make_rpx_header() -> Vec<u8> {
     data
 }
 
+/// Builder de imagem ISO 9660 sintetica (2048/setor): PVD no setor 16, root
+/// no 18, um nivel opcional de subdiretorio ("DIR/ARQUIVO"). Suficiente para
+/// as fixtures de PS1/PS2/PSP — nenhum byte de disco real.
+fn build_iso9660(system_id: &str, volume_id: &str, files: &[(&str, Vec<u8>)]) -> Vec<u8> {
+    const S: usize = 2048;
+    fn record(name: &[u8], extent: u32, size: u32, is_dir: bool) -> Vec<u8> {
+        let mut r = vec![0u8; 33 + name.len()];
+        if !r.len().is_multiple_of(2) {
+            r.push(0); // records tem comprimento par (ECMA-119)
+        }
+        r[0] = r.len() as u8;
+        r[2..6].copy_from_slice(&extent.to_le_bytes());
+        r[6..10].copy_from_slice(&extent.to_be_bytes());
+        r[10..14].copy_from_slice(&size.to_le_bytes());
+        r[14..18].copy_from_slice(&size.to_be_bytes());
+        r[25] = if is_dir { 0x02 } else { 0x00 };
+        r[32] = name.len() as u8;
+        r[33..33 + name.len()].copy_from_slice(name);
+        r
+    }
+
+    // Layout: subdirs ganham 1 setor cada a partir do 19; arquivos depois.
+    let mut subdirs: Vec<&str> = Vec::new();
+    for (path, _) in files {
+        if let Some((dir, _)) = path.split_once('/') {
+            if !subdirs.contains(&dir) {
+                subdirs.push(dir);
+            }
+        }
+    }
+    let root_lba = 18u32;
+    let first_file_lba = 19 + subdirs.len() as u32;
+    let mut file_lbas: Vec<u32> = Vec::new();
+    let mut next = first_file_lba;
+    for (_, content) in files {
+        file_lbas.push(next);
+        next += content.len().div_ceil(S).max(1) as u32;
+    }
+    let total_sectors = next as usize;
+    let mut image = vec![0u8; total_sectors * S];
+
+    // PVD (setor 16) + set terminator (17).
+    let pvd = &mut image[16 * S..17 * S];
+    pvd[0] = 1;
+    pvd[1..6].copy_from_slice(b"CD001");
+    pvd[6] = 1;
+    let sys = system_id.as_bytes();
+    pvd[8..8 + sys.len().min(32)].copy_from_slice(&sys[..sys.len().min(32)]);
+    for b in pvd[8 + sys.len().min(32)..40].iter_mut() {
+        *b = b' ';
+    }
+    let vol = volume_id.as_bytes();
+    pvd[40..40 + vol.len().min(32)].copy_from_slice(&vol[..vol.len().min(32)]);
+    let root_rec = record(&[0], root_lba, S as u32, true);
+    pvd[156..156 + root_rec.len()].copy_from_slice(&root_rec);
+    image[17 * S] = 255;
+    image[17 * S + 1..17 * S + 6].copy_from_slice(b"CD001");
+
+    // Diretorios: raiz + um setor por subdir.
+    let mut root_records: Vec<u8> = Vec::new();
+    root_records.extend(record(&[0], root_lba, S as u32, true));
+    root_records.extend(record(&[1], root_lba, S as u32, true));
+    let mut subdir_records: Vec<Vec<u8>> = subdirs
+        .iter()
+        .enumerate()
+        .map(|(i, _)| {
+            let lba = 19 + i as u32;
+            let mut recs = Vec::new();
+            recs.extend(record(&[0], lba, S as u32, true));
+            recs.extend(record(&[1], root_lba, S as u32, true));
+            recs
+        })
+        .collect();
+    for (i, dir) in subdirs.iter().enumerate() {
+        root_records.extend(record(dir.as_bytes(), 19 + i as u32, S as u32, true));
+    }
+    for ((path, content), lba) in files.iter().zip(&file_lbas) {
+        let (target, name) = match path.split_once('/') {
+            Some((dir, name)) => (subdirs.iter().position(|d| d == &dir), name),
+            None => (None, *path),
+        };
+        let iso_name = format!("{name};1");
+        let rec = record(iso_name.as_bytes(), *lba, content.len() as u32, false);
+        match target {
+            Some(i) => subdir_records[i].extend(rec),
+            None => root_records.extend(rec),
+        }
+    }
+    image[root_lba as usize * S..root_lba as usize * S + root_records.len()]
+        .copy_from_slice(&root_records);
+    for (i, recs) in subdir_records.iter().enumerate() {
+        let base = (19 + i) * S;
+        image[base..base + recs.len()].copy_from_slice(recs);
+    }
+    for ((_, content), lba) in files.iter().zip(&file_lbas) {
+        let base = *lba as usize * S;
+        image[base..base + content.len()].copy_from_slice(content);
+    }
+    image
+}
+
+/// Converte uma imagem 2048/setor em raw 2352 (Mode 2: sync + header + subheader;
+/// EDC/ECC zerados — nossos parsers nao os validam).
+fn wrap_raw_2352(plain: &[u8]) -> Vec<u8> {
+    const SYNC: [u8; 12] = [
+        0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00,
+    ];
+    let mut out = Vec::with_capacity(plain.len() / 2048 * 2352);
+    for chunk in plain.chunks(2048) {
+        let mut sector = vec![0u8; 2352];
+        sector[..12].copy_from_slice(&SYNC);
+        sector[15] = 2; // Mode 2
+        sector[24..24 + chunk.len()].copy_from_slice(chunk);
+        out.extend_from_slice(&sector);
+    }
+    out
+}
+
+/// PARAM.SFO minimo (psdevwiki): magic \\0PSF + index de entries de 16 bytes.
+fn build_sfo(pairs: &[(&str, &str)]) -> Vec<u8> {
+    let mut keys = Vec::new();
+    let mut data = Vec::new();
+    let mut index = Vec::new();
+    for (key, value) in pairs {
+        let key_off = keys.len() as u16;
+        let data_off = data.len() as u32;
+        keys.extend_from_slice(key.as_bytes());
+        keys.push(0);
+        let mut bytes = value.as_bytes().to_vec();
+        bytes.push(0);
+        let len = bytes.len() as u32;
+        data.extend_from_slice(&bytes);
+        index.extend_from_slice(&key_off.to_le_bytes());
+        index.extend_from_slice(&0x0204u16.to_le_bytes()); // utf8
+        index.extend_from_slice(&len.to_le_bytes());
+        index.extend_from_slice(&len.to_le_bytes());
+        index.extend_from_slice(&data_off.to_le_bytes());
+    }
+    let key_table_start = 0x14 + index.len() as u32;
+    let data_table_start = key_table_start + keys.len() as u32;
+    let mut sfo = Vec::new();
+    sfo.extend_from_slice(&[0x00, b'P', b'S', b'F']);
+    sfo.extend_from_slice(&0x0101u32.to_le_bytes());
+    sfo.extend_from_slice(&key_table_start.to_le_bytes());
+    sfo.extend_from_slice(&data_table_start.to_le_bytes());
+    sfo.extend_from_slice(&(pairs.len() as u32).to_le_bytes());
+    sfo.extend_from_slice(&index);
+    sfo.extend_from_slice(&keys);
+    sfo.extend_from_slice(&data);
+    sfo
+}
+
+/// PS1: BIN raw 2352 com SYSTEM.CNF (BOOT=) e strings num arquivo de dados
+/// que atravessa fronteira de setor.
+pub fn make_ps1_bin() -> Vec<u8> {
+    let mut game = vec![0u8; 3000];
+    plant(&mut game, 0x40, b"INSERT COIN TO CONTINUE\0");
+    plant(&mut game, 0x820, b"MEMORY CARD NOT FOUND\0"); // 2o setor do arquivo
+    let plain = build_iso9660(
+        "PLAYSTATION",
+        "SYNTH_PS1",
+        &[
+            (
+                "SYSTEM.CNF",
+                b"BOOT = cdrom:\\SLUS_012.34;1\r\nTCB = 4\r\nEVENT = 10\r\nSTACK = 801fff00\r\n"
+                    .to_vec(),
+            ),
+            ("GAME.DAT", game),
+        ],
+    );
+    wrap_raw_2352(&plain)
+}
+
+/// PS2: ISO 2048 com SYSTEM.CNF (BOOT2=) e strings num subdiretorio.
+pub fn make_ps2_iso() -> Vec<u8> {
+    let mut pak = vec![0u8; 1024];
+    plant(&mut pak, 0x20, b"PRESS X TO JUMP\0");
+    plant(&mut pak, 0x40, b"SAVE PROGRESS?\0");
+    build_iso9660(
+        "PLAYSTATION",
+        "SYNTH_PS2",
+        &[
+            (
+                "SYSTEM.CNF",
+                b"BOOT2 = cdrom0:\\SLUS_205.67;1\r\nVER = 1.00\r\nVMODE = NTSC\r\n".to_vec(),
+            ),
+            ("DATA/TEXT.PAK", pak),
+        ],
+    )
+}
+
+/// PSP: ISO 2048 de UMD com UMD_DATA.BIN e PSP_GAME/PARAM.SFO validos.
+pub fn make_psp_iso() -> Vec<u8> {
+    let mut data = vec![0u8; 1024];
+    plant(&mut data, 0x10, b"NEW GAME\0");
+    plant(&mut data, 0x20, b"CONTINUE ADVENTURE\0");
+    build_iso9660(
+        "PSP GAME",
+        "SYNTH_PSP",
+        &[
+            (
+                "UMD_DATA.BIN",
+                b"ULUS-01234|1234567890ABCDEF|0001|G\0".to_vec(),
+            ),
+            (
+                "PSP_GAME/PARAM.SFO",
+                build_sfo(&[("DISC_ID", "ULUS01234"), ("TITLE", "SYNTHETIC PSP QUEST")]),
+            ),
+            ("PSP_GAME/DATA.BIN", data),
+        ],
+    )
+}
+
 /// Bytes pseudo-aleatorios deterministicos (xorshift), p/ testes negativos.
 pub fn make_random(len: usize, seed: u64) -> Vec<u8> {
     let mut state = seed.max(1);

@@ -14,6 +14,9 @@ pub enum Platform {
     GameCube,
     Wii,
     WiiU,
+    Ps1,
+    Ps2,
+    Psp,
     /// Fixture sintetica do proprio RomTranslate (formato RTSF, para demo/testes).
     Synthetic,
     Unknown,
@@ -29,6 +32,9 @@ impl Platform {
             Platform::GameCube => "GameCube",
             Platform::Wii => "Wii",
             Platform::WiiU => "Wii U",
+            Platform::Ps1 => "PlayStation",
+            Platform::Ps2 => "PlayStation 2",
+            Platform::Psp => "PSP",
             Platform::Synthetic => "Fixture sintetica (RTSF)",
             Platform::Unknown => "Desconhecida",
         }
