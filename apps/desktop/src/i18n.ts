@@ -121,6 +121,10 @@ const messages = {
     "reinsert.running": "Reinserindo...",
     "reinsert.done": "Cópia de trabalho gerada e verificada: {path}",
     "reinsert.applied": "{applied} traduções aplicadas · {kept} mantidas no original",
+    "reinsert.advanced": "Modo avançado: reinserir mesmo com erros de validação",
+    "reinsert.advancedHint":
+      "As entries marcadas com erro entram do jeito que estão — placeholder quebrado ou texto que não cabe pode corromper o jogo. Use só se souber o que está fazendo.",
+    "reinsert.forced": "{n} entries com erro de validação entraram (modo avançado)",
     "patch.export": "Exportar patch",
     "patch.exporting": "Gerando patch...",
     "patch.done":
@@ -249,6 +253,10 @@ const messages = {
     "reinsert.running": "Reinserting...",
     "reinsert.done": "Working copy written and verified: {path}",
     "reinsert.applied": "{applied} translations applied · {kept} kept original",
+    "reinsert.advanced": "Advanced mode: reinsert even with validation errors",
+    "reinsert.advancedHint":
+      "Entries flagged with errors go in as-is — broken placeholders or oversized text may corrupt the game. Use only if you know what you are doing.",
+    "reinsert.forced": "{n} entries with validation errors were forced in (advanced mode)",
     "patch.export": "Export patch",
     "patch.exporting": "Building patch...",
     "patch.done":

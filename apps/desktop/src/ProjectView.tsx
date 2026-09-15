@@ -86,6 +86,7 @@ export default function ProjectView({
 
   const [reinserting, setReinserting] = useState(false);
   const [reinsertOutcome, setReinsertOutcome] = useState<ReinsertOutcome | null>(null);
+  const [allowErrors, setAllowErrors] = useState(false);
   const [patching, setPatching] = useState(false);
   const [patchOutcome, setPatchOutcome] = useState<PatchExportOutcome | null>(null);
   const [patchFormat, setPatchFormat] = useState<"auto" | "ips" | "bps">("auto");
@@ -193,7 +194,7 @@ export default function ProjectView({
     try {
       const outcome = await invoke<ReinsertOutcome>("reinsert_project", {
         projectDir,
-        allowErrors: false,
+        allowErrors,
       });
       setReinsertOutcome(outcome);
       await reloadEntries();
@@ -694,6 +695,15 @@ export default function ProjectView({
         <div className="panel">
           <h3>{t("reinsert.title")}</h3>
           <p className="hint left">{t("reinsert.hint")}</p>
+          <label className="checkline" title={t("reinsert.advancedHint")}>
+            <input
+              type="checkbox"
+              checked={allowErrors}
+              onChange={(e) => setAllowErrors(e.target.checked)}
+            />
+            {t("reinsert.advanced")}
+          </label>
+          {allowErrors && <div className="warn">{t("reinsert.advancedHint")}</div>}
           <div className="actions">
             <select
               value={patchFormat}
@@ -734,6 +744,11 @@ export default function ProjectView({
                   <li key={c}>{c}</li>
                 ))}
               </ul>
+              {reinsertOutcome.forcedErrors > 0 && (
+                <div className="warn">
+                  {t("reinsert.forced", { n: reinsertOutcome.forcedErrors })}
+                </div>
+              )}
             </>
           )}
           {patchOutcome && (
