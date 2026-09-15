@@ -20,7 +20,7 @@ motivo: fim-de-feature
 | Settings + secrets | pronto (toml + secrets 0600) | `apps/desktop/src-tauri/src/settings.rs` | keyring qdo distribuir |
 | UI tradução | pronto (config/progresso/cancel/glossário) | `apps/desktop/src/ProjectView.tsx` | — |
 | Editor + validação | pronto (tokens/bytes/statuses/filtros) | `crates/core/src/validate.rs` + ProjectView | — |
-| Reinserção (RTSF + GBA conservador) | pronto (round-trip testado) | `crates/core/src/{adapters/{rtsf,gba},reinsert}.rs` | NES/SNES no mesmo padrão |
+| Reinserção (RTSF, GBA, NDS, NES, SNES) | pronto (round-trips testados; SNES recalcula soma canônica) | `crates/core/src/adapters/` + `reinsert.rs` | — |
 | Patch export IPS + BPS + manifest | pronto (DoD testado; BPS valida CRC triplo) | `crates/core/src/patch.rs` | delta-create BPS so se precisar de patch menor |
 | Comunidade (Sprint 7) | pronto | `docs/ADAPTERS.md`, README matrix, `.github/` templates | repo público qdo Rhuan decidir |
 | NDS (Sprint 8) | pronto (Experimental: FS + in-place; patch via BPS) | `crates/core/src/adapters/nds.rs` | — |

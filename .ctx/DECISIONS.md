@@ -166,3 +166,13 @@
 **Consequencias:** NDS real e truncamentos exportaveis; zero deps novas; patch BPS recusa arquivo errado com mensagem clara (CRCs nomeados).
 
 **Driver:** rhuan (pediu o BPS) + claude (ponytail no create linear).
+
+## [2026-09-15] SNES: verify pela soma REAL; fixture com checksum de fabrica [evolui a decisao de 14/09]
+
+**Contexto:** em 14/09 o probe/fixture validavam so o PAR complement^checksum (barato p/ deteccao). Com reinsercao SNES, o apply recalcula o par com a soma canonica (`snes_sum`: potencia de 2 direta; resto espelhado ate a parte baixa; layout exotico cai em soma simples — consistente porque o verify usa o MESMO algoritmo).
+
+**Decisao:** `verify` do SNES agora confere a SOMA REAL (mais forte que o probe, que segue barato só no par). `make_snes_lorom` passou a gravar o checksum verdadeiro. O probe nao mudou.
+
+**Consequencias:** working copy de SNES sai com checksum que emulador/hardware aceitam; NES nao tem checksum de header (iNES) — finalize e noop.
+
+**Driver:** rhuan (pediu NES/SNES) + claude.

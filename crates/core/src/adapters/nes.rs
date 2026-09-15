@@ -1,7 +1,14 @@
-//! Probe de NES (formato iNES / NES 2.0: magic "NES\x1A" + tamanhos de PRG/CHR).
+//! Adapter de NES (formato iNES / NES 2.0: magic "NES\x1A" + tamanhos de PRG/CHR).
+//!
+//! Reinsercao CONSERVADORA (Experimental): strings ASCII traduzidas in-place no
+//! espaco original. Muitos jogos NES usam tabelas de tiles proprias — para esses,
+//! use o scanner com tabela `.tbl`; o in-place cobre os que guardam texto ASCII.
+//! iNES nao tem checksum de header: nada a recalcular.
 
-use crate::adapter::{GameAdapter, GameInput};
-use crate::types::{AdapterCapabilities, Platform, ProbeResult};
+use crate::adapter::{AppliedImage, GameAdapter, GameInput, VerificationReport};
+use crate::error::{CoreError, Result};
+use crate::scan::{scan_bytes, ScanConfig, ScanEncoding};
+use crate::types::{AdapterCapabilities, Platform, ProbeResult, SupportLevel, TextEntry};
 
 pub struct NesAdapter;
 
@@ -22,7 +29,17 @@ impl GameAdapter for NesAdapter {
     }
 
     fn capabilities(&self) -> AdapterCapabilities {
-        AdapterCapabilities::detect_only()
+        AdapterCapabilities {
+            detect: true,
+            extract: true,
+            reinsert: true, // conservadora: in-place, sem relocacao
+            patch: true,
+            compression: false,
+            pointer_relocation: false,
+            font_table: false,
+            experimental: true,
+            support_level: SupportLevel::Experimental,
+        }
     }
 
     fn probe(&self, input: &GameInput) -> ProbeResult {
@@ -60,6 +77,69 @@ impl GameAdapter for NesAdapter {
             evidence,
             ..ProbeResult::no_match(self.id(), self.platform())
         }
+    }
+
+    /// Extracao conservadora: scan ASCII com `max_bytes` = espaco original.
+    /// Ids identicos aos do scanner generico — sem duplicatas no projeto.
+    fn extract_structured(&self, data: &[u8]) -> Result<Vec<TextEntry>> {
+        if data.len() < HEADER_LEN || &data[0..4] != MAGIC {
+            return Err(CoreError::Project(
+                "nes: arquivo sem header iNES valido".to_string(),
+            ));
+        }
+        let outcome = scan_bytes(
+            data,
+            &ScanConfig {
+                encoding: ScanEncoding::Ascii,
+                ..ScanConfig::default()
+            },
+        )?;
+        let mut entries = outcome.entries;
+        for e in entries.iter_mut() {
+            e.max_bytes = Some(e.original_bytes.len());
+            e.context = Some("in-place: traducao limitada ao espaco original".to_string());
+        }
+        Ok(entries)
+    }
+
+    fn apply_text(&self, data: &[u8], entries: &[TextEntry]) -> Result<AppliedImage> {
+        if data.len() < HEADER_LEN || &data[0..4] != MAGIC {
+            return Err(CoreError::Project(
+                "nes: arquivo sem header iNES valido".to_string(),
+            ));
+        }
+        // iNES nao tem checksum: nada a finalizar.
+        super::inplace::apply_in_place(data, entries, |_| {})
+    }
+
+    fn verify(&self, data: &[u8]) -> Result<VerificationReport> {
+        let mut checks = Vec::new();
+        let mut problems = Vec::new();
+
+        if data.len() < HEADER_LEN || &data[0..4] != MAGIC {
+            problems.push("magic iNES ausente".to_string());
+        } else {
+            checks.push("magic iNES preservado".to_string());
+            let prg = data[4] as usize * 16 * 1024;
+            let chr = data[5] as usize * 8 * 1024;
+            let trainer = if data[6] & 0x04 != 0 { 512 } else { 0 };
+            let expected = HEADER_LEN + trainer + prg + chr;
+            if data.len() >= expected {
+                checks.push("tamanho consistente com o header".to_string());
+            } else {
+                problems.push("arquivo menor que o declarado no header".to_string());
+            }
+            match self.extract_structured(data) {
+                Ok(entries) => checks.push(format!("{} strings re-extraidas", entries.len())),
+                Err(e) => problems.push(format!("re-extracao falhou: {e}")),
+            }
+        }
+
+        Ok(VerificationReport {
+            ok: problems.is_empty(),
+            checks,
+            problems,
+        })
     }
 }
 

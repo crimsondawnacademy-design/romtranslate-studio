@@ -42,8 +42,8 @@ universal**. O que cada plataforma tem hoje:
 | Fixture RTSF (demo) | ✅ | ✅ | ✅ completa | ✅ com relocação + ponteiros | ✅ |
 | Game Boy Advance | ✅ | ✅ | ⚠️ experimental (in-place) | ⚠️ experimental (in-place) | ✅ |
 | Nintendo DS | ✅ (CRC do header) | ✅ | ⚠️ experimental (por arquivo do filesystem, ASCII + UTF-16) | ⚠️ experimental (in-place) | ✅ (BPS acima de 16 MiB) |
-| NES | ✅ | ✅ | — | — | — |
-| Super Nintendo | ✅ | ✅ | — | — | — |
+| NES | ✅ | ✅ | ⚠️ experimental (in-place; jogos com tabela própria: use `.tbl`) | ⚠️ experimental (in-place) | ✅ |
+| Super Nintendo | ✅ | ✅ | ⚠️ experimental (in-place) | ⚠️ experimental (in-place, checksum interno recalculado) | ✅ |
 | GameCube | ✅ (magic + título) | — | — | — | — |
 | Wii | ✅ (ISO e WBFS) | — | — | — | — |
 | Wii U | planejado | — | — | — | — |

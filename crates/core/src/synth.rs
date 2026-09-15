@@ -31,7 +31,8 @@ fn plant(rom: &mut [u8], offset: usize, bytes: &[u8]) {
     rom[offset..offset + bytes.len()].copy_from_slice(bytes);
 }
 
-/// NES (iNES): header + 16 KiB PRG + 8 KiB CHR coerentes com o declarado.
+/// NES (iNES): header + 16 KiB PRG + 8 KiB CHR coerentes com o declarado,
+/// filler nao-printable (>= 0x80) e strings ASCII plantadas para o scanner.
 pub fn make_nes_rom() -> Vec<u8> {
     let prg_units = 1usize;
     let chr_units = 1usize;
@@ -42,8 +43,10 @@ pub fn make_nes_rom() -> Vec<u8> {
     rom[6] = 0x00;
     rom[7] = 0x00;
     for (i, b) in rom.iter_mut().enumerate().skip(16) {
-        *b = (i % 251) as u8; // conteudo deterministico, nao-texto
+        *b = 0x80 | ((i % 0x60) as u8); // deterministico e nunca printable
     }
+    plant(&mut rom, 0x100, b"PLAY BALL!\0");
+    plant(&mut rom, 0x120, b"GAME OVER\0");
     rom
 }
 
@@ -63,8 +66,13 @@ pub fn make_snes_lorom(title: &str) -> Vec<u8> {
     rom[h + 0x17] = 0x08; // 256 KiB declarado (plausibilidade nao verificada no probe)
     rom[h + 0x18] = 0x00; // sem SRAM
     rom[h + 0x19] = 0x01; // regiao
-                          // Probe valida o PAR complement^checksum == 0xFFFF, nao a soma real do arquivo.
-    let checksum: u16 = 0x1234;
+
+    // Strings plantadas no corpo, longe do header interno.
+    plant(&mut rom, 0x1000, b"MAGIC SWORD\0");
+    plant(&mut rom, 0x1010, b"NEW QUEST\0");
+
+    // Par complement/checksum com a SOMA REAL (campos ainda zerados + 0x1FE).
+    let checksum = crate::adapters::snes::snes_sum(&rom).wrapping_add(0x1FE);
     rom[h + 0x1C..h + 0x1E].copy_from_slice(&(checksum ^ 0xFFFF).to_le_bytes());
     rom[h + 0x1E..h + 0x20].copy_from_slice(&checksum.to_le_bytes());
     rom

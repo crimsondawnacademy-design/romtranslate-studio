@@ -241,9 +241,9 @@ fn reinsert_flow_blocks_errors_and_never_touches_original() {
 
 #[test]
 fn probe_only_adapters_refuse_structured_calls() {
-    use romtranslate_core::adapters::nes::NesAdapter;
-    let data = synth::make_nes_rom();
-    assert!(NesAdapter.extract_structured(&data).is_err());
-    assert!(NesAdapter.apply_text(&data, &[]).is_err());
-    assert!(NesAdapter.verify(&data).is_err());
+    use romtranslate_core::adapters::gamecube::GameCubeAdapter;
+    let data = synth::make_gc_disc_header();
+    assert!(GameCubeAdapter.extract_structured(&data).is_err());
+    assert!(GameCubeAdapter.apply_text(&data, &[]).is_err());
+    assert!(GameCubeAdapter.verify(&data).is_err());
 }

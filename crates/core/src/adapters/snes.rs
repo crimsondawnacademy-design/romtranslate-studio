@@ -1,9 +1,16 @@
-//! Probe de SNES. Nao ha magic number: a deteccao pontua candidatos de header
+//! Adapter de SNES. Nao ha magic number: a deteccao pontua candidatos de header
 //! interno em 0x7FC0 (LoROM) e 0xFFC0 (HiROM), com suporte a copier header de
 //! 512 bytes (.smc). Evidencias: par checksum/complement, titulo ASCII e map mode.
+//!
+//! Reinsercao CONSERVADORA (Experimental): strings ASCII in-place no espaco
+//! original, com o par checksum/complement do header interno recalculado pela
+//! SOMA CANONICA do corpo (copier header fora; resto espelhado quando o
+//! tamanho nao e potencia de 2).
 
-use crate::adapter::{GameAdapter, GameInput};
-use crate::types::{AdapterCapabilities, Platform, ProbeResult};
+use crate::adapter::{AppliedImage, GameAdapter, GameInput, VerificationReport};
+use crate::error::{CoreError, Result};
+use crate::scan::{scan_bytes, ScanConfig, ScanEncoding};
+use crate::types::{AdapterCapabilities, Platform, ProbeResult, SupportLevel, TextEntry};
 
 pub struct SnesAdapter;
 
@@ -79,6 +86,72 @@ fn score_candidate(
     })
 }
 
+/// Copier header (.smc): 512 bytes extras no inicio do arquivo.
+fn copier_len(total: usize) -> usize {
+    if total % 1024 == 512 {
+        512
+    } else {
+        0
+    }
+}
+
+/// Melhor candidato de header interno no arquivo: (offset absoluto, mapping, copier).
+pub fn find_header(data: &[u8]) -> Option<(usize, &'static str, usize)> {
+    let copier = copier_len(data.len());
+    let mut best: Option<(Candidate, usize)> = None;
+    for (offset, mapping, hirom) in [
+        (LOROM_HEADER, "LoROM", false),
+        (HIROM_HEADER, "HiROM", true),
+    ] {
+        if let Some(c) = score_candidate(data, copier + offset, mapping, hirom) {
+            if best.as_ref().is_none_or(|(b, _)| c.score > b.score) {
+                best = Some((c, copier + offset));
+            }
+        }
+    }
+    best.filter(|(c, _)| c.score > 0.2)
+        .map(|(c, abs)| (abs, c.mapping, copier))
+}
+
+/// Soma canonica SNES (u16 wrapping) do corpo da ROM. Tamanho potencia de 2:
+/// soma direta; senao, o resto e espelhado ate preencher a parte baixa (regra
+/// dos dumps A+B); layout mais exotico cai em soma simples — o verify usa o
+/// MESMO algoritmo, entao o fluxo fica consistente.
+pub fn snes_sum(body: &[u8]) -> u16 {
+    fn sum(data: &[u8]) -> u32 {
+        data.iter().fold(0u32, |a, &b| a.wrapping_add(b as u32))
+    }
+    let len = body.len();
+    if len == 0 {
+        return 0;
+    }
+    if len.is_power_of_two() {
+        return sum(body) as u16;
+    }
+    let half = 1usize << (usize::BITS - 1 - len.leading_zeros());
+    let rest = &body[half..];
+    if rest.len().is_power_of_two() && half.is_multiple_of(rest.len()) {
+        let mult = (half / rest.len()) as u32;
+        sum(&body[..half]).wrapping_add(sum(rest).wrapping_mul(mult)) as u16
+    } else {
+        sum(body) as u16
+    }
+}
+
+/// Recalcula o par complement/checksum no header interno: campos zerados
+/// durante a soma + 0x1FE (a contribuicao fixa de qualquer par valido).
+fn recalc_internal_checksum(out: &mut [u8]) {
+    let Some((header_abs, _, copier)) = find_header(out) else {
+        return;
+    };
+    out[header_abs + COMPLEMENT..header_abs + COMPLEMENT + 4].fill(0);
+    let checksum = snes_sum(&out[copier..]).wrapping_add(0x1FE);
+    let complement = checksum ^ 0xFFFF;
+    out[header_abs + COMPLEMENT..header_abs + COMPLEMENT + 2]
+        .copy_from_slice(&complement.to_le_bytes());
+    out[header_abs + CHECKSUM..header_abs + CHECKSUM + 2].copy_from_slice(&checksum.to_le_bytes());
+}
+
 impl GameAdapter for SnesAdapter {
     fn id(&self) -> &'static str {
         "snes.generic"
@@ -93,7 +166,17 @@ impl GameAdapter for SnesAdapter {
     }
 
     fn capabilities(&self) -> AdapterCapabilities {
-        AdapterCapabilities::detect_only()
+        AdapterCapabilities {
+            detect: true,
+            extract: true,
+            reinsert: true, // conservadora: in-place, sem relocacao
+            patch: true,
+            compression: false,
+            pointer_relocation: false,
+            font_table: false,
+            experimental: true,
+            support_level: SupportLevel::Experimental,
+        }
     }
 
     fn probe(&self, input: &GameInput) -> ProbeResult {
@@ -132,6 +215,80 @@ impl GameAdapter for SnesAdapter {
             evidence: cand.evidence,
             ..ProbeResult::no_match(self.id(), self.platform())
         }
+    }
+
+    /// Extracao conservadora: scan ASCII com `max_bytes` = espaco original.
+    fn extract_structured(&self, data: &[u8]) -> Result<Vec<TextEntry>> {
+        if find_header(data).is_none() {
+            return Err(CoreError::Project(
+                "snes: header interno nao encontrado (LoROM/HiROM)".to_string(),
+            ));
+        }
+        let outcome = scan_bytes(
+            data,
+            &ScanConfig {
+                encoding: ScanEncoding::Ascii,
+                ..ScanConfig::default()
+            },
+        )?;
+        let mut entries = outcome.entries;
+        for e in entries.iter_mut() {
+            e.max_bytes = Some(e.original_bytes.len());
+            e.context = Some("in-place: traducao limitada ao espaco original".to_string());
+        }
+        Ok(entries)
+    }
+
+    /// In-place + recalculo do par checksum/complement do header interno.
+    fn apply_text(&self, data: &[u8], entries: &[TextEntry]) -> Result<AppliedImage> {
+        if find_header(data).is_none() {
+            return Err(CoreError::Project(
+                "snes: header interno nao encontrado (LoROM/HiROM)".to_string(),
+            ));
+        }
+        super::inplace::apply_in_place(data, entries, recalc_internal_checksum)
+    }
+
+    fn verify(&self, data: &[u8]) -> Result<VerificationReport> {
+        let mut checks = Vec::new();
+        let mut problems = Vec::new();
+
+        match find_header(data) {
+            None => problems.push("header interno nao encontrado".to_string()),
+            Some((header_abs, mapping, copier)) => {
+                checks.push(format!("header interno {mapping} em 0x{header_abs:X}"));
+                let complement = u16::from_le_bytes([
+                    data[header_abs + COMPLEMENT],
+                    data[header_abs + COMPLEMENT + 1],
+                ]);
+                let checksum = u16::from_le_bytes([
+                    data[header_abs + CHECKSUM],
+                    data[header_abs + CHECKSUM + 1],
+                ]);
+                // Soma real com os 4 bytes do par zerados + contribuicao fixa 0x1FE.
+                let mut body = data[copier..].to_vec();
+                let rel = header_abs - copier;
+                body[rel + COMPLEMENT..rel + COMPLEMENT + 4].fill(0);
+                let expected = snes_sum(&body).wrapping_add(0x1FE);
+                if checksum == expected && complement == (checksum ^ 0xFFFF) {
+                    checks.push("checksum interno bate com a soma real do arquivo".to_string());
+                } else {
+                    problems.push(format!(
+                        "checksum interno invalido: header 0x{checksum:04X}, soma real 0x{expected:04X}"
+                    ));
+                }
+                match self.extract_structured(data) {
+                    Ok(entries) => checks.push(format!("{} strings re-extraidas", entries.len())),
+                    Err(e) => problems.push(format!("re-extracao falhou: {e}")),
+                }
+            }
+        }
+
+        Ok(VerificationReport {
+            ok: problems.is_empty(),
+            checks,
+            problems,
+        })
     }
 }
 
