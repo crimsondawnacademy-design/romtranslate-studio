@@ -138,9 +138,15 @@ pub(super) fn verify_iso(
             Err(e) => problems.push(format!("re-extracao falhou: {e}")),
         }
         if map == SectorMap::Raw2352 {
-            let (ok_count, bad) = iso9660::raw_edc_scan(data);
+            let (ok_count, bad, no_sync) = iso9660::raw_edc_scan(data);
             if bad == 0 {
-                checks.push(format!("EDC integro em {ok_count} setores"));
+                let mut line = format!("EDC integro em {ok_count} setores");
+                if no_sync > 0 {
+                    line.push_str(&format!(
+                        " ({no_sync} setores sem sync — audio? — ignorados)"
+                    ));
+                }
+                checks.push(line);
             } else {
                 problems.push(format!("{bad} setores com EDC invalido"));
             }

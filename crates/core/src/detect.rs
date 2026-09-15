@@ -25,7 +25,11 @@ pub struct InspectionReport {
 }
 
 /// Pipeline de inspecao do Sprint 1: hash + probe de todos os adapters.
+/// Um `.cue` e resolvido pro BIN do track de dados antes de tudo — o report
+/// (path/hash/probes) e sobre o BIN, que e o que o projeto vai usar.
 pub fn inspect(path: &Path) -> Result<InspectionReport> {
+    let (resolved, cue) = crate::cue::resolve_source(path)?;
+    let path = resolved.as_path();
     let input = GameInput::load(path)?;
     let sha256 = sha256_file(path)?;
 
@@ -38,6 +42,21 @@ pub fn inspect(path: &Path) -> Result<InspectionReport> {
         })
         .filter(|r| r.confidence > 0.0)
         .collect();
+    if let Some(cue) = cue {
+        let note = format!(
+            "cue sheet: track de dados {} ({}) em \"{}\"; {} track(s) de audio intactos",
+            cue.data_track,
+            cue.data_mode,
+            cue.bin_path
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            cue.audio_tracks
+        );
+        for r in &mut results {
+            r.evidence.insert(0, note.clone());
+        }
+    }
     results.sort_by(|a, b| b.confidence.total_cmp(&a.confidence));
 
     let best = results

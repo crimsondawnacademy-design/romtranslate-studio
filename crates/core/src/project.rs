@@ -28,7 +28,9 @@ pub struct CreateProjectArgs {
 
 /// Cria um projeto local: diretorio `.rtsproj` + `project.json`.
 /// O arquivo original NUNCA e copiado nem alterado — guardamos path + SHA-256.
-pub fn create_project(args: CreateProjectArgs) -> Result<GameProject> {
+/// Um `.cue` como origem e resolvido pro BIN do track de dados.
+pub fn create_project(mut args: CreateProjectArgs) -> Result<GameProject> {
+    args.source_path = crate::cue::resolve_source(&args.source_path)?.0;
     if !args.source_path.is_file() {
         return Err(CoreError::Project(format!(
             "arquivo de origem nao encontrado: {}",

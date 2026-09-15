@@ -295,19 +295,26 @@ pub fn apply_iso(
     Ok(applied)
 }
 
-/// Confere o EDC de todos os setores de uma imagem raw 2352.
-/// Retorna (setores validos, setores invalidos); setores sem EDC nao contam.
-pub fn raw_edc_scan(data: &[u8]) -> (usize, usize) {
+/// Confere o EDC de todos os setores de dados de uma imagem raw 2352.
+/// Setor sem o sync pattern nao e setor de dados (track de audio num dump
+/// single-file, por exemplo) e entra no terceiro contador, nao em "invalido".
+/// Retorna (validos, invalidos, sem_sync); setores sem EDC nao contam.
+pub fn raw_edc_scan(data: &[u8]) -> (usize, usize, usize) {
     let mut ok = 0;
     let mut bad = 0;
+    let mut no_sync = 0;
     for sector in data.as_chunks::<SECTOR_RAW>().0 {
+        if sector[..SYNC.len()] != SYNC {
+            no_sync += 1;
+            continue;
+        }
         match super::cdrom::sector_edc_ok(sector) {
             Some(true) => ok += 1,
             Some(false) => bad += 1,
             None => {}
         }
     }
-    (ok, bad)
+    (ok, bad, no_sync)
 }
 
 pub fn identify_playstation(data: &[u8], map: SectorMap) -> Option<(PsKind, String)> {

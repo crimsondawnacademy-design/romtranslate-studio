@@ -451,6 +451,17 @@ pub fn make_ps1_bin() -> Vec<u8> {
     wrap_raw_2352(&plain)
 }
 
+/// Dump single-file multi-track: o BIN de PS1 com setores de "audio" (PCM
+/// cru, sem sync/header/EDC) anexados — layout de cue com FILE unico.
+pub fn make_ps1_bin_with_audio() -> (Vec<u8>, usize) {
+    let mut bin = make_ps1_bin();
+    let audio_sectors = 3usize;
+    for s in 0..audio_sectors {
+        bin.extend((0..2352).map(|i| ((i * 31 + s * 17 + 7) & 0xFF) as u8));
+    }
+    (bin, audio_sectors)
+}
+
 /// PS2: ISO 2048 com SYSTEM.CNF (BOOT2=) e strings num subdiretorio.
 pub fn make_ps2_iso() -> Vec<u8> {
     let mut pak = vec![0u8; 1024];

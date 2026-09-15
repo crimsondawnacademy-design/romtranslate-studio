@@ -53,7 +53,10 @@ universal**. O que cada plataforma tem hoje:
 
 \* BIN raw de PS1 (2352 bytes/setor): a reinserção regenera o EDC/ECC
 (ECMA-130) de cada setor alterado, e o verify confere o EDC da imagem inteira.
-Imagens multi-track (`.cue` com áudio) ainda não: use o track de dados.
+Dump multi-track? Abra o **`.cue`**: o app resolve o track de dados sozinho
+(layout Redump — dados como primeiro track do FILE) e os tracks de áudio
+ficam intactos — o verify ignora setores sem sync. A working copy e o patch
+são do BIN de dados; o `.cue` original continua valendo pra ele.
 
 O export escolhe o formato sozinho: **IPS** quando cabe (máxima
 compatibilidade) e **BPS** para arquivos maiores ou que encolhem — o BPS ainda
