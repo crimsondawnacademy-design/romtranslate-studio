@@ -6,6 +6,7 @@
 
 | data | maquina | ferramenta | modelo | o_que_fez | arquivos_tocados |
 |---|---|---|---|---|---|
+| 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | Streaming PS2: mmap (fileio::read_view) na extração/verify/patch, reinserção streaming p/ ISO >2 GiB (plan_in_place + escrita pontual), verify_bps_against sem materializar target | `crates/core/src/{fileio,reinsert,patch}.rs`, `crates/core/src/adapters/{inplace,ps2}.rs`, `crates/core/tests/{streaming,bps}.rs` |
 | 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | Multi-track .cue: parser+resolução pro track de dados (inspect/create_project), verify ignora setores sem sync (áudio) | `crates/core/src/cue.rs`, `crates/core/src/{detect,project}.rs`, `crates/core/src/adapters/{iso9660,ps1}.rs`, `crates/core/tests/cue.rs` |
 | 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | EDC/ECC ECMA-130 (módulo cdrom, golden do ecm.c compilado): reinserção direta em BIN raw de PS1 + verify de EDC + fixtures com EDC/ECC reais | `crates/core/src/adapters/{cdrom,iso9660,ps1,mod}.rs`, `crates/core/src/synth.rs`, `crates/core/tests/playstation.rs`, `README.md` |
 | 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | PS1/PS2/PSP: parser ISO 9660 compartilhado (2048+raw), BOOT/BOOT2, SFO; extração por arquivo e in-place em 2048; fixtures ISO sintéticas | `crates/core/src/adapters/{iso9660,ps1,ps2,psp}.rs`, `crates/core/tests/playstation.rs` |

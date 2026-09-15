@@ -48,7 +48,7 @@ universal**. O que cada plataforma tem hoje:
 | Wii | ✅ (ISO e WBFS) | — | — | — | — |
 | Wii U | ✅ (WUX e RPX/RPL) | — | — | — | — |
 | PlayStation (PS1) | ✅ (ISO 9660 + SYSTEM.CNF) | ✅ | ⚠️ experimental (por arquivo; BIN raw por setor) | ⚠️ experimental (in-place; BIN raw com EDC/ECC regenerado)* | ✅ |
-| PlayStation 2 | ✅ (BOOT2 no SYSTEM.CNF) | ✅ | ⚠️ experimental (por arquivo; imagens até 2 GiB) | ⚠️ experimental (in-place) | ✅ (BPS) |
+| PlayStation 2 | ✅ (BOOT2 no SYSTEM.CNF) | ✅ | ⚠️ experimental (por arquivo; DVD inteiro via mmap, sem teto de RAM) | ⚠️ experimental (in-place; >2 GiB em streaming) | ✅ (BPS, round-trip streaming) |
 | PSP | ✅ (UMD + PARAM.SFO com título) | ✅ | ⚠️ experimental (por arquivo) | ⚠️ experimental (in-place) | ✅ (BPS) |
 
 \* BIN raw de PS1 (2352 bytes/setor): a reinserção regenera o EDC/ECC

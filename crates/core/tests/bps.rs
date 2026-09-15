@@ -7,7 +7,9 @@ use std::path::PathBuf;
 use romtranslate_core::adapter::GameAdapter;
 use romtranslate_core::adapters::rtsf::RtsfAdapter;
 use romtranslate_core::db::ProjectDb;
-use romtranslate_core::patch::{apply_bps, create_bps, export_patch, PatchFormat};
+use romtranslate_core::patch::{
+    apply_bps, create_bps, export_patch, verify_bps_against, PatchFormat,
+};
 use romtranslate_core::project::{create_project, CreateProjectArgs};
 use romtranslate_core::reinsert::reinsert_project;
 use romtranslate_core::synth;
@@ -143,4 +145,34 @@ fn export_auto_picks_ips_for_small_and_forced_bps_works() {
     let manifest: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&forced.manifest_path).unwrap()).unwrap();
     assert_eq!(manifest["patch_format"], "BPS");
+}
+
+#[test]
+fn verify_bps_against_mirrors_apply_without_materializing() {
+    let original: Vec<u8> = (0..40_000u32).map(|i| (i * 13 + 5) as u8).collect();
+    let mut modified = original.clone();
+    modified[1_000..1_020].copy_from_slice(b"TRADUZIDO AQUI MESMO");
+    modified[30_000] ^= 0xFF;
+    let patch = roundtrip(&original, &modified);
+
+    // Target correto passa; qualquer divergencia reprova.
+    verify_bps_against(&original, &patch, &modified).unwrap();
+    let mut wrong = modified.clone();
+    wrong[2_000] ^= 0x01;
+    assert!(verify_bps_against(&original, &patch, &wrong).is_err());
+    let mut truncated = modified.clone();
+    truncated.pop();
+    assert!(verify_bps_against(&original, &patch, &truncated)
+        .unwrap_err()
+        .to_string()
+        .contains("bytes"));
+    // Patch corrompido tambem reprova (CRC do proprio patch).
+    let mut bad_patch = patch.clone();
+    bad_patch[10] ^= 0xFF;
+    assert!(verify_bps_against(&original, &bad_patch, &modified).is_err());
+    // Divergencia so no ULTIMO trecho (regiao SourceRead final) tambem pega.
+    let mut tail_wrong = modified.clone();
+    let last = tail_wrong.len() - 1;
+    tail_wrong[last] ^= 0x01;
+    assert!(verify_bps_against(&original, &patch, &tail_wrong).is_err());
 }

@@ -144,17 +144,8 @@ async fn extract_structured(project_dir: String) -> Result<usize, String> {
         let adapter = romtranslate_core::adapters::find(&game.adapter_id).ok_or_else(|| {
             romtranslate_core::CoreError::Project(format!("adapter {} nao existe", game.adapter_id))
         })?;
-        let size = std::fs::metadata(&game.source_path)
-            .map_err(|e| romtranslate_core::CoreError::io(&game.source_path, e))?
-            .len();
-        if size > romtranslate_core::adapter::IN_MEMORY_MAX {
-            return Err(romtranslate_core::CoreError::FileTooLarge {
-                size,
-                limit: romtranslate_core::adapter::IN_MEMORY_MAX,
-            });
-        }
-        let data = std::fs::read(&game.source_path)
-            .map_err(|e| romtranslate_core::CoreError::io(&game.source_path, e))?;
+        // mmap: DVD de PS2 (>2 GiB) extrai sem carregar o arquivo em RAM.
+        let data = romtranslate_core::fileio::read_view(&game.source_path)?;
         let entries = adapter.extract_structured(&data)?;
         ProjectDb::open(&dir)?.upsert_entries(&entries)
     })

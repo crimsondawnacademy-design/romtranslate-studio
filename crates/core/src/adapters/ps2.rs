@@ -1,7 +1,8 @@
 //! Adapter de PlayStation 2: ISO 9660 (DVD, 2048/setor; CD raw tambem
 //! detectado) com SYSTEM.CNF contendo `BOOT2 =` — o discriminador canonico
-//! contra PS1. In-place em 2048; imagens acima do limite em memoria (2 GiB)
-//! sao detectaveis mas nao extraiveis ainda (streaming futuro).
+//! contra PS1. In-place em 2048. DVD acima do teto em memoria (2 GiB):
+//! extracao/verify por mmap (`fileio::read_view`) e reinsercao streaming
+//! (`reinsert::stream_apply_iso`) — o dual layer de 8.5 GiB passa inteiro.
 
 use super::iso9660::{
     self, apply_iso, detect_map, extract_ascii_by_file, identify_playstation, parse_pvd, walk,

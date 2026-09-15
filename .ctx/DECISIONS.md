@@ -244,3 +244,27 @@ sobrepostos no mesmo setor — o passo Q lê a paridade P recém-escrita
 PS1/PS2/PSP confere EDC da imagem raw inteira; fixtures raw do synth agora
 nascem com EDC/ECC válidos (subheader XA form 1). Multi-track (.cue com
 áudio) segue fora — usuário aponta o track de dados.
+
+## 2026-09-15 — Streaming pra DVD de PS2: mmap na leitura, escrita pontual na reinserção
+
+**Contexto:** DVD de PS2 tem 4.7–8.5 GiB; o teto em memória (IN_MEMORY_MAX,
+2 GiB) barrava extração e reinserção. Mac de trabalho tem 8 GB de RAM.
+
+**Decisão:** leitura por memory-map (`fileio::read_view`, memmap2) — todas
+as APIs continuam recebendo `&[u8]`, o SO pagina sob demanda e nada muda
+nos adapters. Reinserção acima do teto vira streaming: `plan_in_place`
+(validação anti-drift + bytes prontos, fatorado do apply) + cópia do
+arquivo + seek/write só nos trechos alterados. Guard duro: streaming só
+pra ISO 9660 2048/setor, formato sem checksum global nem EDC/ECC — raw
+2352 é CD (<1 GiB) e continua no caminho em memória. Round-trip do BPS
+gigante: `verify_bps_against` compara o apply contra a working copy sem
+alocar o target (TargetCopy lê do expected, prefixo já provado idêntico;
+mais estrito que o apply, e nossos patches nem emitem TargetCopy).
+
+**Como testa sem DVD real:** `reinsert_project_with_limit` injeta o teto —
+teste diferencial força streaming num ISO sintético pequeno e exige
+resultado byte a byte idêntico ao caminho em memória.
+
+**Consequência:** extração/reinserção/patch de DVD dual layer inteiro com
+RAM limitada ao page cache. Premissa documentada do mmap: ninguém altera
+o arquivo durante a operação (a mesma da leitura normal).

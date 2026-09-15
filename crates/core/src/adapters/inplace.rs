@@ -30,18 +30,21 @@ fn encode(entry_id: &str, text: &str, encoding: &TextEncoding) -> Result<Option<
     }
 }
 
-/// Aplica traducoes in-place sobre `data`. Regras:
+/// Plano de escrita in-place: pares (offset, bytes ja com padding) validados
+/// contra a imagem original — quem aplica decide se e num Vec em memoria
+/// (`apply_in_place`) ou direto num arquivo (reinsercao streaming).
+pub struct InPlacePlan {
+    pub writes: Vec<(usize, Vec<u8>)>,
+    pub report: ApplyReport,
+}
+
+/// Valida e monta o plano de escritas. Regras:
 /// - sanity anti-drift: os bytes atuais precisam ser identicos a `original_bytes`;
 /// - traducao serializada tem que caber no espaco original;
 /// - sobra preenchida com terminador (0x00) se o run original era terminado,
-///   senao espaco (fixed-width) — em ASCII/UTF-8; UTF-16 sempre 0x00 (par);
-/// - `finalize` roda por ultimo (recalculo de checksums do formato).
-pub fn apply_in_place(
-    data: &[u8],
-    entries: &[TextEntry],
-    finalize: impl FnOnce(&mut [u8]),
-) -> Result<AppliedImage> {
-    let mut out = data.to_vec();
+///   senao espaco (fixed-width) — em ASCII/UTF-8; UTF-16 sempre 0x00 (par).
+pub fn plan_in_place(data: &[u8], entries: &[TextEntry]) -> Result<InPlacePlan> {
+    let mut writes = Vec::new();
     let mut report = ApplyReport {
         applied: 0,
         kept_original: 0,
@@ -60,14 +63,14 @@ pub fn apply_in_place(
         };
         let end = offset
             .checked_add(slot)
-            .filter(|&e| e <= out.len())
+            .filter(|&e| e <= data.len())
             .ok_or_else(|| {
                 CoreError::Project(format!(
                     "entry {} aponta para fora do arquivo (0x{offset:X})",
                     entry.id
                 ))
             })?;
-        if out[offset..end] != entry.original_bytes[..] {
+        if data[offset..end] != entry.original_bytes[..] {
             return Err(CoreError::Project(format!(
                 "bytes em 0x{offset:X} nao batem com a entry {} — arquivo diferente do que \
                  foi extraido? Re-extraia antes de reinserir",
@@ -96,11 +99,30 @@ pub fn apply_in_place(
             TextEncoding::Utf16Le | TextEncoding::Utf16Be
         );
         let pad = if terminated || is_utf16 { 0x00 } else { 0x20 };
-        out[offset..end].fill(pad);
-        out[offset..offset + bytes.len()].copy_from_slice(&bytes);
+        let mut patch = vec![pad; slot];
+        patch[..bytes.len()].copy_from_slice(&bytes);
+        writes.push((offset, patch));
         report.applied += 1;
     }
 
+    Ok(InPlacePlan { writes, report })
+}
+
+/// Aplica o plano numa copia em memoria; `finalize` roda por ultimo
+/// (recalculo de checksums do formato).
+pub fn apply_in_place(
+    data: &[u8],
+    entries: &[TextEntry],
+    finalize: impl FnOnce(&mut [u8]),
+) -> Result<AppliedImage> {
+    let plan = plan_in_place(data, entries)?;
+    let mut out = data.to_vec();
+    for (offset, patch) in &plan.writes {
+        out[*offset..offset + patch.len()].copy_from_slice(patch);
+    }
     finalize(&mut out);
-    Ok(AppliedImage { bytes: out, report })
+    Ok(AppliedImage {
+        bytes: out,
+        report: plan.report,
+    })
 }

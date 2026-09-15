@@ -252,9 +252,17 @@ pub fn create_bps(original: &[u8], modified: &[u8]) -> Result<Vec<u8>> {
     Ok(out)
 }
 
-/// Aplica um patch BPS, validando os tres CRC-32 (patch integro, source
-/// correto, target exato). Suporta os quatro commands do formato.
-pub fn apply_bps(source: &[u8], patch: &[u8]) -> Result<Vec<u8>> {
+struct BpsHeader {
+    /// Posicao do primeiro command (depois do header + metadata).
+    pos: usize,
+    footer_at: usize,
+    target_size: usize,
+    target_crc: u32,
+}
+
+/// Validacao comum de header/footer do BPS: magic, CRC do patch, CRC e
+/// tamanho do source, skip da metadata. Nao valida o tamanho do target.
+fn bps_prelude(source: &[u8], patch: &[u8]) -> Result<BpsHeader> {
     if patch.len() < BPS_MAGIC.len() + 12 || &patch[..4] != BPS_MAGIC {
         return Err(bps_err("arquivo nao e um patch BPS (magic BPS1 ausente)"));
     }
@@ -271,8 +279,7 @@ pub fn apply_bps(source: &[u8], patch: &[u8]) -> Result<Vec<u8>> {
             crc32(source)
         )));
     }
-    let stored_target_crc =
-        u32::from_le_bytes(patch[footer_at + 4..footer_at + 8].try_into().unwrap());
+    let target_crc = u32::from_le_bytes(patch[footer_at + 4..footer_at + 8].try_into().unwrap());
 
     let mut pos = BPS_MAGIC.len();
     let source_size = bps_read_number(patch, &mut pos)? as usize;
@@ -283,14 +290,32 @@ pub fn apply_bps(source: &[u8], patch: &[u8]) -> Result<Vec<u8>> {
             source.len()
         )));
     }
-    if target_size > crate::adapter::IN_MEMORY_MAX as usize {
-        return Err(bps_err("target declarado maior que o limite em memoria"));
-    }
     let metadata_size = bps_read_number(patch, &mut pos)? as usize;
     pos = pos
         .checked_add(metadata_size)
         .filter(|&p| p <= footer_at)
         .ok_or_else(|| bps_err("metadata passa do fim do patch"))?;
+    Ok(BpsHeader {
+        pos,
+        footer_at,
+        target_size,
+        target_crc,
+    })
+}
+
+/// Aplica um patch BPS, validando os tres CRC-32 (patch integro, source
+/// correto, target exato). Suporta os quatro commands do formato.
+pub fn apply_bps(source: &[u8], patch: &[u8]) -> Result<Vec<u8>> {
+    let header = bps_prelude(source, patch)?;
+    let BpsHeader {
+        mut pos,
+        footer_at,
+        target_size,
+        target_crc: stored_target_crc,
+    } = header;
+    if target_size > crate::adapter::IN_MEMORY_MAX as usize {
+        return Err(bps_err("target declarado maior que o limite em memoria"));
+    }
 
     let mut target = vec![0u8; target_size];
     let mut output = 0usize;
@@ -358,6 +383,101 @@ pub fn apply_bps(source: &[u8], patch: &[u8]) -> Result<Vec<u8>> {
         return Err(bps_err("resultado corrompido (CRC-32 do target nao bate)"));
     }
     Ok(target)
+}
+
+/// Round-trip streaming: confere que `apply_bps(source, patch)` produziria
+/// EXATAMENTE `expected`, sem materializar o target — e o que valida o
+/// export de um DVD acima do teto em memoria. Como cada trecho produzido e
+/// comparado na hora, TargetCopy pode ler de `expected` (prefixo ja provado
+/// identico); por isso ele so aceita ler area ja verificada — mais estrito
+/// que o apply (que le zeros de area nao escrita), e patches nossos nem
+/// emitem TargetCopy.
+pub fn verify_bps_against(source: &[u8], patch: &[u8], expected: &[u8]) -> Result<()> {
+    let BpsHeader {
+        mut pos,
+        footer_at,
+        target_size,
+        target_crc: stored_target_crc,
+    } = bps_prelude(source, patch)?;
+    if target_size != expected.len() {
+        return Err(bps_err(format!(
+            "target do patch tem {target_size} bytes; o arquivo esperado tem {}",
+            expected.len()
+        )));
+    }
+
+    let mismatch = || bps_err("round-trip: o patch nao reproduz a working copy");
+    let mut output = 0usize;
+    let mut source_rel = 0usize;
+    let mut target_rel = 0usize;
+
+    while pos < footer_at {
+        let data = bps_read_number(patch, &mut pos)?;
+        let command = (data & 3) as u8;
+        let length = (data >> 2) as usize + 1;
+        let end = output
+            .checked_add(length)
+            .filter(|&e| e <= target_size)
+            .ok_or_else(|| bps_err("action escreve alem do target"))?;
+        match command {
+            0 => {
+                if end > source.len() {
+                    return Err(bps_err("SourceRead alem do source"));
+                }
+                if source[output..end] != expected[output..end] {
+                    return Err(mismatch());
+                }
+            }
+            1 => {
+                let data_end = pos
+                    .checked_add(length)
+                    .filter(|&e| e <= footer_at)
+                    .ok_or_else(|| bps_err("TargetRead alem do patch"))?;
+                if patch[pos..data_end] != expected[output..end] {
+                    return Err(mismatch());
+                }
+                pos = data_end;
+            }
+            2 => {
+                let raw = bps_read_number(patch, &mut pos)?;
+                source_rel = signed_step(source_rel, raw, "SourceCopy")?;
+                let src_end = source_rel
+                    .checked_add(length)
+                    .filter(|&e| e <= source.len())
+                    .ok_or_else(|| bps_err("SourceCopy alem do source"))?;
+                if source[source_rel..src_end] != expected[output..end] {
+                    return Err(mismatch());
+                }
+                source_rel = src_end;
+            }
+            3 => {
+                let raw = bps_read_number(patch, &mut pos)?;
+                target_rel = signed_step(target_rel, raw, "TargetCopy")?;
+                for k in 0..length {
+                    if target_rel >= output + k {
+                        return Err(bps_err("TargetCopy le area ainda nao verificada"));
+                    }
+                    if expected[output + k] != expected[target_rel] {
+                        return Err(mismatch());
+                    }
+                    target_rel += 1;
+                }
+            }
+            _ => unreachable!(),
+        }
+        output = end;
+    }
+    if output != target_size {
+        return Err(bps_err(format!(
+            "patch terminou com {output} de {target_size} bytes escritos"
+        )));
+    }
+    if crc32(expected) != stored_target_crc {
+        return Err(bps_err(
+            "CRC-32 do target no patch nao bate com a working copy",
+        ));
+    }
+    Ok(())
 }
 
 fn signed_step(base: usize, raw: u64, what: &str) -> Result<usize> {
@@ -457,9 +577,9 @@ pub fn export_patch(project_dir: &Path, format: Option<PatchFormat>) -> Result<P
         ));
     }
 
-    let original =
-        fs::read(&project.source_path).map_err(|e| CoreError::io(&project.source_path, e))?;
-    let modified = fs::read(&working_path).map_err(|e| CoreError::io(&working_path, e))?;
+    // mmap dos dois lados: um DVD de PS2 nao precisa (nem cabe) inteiro em RAM.
+    let original = crate::fileio::read_view(&project.source_path)?;
+    let modified = crate::fileio::read_view(&working_path)?;
 
     let format = format.unwrap_or_else(|| choose_format(original.len(), modified.len()));
     let patch = match format {
@@ -467,11 +587,15 @@ pub fn export_patch(project_dir: &Path, format: Option<PatchFormat>) -> Result<P
         PatchFormat::Bps => create_bps(&original, &modified)?,
     };
     // Round-trip de seguranca: o patch reproduz EXATAMENTE a working copy.
-    let roundtrip = match format {
-        PatchFormat::Ips => apply_ips(&original, &patch)?,
-        PatchFormat::Bps => apply_bps(&original, &patch)?,
+    // Acima do teto em memoria o apply materializaria o target (GiBs) — a
+    // variante streaming compara sem alocar.
+    let big = modified.len() as u64 > crate::adapter::IN_MEMORY_MAX;
+    let roundtrip_ok = match format {
+        PatchFormat::Ips => apply_ips(&original, &patch)?[..] == modified[..],
+        PatchFormat::Bps if big => verify_bps_against(&original, &patch, &modified).is_ok(),
+        PatchFormat::Bps => apply_bps(&original, &patch)?[..] == modified[..],
     };
-    if roundtrip != modified {
+    if !roundtrip_ok {
         return Err(CoreError::Project(
             "round-trip interno do patch falhou (bug no gerador) — patch NAO exportado".to_string(),
         ));

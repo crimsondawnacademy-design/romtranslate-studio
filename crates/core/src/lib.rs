@@ -10,6 +10,7 @@ pub mod db;
 pub mod detect;
 pub mod error;
 pub mod export;
+pub mod fileio;
 pub mod hash;
 pub mod patch;
 pub mod pipeline;
