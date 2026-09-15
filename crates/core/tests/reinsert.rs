@@ -240,10 +240,10 @@ fn reinsert_flow_blocks_errors_and_never_touches_original() {
 }
 
 #[test]
-fn generic_probe_adapters_refuse_structured_calls() {
-    use romtranslate_core::adapters::gba::GbaAdapter;
-    let data = synth::make_gba_rom("TEST");
-    assert!(GbaAdapter.extract_structured(&data).is_err());
-    assert!(GbaAdapter.apply_text(&data, &[]).is_err());
-    assert!(GbaAdapter.verify(&data).is_err());
+fn probe_only_adapters_refuse_structured_calls() {
+    use romtranslate_core::adapters::nes::NesAdapter;
+    let data = synth::make_nes_rom();
+    assert!(NesAdapter.extract_structured(&data).is_err());
+    assert!(NesAdapter.apply_text(&data, &[]).is_err());
+    assert!(NesAdapter.verify(&data).is_err());
 }

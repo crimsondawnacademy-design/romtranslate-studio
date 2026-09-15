@@ -172,6 +172,13 @@ async fn reinsert_project(
     .await
 }
 
+#[tauri::command]
+async fn export_patch(
+    project_dir: String,
+) -> Result<romtranslate_core::patch::PatchExportOutcome, String> {
+    blocking(move || romtranslate_core::patch::export_patch(&PathBuf::from(project_dir))).await
+}
+
 // ---- Sprint 4: editor + validacao ----
 
 #[tauri::command]
@@ -369,6 +376,7 @@ pub fn run() {
             load_entries,
             extract_structured,
             reinsert_project,
+            export_patch,
             update_entry,
             set_entry_reviewed,
             validate_project,

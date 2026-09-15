@@ -120,6 +120,12 @@ const messages = {
     "reinsert.running": "Reinserindo...",
     "reinsert.done": "Cópia de trabalho gerada e verificada: {path}",
     "reinsert.applied": "{applied} traduções aplicadas · {kept} mantidas no original",
+    "patch.export": "Exportar patch (IPS)",
+    "patch.exporting": "Gerando patch...",
+    "patch.done":
+      "Patch gerado ({size} bytes) e conferido por round-trip. Distribua o patch — nunca a ROM.",
+    "patch.hint":
+      "Exige a reinserção feita. Gera .ips + manifest.json + CSV das traduções em exports/.",
     "common.back": "Voltar",
     "common.error": "Erro",
   },
@@ -238,6 +244,12 @@ const messages = {
     "reinsert.running": "Reinserting...",
     "reinsert.done": "Working copy written and verified: {path}",
     "reinsert.applied": "{applied} translations applied · {kept} kept original",
+    "patch.export": "Export patch (IPS)",
+    "patch.exporting": "Building patch...",
+    "patch.done":
+      "Patch built ({size} bytes) and round-trip checked. Distribute the patch — never the ROM.",
+    "patch.hint":
+      "Requires a completed reinsertion. Writes .ips + manifest.json + translations CSV into exports/.",
     "common.back": "Back",
     "common.error": "Error",
   },

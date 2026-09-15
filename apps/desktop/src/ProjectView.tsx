@@ -13,6 +13,7 @@ import {
   ScanEncoding,
   ScanOutcome,
   SettingsReport,
+  PatchExportOutcome,
   ReinsertOutcome,
   TextEntry,
   TranslateSummary,
@@ -85,6 +86,8 @@ export default function ProjectView({
 
   const [reinserting, setReinserting] = useState(false);
   const [reinsertOutcome, setReinsertOutcome] = useState<ReinsertOutcome | null>(null);
+  const [patching, setPatching] = useState(false);
+  const [patchOutcome, setPatchOutcome] = useState<PatchExportOutcome | null>(null);
 
   const [issuesByEntry, setIssuesByEntry] = useState<
     Record<string, ValidationIssue[]>
@@ -197,6 +200,20 @@ export default function ProjectView({
       setError(String(e));
     } finally {
       setReinserting(false);
+    }
+  }
+
+  async function runPatchExport() {
+    setError(null);
+    setPatchOutcome(null);
+    setPatching(true);
+    try {
+      const outcome = await invoke<PatchExportOutcome>("export_patch", { projectDir });
+      setPatchOutcome(outcome);
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setPatching(false);
     }
   }
 
@@ -670,6 +687,13 @@ export default function ProjectView({
           <p className="hint left">{t("reinsert.hint")}</p>
           <div className="actions">
             <button
+              onClick={runPatchExport}
+              disabled={patching || reinserting || sourceBroken}
+              title={t("patch.hint")}
+            >
+              {patching ? t("patch.exporting") : t("patch.export")}
+            </button>
+            <button
               className="primary"
               onClick={runReinsert}
               disabled={reinserting || sourceBroken || translating}
@@ -693,6 +717,15 @@ export default function ProjectView({
                 ))}
               </ul>
             </>
+          )}
+          {patchOutcome && (
+            <div className="ok">
+              {t("patch.done", { size: patchOutcome.patchSize })}
+              <br />
+              <span className="path">{patchOutcome.patchPath}</span>
+              <span className="path">{patchOutcome.manifestPath}</span>
+              <span className="path">{patchOutcome.csvPath}</span>
+            </div>
           )}
         </div>
       )}

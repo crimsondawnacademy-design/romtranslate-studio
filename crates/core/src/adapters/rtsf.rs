@@ -166,7 +166,7 @@ impl GameAdapter for RtsfAdapter {
             detect: true,
             extract: true,
             reinsert: true,
-            patch: false,
+            patch: true,
             compression: false,
             pointer_relocation: true,
             font_table: false,

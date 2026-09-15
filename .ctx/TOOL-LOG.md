@@ -6,6 +6,7 @@
 
 | data | maquina | ferramenta | modelo | o_que_fez | arquivos_tocados |
 |---|---|---|---|---|---|
+| 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | Sprint 6: patch IPS (create/apply) + export com manifest/CSV; reinserção conservadora GBA in-place com checksum recalculado; fluxo GBA ponta a ponta testado | `crates/core/src/patch.rs`, `crates/core/src/adapters/gba.rs`, `crates/core/tests/patch.rs` |
 | 2026-09-14 | Mac mini M1 (casa) | claude | claude-fable-5 | Sprint 5: adapter RTSF (fixed/reloc/ptr-table/checksum), trait extract/apply/verify, reinsert com working copy + bloqueio de Error, round-trip testado | `crates/core/src/adapters/rtsf.rs`, `crates/core/src/reinsert.rs`, `crates/core/tests/reinsert.rs` |
 | 2026-09-14 | Mac mini M1 (casa) | claude | claude-fable-5 | Sprint 4: validador (placeholders/bytes/anomalias), statuses+revisão, editor inline com TM, filtros | `crates/core/src/validate.rs`, `crates/core/tests/validate.rs`, `apps/desktop/src/ProjectView.tsx` |
 | 2026-09-14 | Mac mini M1 (casa) | claude | claude-fable-5 | Sprint 3: providers Ollama/OpenAI-compat, TM+glossario SQLite, pipeline retry/cancel/progresso, settings+secrets, UI de traducao; teste real Ollama OK | `crates/core/src/{provider,providers/*,db,pipeline}.rs`, `apps/desktop/src-tauri/src/{lib,settings}.rs`, `apps/desktop/src/ProjectView.tsx` |

@@ -186,3 +186,12 @@ export interface ReinsertOutcome {
   verification: VerificationReport;
   forcedErrors: number;
 }
+
+export interface PatchExportOutcome {
+  patchPath: string;
+  manifestPath: string;
+  csvPath: string;
+  patchFormat: string;
+  patchedSha256: string;
+  patchSize: number;
+}

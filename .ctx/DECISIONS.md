@@ -126,3 +126,23 @@
 **Consequências:** working copy ou está íntegra e verificada, ou não existe (falha de verify mantém o arquivo só para inspeção, com erro claro).
 
 **Driver:** claude.
+
+## [2026-09-15] Patch: IPS proprio em Rust; BPS adiado
+
+**Contexto:** spec §16 prioriza IPS/BPS/xdelta. IPS e trivial (formato de 1983) e cobre cartuchos ate 16 MiB; BPS exigiria implementar delta encoding + CRC ou depender de binario externo.
+
+**Decisao:** IPS em Rust puro no `patch.rs`: create emite records raw (com merge de gaps <6 bytes e desvio do offset 0x454F46); apply le records, RLE e truncate extension. Todo patch passa por round-trip interno antes do export. BPS entra como variant quando arquivo >16 MiB ou truncamento forem necessarios (plataformas de disco).
+
+**Consequencias:** zero dependencia externa; patch compativel com Lunar IPS/Floating IPS/RetroArch. Limite de 16 MiB explicito no erro.
+
+**Driver:** claude (ponytail).
+
+## [2026-09-15] GBA: reinsercao conservadora in-place (Experimental)
+
+**Contexto:** reinsercao estruturada de verdade exige conhecer tabelas/ponteiros de cada jogo. O caminho util mais curto para "roda no emulador" e traduzir cada string ASCII no espaco que ela ja ocupa.
+
+**Decisao:** `extract_structured` do GBA = scan ASCII com `max_bytes` = tamanho do run (ids identicos aos do scanner generico — rodar os dois nao duplica entries). `apply_text` escreve in-place com sanity check (bytes atuais == original_bytes da entry, senao erro anti-drift), padding 0x00/0x20 conforme o run era null-terminated, e SEMPRE recalcula o header checksum (traduzir o titulo em 0xA0 e legitimo). Sem relocacao: traducao maior que o espaco e erro orientando encurtar — o validador ja avisa antes ("muito longa").
+
+**Consequencias:** menus/textos curtos de muitos jogos GBA traduziveis hoje, marcado Experimental (sem promessa universal, spec §26). Textos com ponteiros/compressao ficam para adapters por-jogo/engine.
+
+**Driver:** rhuan (pediu o caminho pro emulador) + claude.
