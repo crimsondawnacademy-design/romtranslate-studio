@@ -3416,7 +3416,7 @@ dependencies = [
 
 [[package]]
 name = "romtranslate-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3434,7 +3434,7 @@ dependencies = [
 
 [[package]]
 name = "romtranslate-desktop"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "keyring",
  "romtranslate-core",
