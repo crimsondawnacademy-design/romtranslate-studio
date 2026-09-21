@@ -6,6 +6,7 @@
 
 | data | maquina | ferramenta | modelo | o_que_fez | arquivos_tocados |
 |---|---|---|---|---|---|
+| 2026-09-21 | Mac mini M1 (casa) | claude | claude-opus-5 | Aviso no topo das notas da v0.1.0 (usar v0.1.1 por causa do bug do DS) | `.ctx/STATE.md` |
 | 2026-09-21 | Mac mini M1 (casa) | claude | claude-opus-5 | v0.1.1 publicada (pelo Rhuan) com notas de versão; download conferido sem login | `.ctx/STATE.md` |
 | 2026-09-21 | Mac mini M1 (casa) | claude | claude-opus-5 | Versão 0.1.1 + tag v0.1.1 (correção do NDS + relocação GBA/NDS/PS1) | `Cargo.toml`, `Cargo.lock`, `apps/desktop/package.json`, `apps/desktop/src-tauri/tauri.conf.json` |
 | 2026-09-21 | Mac mini M1 (casa) | claude | claude-opus-5 | Relocação no NDS (arquivo cresce + FAT) e PS1 (sobra do setor final); corrige claim errado sobre ARM9/EXE; corrige bug antigo do NDS (leituras ASCII/UTF-16 fundidas pelo id) + guarda de escrita sobreposta | `crates/core/src/adapters/{pointers,nds,iso9660,ps1,ps2,psp,inplace,gba}.rs`, `crates/core/src/{validate,synth}.rs`, `crates/core/tests/relocation_files.rs`, `apps/desktop/src/*`, `README.md`, `docs/ADAPTERS.md` |
