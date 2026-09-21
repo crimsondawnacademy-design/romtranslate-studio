@@ -105,8 +105,9 @@ jobs:
 
             - macOS Apple Silicon (M1 em diante): `*_aarch64.dmg`
             - macOS Intel: `*_x64.dmg`
-            - Windows: `*-setup.exe` (instalador) ou `*_x64_en-US.msi`
-            - Linux: `*.AppImage` (roda direto) ou `*.deb`
+            - Windows: `*_x64-setup.exe` (instalador) ou `*_x64_en-US.msi`
+            - Linux: `*_amd64.deb` ou `*.x86_64.rpm` (~6 MB) — ou
+              `*_amd64.AppImage` (~80 MB, roda sem instalar)
 
             **A primeira execucao vai dar aviso** — e esperado, por causa da
             falta de assinatura:

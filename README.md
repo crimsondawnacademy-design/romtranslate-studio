@@ -19,7 +19,8 @@ cópia de trabalho → **patch IPS** com manifest.
 Binários prontos saem em
 [Releases](https://github.com/crimsondawnacademy-design/romtranslate-studio/releases):
 `.dmg` para macOS (Apple Silicon e Intel), `-setup.exe` ou `.msi` para Windows,
-`.AppImage` ou `.deb` para Linux.
+`.deb`, `.rpm` ou `.AppImage` para Linux — prefira `.deb`/`.rpm` (~6 MB); o
+AppImage roda sem instalar, mas pesa ~80 MB porque embute as dependências.
 
 Os binários **não são assinados** — projeto pessoal, e certificado de
 desenvolvedor é pago. Na primeira execução o sistema reclama; é esperado:
