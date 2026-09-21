@@ -202,14 +202,19 @@ pub fn validate_entry(entry: &TextEntry) -> Vec<ValidationIssue> {
                     );
                 }
             } else if n > entry.original_bytes.len() {
-                push(
-                    Severity::Warning,
-                    IssueKind::ByteOverflow,
+                let original = entry.original_bytes.len();
+                // Realocar resolve o espaco no ROM, nao na tela: caixa de texto
+                // ou buffer de RAM do jogo podem nao comportar o texto maior.
+                let message = if entry.pointer_offsets().is_empty() {
                     format!(
-                        "traducao ocupa {n} bytes; o espaco original tem {} (reinsercao fixa exigiria texto menor)",
-                        entry.original_bytes.len()
-                    ),
-                );
+                        "traducao ocupa {n} bytes; o espaco original tem {original} (reinsercao fixa exigiria texto menor)"
+                    )
+                } else {
+                    format!(
+                        "traducao ocupa {n} bytes (original {original}): sera realocada pro fim do ROM — confira no emulador se cabe na caixa de texto"
+                    )
+                };
+                push(Severity::Warning, IssueKind::ByteOverflow, message);
             }
         }
         EncodedLen::Unsupported => {}

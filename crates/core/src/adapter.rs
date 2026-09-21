@@ -63,7 +63,7 @@ use serde::Serialize;
 
 /// Resultado de `apply_text`: quantas entries entraram na imagem nova.
 /// Falha de serializacao e `Err` (all-or-nothing) — nunca imagem parcial.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApplyReport {
     /// Entries com traducao aplicadas na imagem.
@@ -72,6 +72,9 @@ pub struct ApplyReport {
     pub kept_original: usize,
     /// Entries de scanner generico ignoradas (adapter so aplica as estruturadas).
     pub ignored_generic: usize,
+    /// Das aplicadas, quantas foram gravadas em outro lugar com os ponteiros
+    /// reapontados (nao cabiam no espaco original).
+    pub relocated: usize,
 }
 
 /// Imagem modificada em memoria + relatorio. O caller decide onde gravar

@@ -109,6 +109,7 @@ const messages = {
     "editor.bytes": "{n} bytes",
     "editor.bytesLimit": "limite {max}",
     "editor.bytesOriginal": "original {n}",
+    "editor.relocatable": "realocável — pode passar do original",
     "editor.noEncoder": "sem contagem p/ este encoding",
     "editor.save": "Salvar tradução",
     "editor.markReviewed": "Marcar revisada",
@@ -121,6 +122,7 @@ const messages = {
     "reinsert.running": "Reinserindo...",
     "reinsert.done": "Cópia de trabalho gerada e verificada: {path}",
     "reinsert.applied": "{applied} traduções aplicadas · {kept} mantidas no original",
+    "reinsert.relocated": "{n} realocadas pro fim do ROM, com os ponteiros atualizados",
     "reinsert.advanced": "Modo avançado: reinserir mesmo com erros de validação",
     "reinsert.advancedHint":
       "As entries marcadas com erro entram do jeito que estão — placeholder quebrado ou texto que não cabe pode corromper o jogo. Use só se souber o que está fazendo.",
@@ -241,6 +243,7 @@ const messages = {
     "editor.bytes": "{n} bytes",
     "editor.bytesLimit": "limit {max}",
     "editor.bytesOriginal": "original {n}",
+    "editor.relocatable": "relocatable — may exceed the original",
     "editor.noEncoder": "no byte count for this encoding",
     "editor.save": "Save translation",
     "editor.markReviewed": "Mark reviewed",
@@ -253,6 +256,7 @@ const messages = {
     "reinsert.running": "Reinserting...",
     "reinsert.done": "Working copy written and verified: {path}",
     "reinsert.applied": "{applied} translations applied · {kept} kept original",
+    "reinsert.relocated": "{n} relocated to the end of the ROM, with pointers updated",
     "reinsert.advanced": "Advanced mode: reinsert even with validation errors",
     "reinsert.advancedHint":
       "Entries flagged with errors go in as-is — broken placeholders or oversized text may corrupt the game. Use only if you know what you are doing.",

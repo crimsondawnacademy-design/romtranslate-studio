@@ -178,6 +178,7 @@ export interface ApplyReport {
   applied: number;
   keptOriginal: number;
   ignoredGeneric: number;
+  relocated: number;
 }
 
 export interface VerificationReport {

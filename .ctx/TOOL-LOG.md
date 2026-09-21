@@ -6,6 +6,7 @@
 
 | data | maquina | ferramenta | modelo | o_que_fez | arquivos_tocados |
 |---|---|---|---|---|---|
+| 2026-09-21 | Mac mini M1 (casa) | claude | claude-opus-5 | Relocação de ponteiros no GBA: detecção de TABELAS (não busca global), realoca pro fim do ROM com anti-drift e auto-checagem; validador avisa; UI mostra realocáveis | `crates/core/src/adapters/{pointers,inplace,gba,rtsf}.rs`, `crates/core/src/{validate,types,adapter,reinsert,synth}.rs`, `crates/core/tests/relocation.rs`, `apps/desktop/src/*`, `README.md`, `docs/ADAPTERS.md` |
 | 2026-09-21 | Mac mini M1 (casa) | claude | claude-opus-5 | v0.1.0 PUBLICADO (rascunho → público); download conferido sem login | `.ctx/STATE.md` |
 | 2026-09-20 | Mac mini M1 (casa) | claude | claude-opus-5 | Release v0.1.0 cortado: 4 plataformas ok, 1 release rascunho com 9 anexos; acentos corrigidos no corpo do release | `.github/workflows/release.yml`, `.ctx/STATE.md` |
 | 2026-09-20 | Mac mini M1 (casa) | claude | claude-opus-5 | CI de release: tag v* monta 4 bundles e abre release rascunho; dispatch = dry run; guard de versão; aviso de binário não assinado no README | `.github/workflows/release.yml`, `README.md` |

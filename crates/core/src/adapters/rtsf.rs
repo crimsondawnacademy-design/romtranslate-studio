@@ -258,11 +258,7 @@ impl GameAdapter for RtsfAdapter {
     fn apply_text(&self, data: &[u8], entries: &[TextEntry]) -> Result<AppliedImage> {
         let layout = parse_layout(data)?;
         let mut out = data.to_vec();
-        let mut report = ApplyReport {
-            applied: 0,
-            kept_original: 0,
-            ignored_generic: 0,
-        };
+        let mut report = ApplyReport::default();
 
         // Textos finais das relocaveis: comeca com o conteudo atual do arquivo.
         let current = self.extract_structured(data)?;
@@ -308,6 +304,7 @@ impl GameAdapter for RtsfAdapter {
                     }
                     reloc_texts[index] = translation.to_string();
                     report.applied += 1;
+                    report.relocated += 1;
                 }
                 other => {
                     return Err(err(format!(

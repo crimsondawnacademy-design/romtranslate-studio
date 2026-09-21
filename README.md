@@ -61,7 +61,7 @@ universal**. O que cada plataforma tem hoje:
 | Plataforma | Detecção | Scan genérico | Extração estruturada | Reinserção | Patch |
 |---|---|---|---|---|---|
 | Fixture RTSF (demo) | ✅ | ✅ | ✅ completa | ✅ com relocação + ponteiros | ✅ |
-| Game Boy Advance | ✅ | ✅ | ⚠️ experimental (in-place) | ⚠️ experimental (in-place) | ✅ |
+| Game Boy Advance | ✅ | ✅ | ⚠️ experimental (detecta tabelas de ponteiros) | ⚠️ experimental (in-place + **relocação** de strings com ponteiro em tabela) | ✅ (BPS se o ROM de 16 MiB crescer) |
 | Nintendo DS | ✅ (CRC do header) | ✅ | ⚠️ experimental (por arquivo do filesystem, ASCII + UTF-16) | ⚠️ experimental (in-place) | ✅ (BPS acima de 16 MiB) |
 | NES | ✅ | ✅ | ⚠️ experimental (in-place; jogos com tabela própria: use `.tbl`) | ⚠️ experimental (in-place) | ✅ |
 | Super Nintendo | ✅ | ✅ | ⚠️ experimental (in-place) | ⚠️ experimental (in-place, checksum interno recalculado) | ✅ |
@@ -84,10 +84,23 @@ compatibilidade) e **BPS** para arquivos maiores ou que encolhem — o BPS ainda
 valida por CRC-32 que o patch está sendo aplicado no arquivo certo. Partições
 de disco Wii são cifradas: extração exigiria keys, que este projeto não inclui.
 
-**"In-place" (GBA)**: cada string traduzida ocupa o espaço da original (mesmo
-tamanho ou menor) — cobre menus e textos curtos de muitos jogos; textos com
-ponteiros/compressão pedem adapter dedicado. O validador avisa o que não cabe
-antes de qualquer escrita.
+**"In-place"**: cada string traduzida ocupa o espaço da original (mesmo
+tamanho ou menor) — cobre menus e textos curtos de muitos jogos. O validador
+avisa o que não cabe antes de qualquer escrita.
+
+**Relocação de ponteiros (GBA)**: tradução maior que o original é gravada no
+fim do ROM e os ponteiros pra ela são reapontados — desde que a string seja
+referenciada por uma **tabela** de ponteiros (2+ ponteiros de ROM seguidos,
+cada um apontando pro início de uma string). O app **não** caça cada
+ocorrência do endereço no ROM inteiro: uma palavra de código pode ter o mesmo
+valor de um ponteiro por coincidência, e trocá-la corromperia o jogo em
+silêncio. Por isso ponteiro isolado (literal pool) não conta, e a string fica
+limitada ao espaço original. O texto antigo continua no lugar, então uma
+referência que a detecção não viu mostra o original em vez de lixo.
+Realocar resolve o espaço **no ROM**, não **na tela**: o validador avisa cada
+string realocada pra você conferir no emulador se ela cabe na caixa de texto.
+Projetos antigos: rode a extração estruturada de novo pra detectar as tabelas
+(as traduções são preservadas).
 
 ## Rodando
 

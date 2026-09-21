@@ -3,11 +3,17 @@
 //! Deteccao sem embutir o logo Nintendo (material de terceiros): byte fixo
 //! 0x96 em 0xB2, header checksum em 0xBD, pistas fracas (branch ARM, titulo).
 //!
-//! Reinsercao CONSERVADORA (Experimental): cada string ASCII descoberta e
-//! traduzida in-place no espaco que ja ocupa (mesmo tamanho ou menor), sem
-//! mexer em ponteiros — cobre menus/textos curtos de muitos jogos. O header
-//! checksum e recalculado (traduzir o titulo em 0xA0 o afetaria).
+//! Reinsercao (Experimental): traducao que cabe vai in-place no espaco da
+//! original. A que nao cabe so passa se a string tiver ponteiros numa TABELA
+//! detectada (`adapters::pointers`: 2+ ponteiros de ROM consecutivos pra
+//! inicios de string) — ai vai pro fim do ROM e a tabela e reapontada.
+//! Ponteiro isolado (literal pool) nao conta, e ponteiro pros espelhos de
+//! wait-state (0x0A/0x0C000000) nao e reconhecido. O header checksum e
+//! recalculado (traduzir o titulo em 0xA0 o afetaria).
 
+use std::collections::HashSet;
+
+use super::pointers::{find_pointer_tables, relocate};
 use crate::adapter::{AppliedImage, GameAdapter, GameInput, VerificationReport};
 use crate::error::{CoreError, Result};
 use crate::scan::{scan_bytes, ScanConfig, ScanEncoding};
@@ -19,6 +25,10 @@ const HEADER_LEN: usize = 0xC0;
 const FIXED_VALUE_OFFSET: usize = 0xB2;
 const CHECKSUM_OFFSET: usize = 0xBD;
 const TITLE_RANGE: std::ops::Range<usize> = 0xA0..0xAC;
+/// ROM mapeada em 0x08000000 (GBATEK): ponteiro pra texto = base + offset.
+const ROM_BASE: u32 = 0x0800_0000;
+/// Janela de ROM do cartucho: 32 MiB (0x08000000-0x09FFFFFF).
+const MAX_ROM_LEN: usize = 32 * 1024 * 1024;
 
 /// Checksum do header GBA: soma negativa de 0xA0..=0xBC menos 0x19 (mod 256).
 pub fn header_checksum(header: &[u8]) -> u8 {
@@ -46,10 +56,10 @@ impl GameAdapter for GbaAdapter {
         AdapterCapabilities {
             detect: true,
             extract: true,
-            reinsert: true, // conservadora: in-place, sem relocacao
+            reinsert: true, // in-place; relocacao so com ponteiros em tabela
             patch: true,
             compression: false,
-            pointer_relocation: false,
+            pointer_relocation: true,
             font_table: false,
             experimental: true,
             support_level: SupportLevel::Experimental,
@@ -102,9 +112,10 @@ impl GameAdapter for GbaAdapter {
         }
     }
 
-    /// Extracao conservadora: scan ASCII com `max_bytes` = espaco que a string
-    /// ja ocupa. Ids identicos aos do scanner generico ("scan-<offset>"), entao
-    /// rodar os dois nao duplica entries no projeto.
+    /// Scan ASCII + deteccao de tabelas de ponteiros. String com ponteiro em
+    /// tabela fica sem `max_bytes` (pode crescer: sera realocada); as demais
+    /// ficam limitadas ao espaco que ja ocupam. Ids identicos aos do scanner
+    /// generico ("scan-<offset>"), entao rodar os dois nao duplica entries.
     fn extract_structured(&self, data: &[u8]) -> Result<Vec<TextEntry>> {
         if data.len() < HEADER_LEN {
             return Err(CoreError::Project(
@@ -119,23 +130,65 @@ impl GameAdapter for GbaAdapter {
             },
         )?;
         let mut entries = outcome.entries;
+        // So string terminada pode crescer: quem le por tamanho fixo nao aceita.
+        let starts: HashSet<usize> = entries
+            .iter()
+            .filter(|e| e.metadata.get("terminated").and_then(|v| v.as_bool()) == Some(true))
+            .filter_map(|e| e.offset.map(|o| o as usize))
+            .collect();
+        let tables = find_pointer_tables(data, ROM_BASE, &starts);
+
         for e in entries.iter_mut() {
-            e.max_bytes = Some(e.original_bytes.len());
-            e.context = Some("in-place: traducao limitada ao espaco original".to_string());
+            let pointers = e.offset.and_then(|o| tables.get(&(o as usize)));
+            match (pointers, e.metadata.as_object_mut()) {
+                (Some(pointers), Some(meta)) => {
+                    meta.insert("pointers".to_string(), serde_json::json!(pointers));
+                    e.max_bytes = None;
+                    e.context = Some(format!(
+                        "realocavel: {} ponteiro(s) em tabela — nao precisa caber no espaco original",
+                        pointers.len()
+                    ));
+                }
+                _ => {
+                    e.max_bytes = Some(e.original_bytes.len());
+                    e.context = Some("in-place: traducao limitada ao espaco original".to_string());
+                }
+            }
         }
         Ok(entries)
     }
 
-    /// Reinsercao in-place compartilhada (`adapters::inplace`), recalculando o
-    /// header checksum no final (traducao do titulo em 0xA0 o afetaria).
+    /// In-place do que cabe; o que nao cabe e tem ponteiros em tabela vai pro
+    /// fim do ROM com a tabela reapontada. Header checksum recalculado no fim.
     fn apply_text(&self, data: &[u8], entries: &[TextEntry]) -> Result<AppliedImage> {
         if data.len() < HEADER_LEN {
             return Err(CoreError::Project(
                 "gba: arquivo menor que o header do cartucho".to_string(),
             ));
         }
-        super::inplace::apply_in_place(data, entries, |out| {
-            out[CHECKSUM_OFFSET] = header_checksum(out);
+        let plan = super::inplace::plan_in_place(data, entries, true)?;
+        let mut out = data.to_vec();
+        for (offset, patch) in &plan.writes {
+            out[*offset..offset + patch.len()].copy_from_slice(patch);
+        }
+        // Escrita in-place que pisasse num ponteiro de tabela corromperia outro
+        // texto em silencio (ex.: campo de nome sem terminador colado no ponteiro).
+        for entry in entries {
+            for p in entry.pointer_offsets() {
+                if out.get(p..p + 4) != data.get(p..p + 4) {
+                    return Err(CoreError::Project(format!(
+                        "gba: uma traducao in-place sobrescreveria o ponteiro em 0x{p:X} (que \
+                         aponta pra entry {}) — encurte o texto logo antes desse endereco",
+                        entry.id
+                    )));
+                }
+            }
+        }
+        relocate(&mut out, &plan.relocations, ROM_BASE, MAX_ROM_LEN)?;
+        out[CHECKSUM_OFFSET] = header_checksum(&out);
+        Ok(AppliedImage {
+            bytes: out,
+            report: plan.report,
         })
     }
 

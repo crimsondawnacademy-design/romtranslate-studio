@@ -309,3 +309,54 @@ pnpm + compilar, o que elimina quase todo o público de rom hacking.
 **Verificação:** build release local no M1 antes de shipar o workflow —
 DMG de 5 MB, `.app` com identifier e versão corretos, assinatura
 `adhoc/linker-signed` (confirma o aviso de não assinado).
+
+## 2026-09-21 — Relocação de ponteiros: reconhecer TABELAS, nunca busca global
+
+**Contexto:** tradução PT-BR é ~20–30% mais longa que o inglês e, sem
+relocação, tinha que caber em bytes no espaço da original — o maior limite de
+uso real do app. A spec (Camada C) manda: "Crie abstrações para tabelas de
+ponteiros e relocação. **Nunca faça busca/substituição global de bytes como
+estratégia padrão.**"
+
+**Por que a spec está certa (conta feita antes de codar):** no GBA um
+ponteiro de ROM é `0x08000000 + offset` em u32 LE. A tentação é procurar
+esse valor no ROM inteiro e trocar toda ocorrência. Só que a instrução Thumb
+LSR tem os bytes `0x08xx` — uma palavra de código pode ter exatamente o
+valor de um ponteiro por coincidência, e trocá-la corrompe o jogo sem aviso.
+
+**Decisão:**
+
+1. **Ponteiro só conta dentro de uma TABELA:** 2+ palavras alinhadas
+   consecutivas que apontam, CADA UMA, pro início exato de uma string
+   terminada que o scanner extraiu. Coincidência dupla é desprezível;
+   estrutura real (menu, `struct {nome, desc}`, literal pool com 2+ strings)
+   é pega. Ponteiro isolado é ignorado de propósito — a string fica in-place.
+2. **Anexar no fim, não reusar o padding 0xFF.** Zero heurística de "onde
+   acaba o dado", zero risco de pisar em dado real. Custo: o ROM cresce, e um
+   ROM de 16 MiB que cresce sai em BPS (IPS não endereça além de 16 MiB) — o
+   export já escolhe BPS sozinho. `ponytail`: reusar o padding mantém o
+   tamanho/IPS, mas exige a heurística; só se alguém precisar.
+3. **Alinhar em 4** a string realocada: há engine que copia texto com
+   LDM/STM, e no ARM7 leitura desalinhada rotaciona a palavra.
+4. **Original fica intacto:** referência que a detecção não viu mostra o
+   texto antigo em vez de lixo — degradação graciosa.
+5. **Só relocar o que ESTOURA.** O que cabe continua in-place e os
+   ponteiros não mudam — minimiza exposição.
+6. **`max_bytes = None` pra realocáveis:** o `max_bytes` vai pro prompt da
+   IA; sem ele a IA traduz natural em vez de espremer o texto.
+7. **Validador avisa (não bloqueia) estouro de realocável:** relocação
+   resolve espaço no ROM, não na tela — caixa de texto ou buffer de RAM do
+   jogo podem não comportar. O aviso aponta o que conferir no emulador.
+8. **Motor genérico em `adapters/pointers.rs`** (u32 LE com `base`
+   parametrizado), GBA é o único usuário hoje. NDS ARM9 e PS1 EXE cabem no
+   mesmo motor mudando a base; NES/SNES (16 bits por banco) NÃO — ambíguo
+   demais pra detecção, pediria tabela declarada pelo usuário (estilo Atlas).
+
+**Salvaguardas:** anti-drift (ponteiro tem que ainda valer base+offset
+original), checagem de que nenhuma escrita in-place pisou num ponteiro de
+tabela, auto-checagem final (todo ponteiro reapontado resolve pros bytes
+novos), teto de 32 MiB (janela de ROM do GBA). All-or-nothing como o resto.
+
+**Limites honestos:** ponteiro isolado (literal pool com 1 string) não
+reloca; ponteiros pros espelhos de wait-state 0x0A/0x0C000000 não são
+reconhecidos; só ASCII terminada (é o que o adapter GBA extrai).

@@ -186,6 +186,23 @@ pub struct TextEntry {
     pub metadata: serde_json::Value,
 }
 
+impl TextEntry {
+    /// Offsets dos ponteiros (em tabelas detectadas pelo adapter) que apontam
+    /// pro inicio desta string. Vazio = so reinsercao in-place.
+    pub fn pointer_offsets(&self) -> Vec<usize> {
+        self.metadata
+            .get("pointers")
+            .and_then(|v| v.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|p| p.as_u64())
+                    .map(|p| p as usize)
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+}
+
 /// Serializa bytes como hex — legivel em project.json/exports e sem base64 dep.
 mod serde_bytes_hex {
     use serde::{Deserialize, Deserializer, Serializer};

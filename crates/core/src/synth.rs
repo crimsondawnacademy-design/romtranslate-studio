@@ -31,6 +31,29 @@ fn plant(rom: &mut [u8], offset: usize, bytes: &[u8]) {
     rom[offset..offset + bytes.len()].copy_from_slice(bytes);
 }
 
+/// GBA com tabelas de ponteiros de ROM (0x08000000 + offset, LE):
+/// - 0x800: tabela de 3 -> NEW GAME, CONTINUE, OPTIONS;
+/// - 0x880: tabela de 2 -> CONTINUE, OPTIONS (string com 2 referencias);
+/// - 0x900: ponteiro ISOLADO -> GAME OVER (literal pool: nao e tabela).
+pub fn make_gba_rom_with_pointers() -> Vec<u8> {
+    let mut rom = make_gba_rom("PTRTEST");
+    rom.resize(4096, 0);
+    plant(&mut rom, 0x400, b"NEW GAME\0");
+    plant(&mut rom, 0x410, b"CONTINUE\0");
+    plant(&mut rom, 0x420, b"OPTIONS\0");
+    plant(&mut rom, 0x440, b"GAME OVER\0");
+    let mut put_ptr = |at: usize, target: u32| {
+        rom[at..at + 4].copy_from_slice(&(0x0800_0000 + target).to_le_bytes());
+    };
+    for (i, target) in [0x400, 0x410, 0x420].into_iter().enumerate() {
+        put_ptr(0x800 + i * 4, target);
+    }
+    put_ptr(0x880, 0x410);
+    put_ptr(0x884, 0x420);
+    put_ptr(0x900, 0x440);
+    rom
+}
+
 /// NES (iNES): header + 16 KiB PRG + 8 KiB CHR coerentes com o declarado,
 /// filler nao-printable (>= 0x80) e strings ASCII plantadas para o scanner.
 pub fn make_nes_rom() -> Vec<u8> {

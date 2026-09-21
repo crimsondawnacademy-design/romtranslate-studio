@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { makeT, MessageId } from "./i18n";
-import { defaultProjectDir, encodedByteLength, formatOffset } from "./util";
+import { defaultProjectDir, encodedByteLength, formatOffset, pointerCount } from "./util";
 import {
   AppSettings,
   GameProject,
@@ -738,6 +738,12 @@ export default function ProjectView({
                   applied: reinsertOutcome.apply.applied,
                   kept: reinsertOutcome.apply.keptOriginal,
                 })}
+                {reinsertOutcome.apply.relocated > 0 && (
+                  <>
+                    <br />
+                    {t("reinsert.relocated", { n: reinsertOutcome.apply.relocated })}
+                  </>
+                )}
               </div>
               <ul className="evidence">
                 {reinsertOutcome.verification.checks.map((c) => (
@@ -835,7 +841,8 @@ function EntryEditor({
   const draftBytes = encodedByteLength(draft, entry.encoding);
   const originalBytes = entry.originalBytes.length / 2;
   const limit = entry.maxBytes ?? originalBytes;
-  const overflow = draftBytes !== null && draftBytes > limit;
+  const relocatable = pointerCount(entry) > 0;
+  const overflow = draftBytes !== null && draftBytes > limit && !relocatable;
   const dirty = draft !== (entry.translatedText ?? "");
 
   return (
@@ -859,9 +866,11 @@ function EntryEditor({
             {draftBytes === null
               ? t("editor.noEncoder")
               : `${t("editor.bytes", { n: draftBytes })} · ${
-                  entry.maxBytes !== null
-                    ? t("editor.bytesLimit", { max: entry.maxBytes })
-                    : t("editor.bytesOriginal", { n: originalBytes })
+                  relocatable
+                    ? `${t("editor.bytesOriginal", { n: originalBytes })} · ${t("editor.relocatable")}`
+                    : entry.maxBytes !== null
+                      ? t("editor.bytesLimit", { max: entry.maxBytes })
+                      : t("editor.bytesOriginal", { n: originalBytes })
                 }`}
           </p>
         </div>

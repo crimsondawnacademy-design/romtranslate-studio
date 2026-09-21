@@ -11,7 +11,7 @@ export function formatBytes(bytes: number): string {
   return `${value.toFixed(value >= 100 ? 0 : 1)} ${unit}`;
 }
 
-import { TextEncodingWire } from "./types";
+import { TextEncodingWire, TextEntry } from "./types";
 
 /** Bytes da string no encoding destino; null = nao codificavel ou sem encoder. */
 export function encodedByteLength(
@@ -34,6 +34,12 @@ export function encodedByteLength(
     case "shift_jis":
       return null;
   }
+}
+
+/** Ponteiros em tabela que o adapter achou pra string (0 = so in-place). */
+export function pointerCount(entry: TextEntry): number {
+  const pointers = (entry.metadata as { pointers?: unknown } | null)?.pointers;
+  return Array.isArray(pointers) ? pointers.length : 0;
 }
 
 export function formatOffset(offset: number | null): string {

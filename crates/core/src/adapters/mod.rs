@@ -5,6 +5,7 @@ pub(crate) mod inplace;
 pub(crate) mod iso9660;
 pub mod nds;
 pub mod nes;
+pub(crate) mod pointers;
 pub mod ps1;
 pub mod ps2;
 pub mod psp;

@@ -158,7 +158,7 @@ fn stream_apply_iso(
             view.len()
         )));
     }
-    let plan = crate::adapters::inplace::plan_in_place(&view, entries)?;
+    let plan = crate::adapters::inplace::plan_in_place(&view, entries, false)?;
     drop(view);
 
     fs::copy(source, dest_tmp).map_err(|e| CoreError::io(dest_tmp, e))?;

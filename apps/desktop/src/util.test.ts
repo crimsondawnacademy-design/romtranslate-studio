@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { defaultProjectDir, encodedByteLength, formatBytes, formatOffset } from "./util";
+import {
+  defaultProjectDir,
+  encodedByteLength,
+  formatBytes,
+  formatOffset,
+  pointerCount,
+} from "./util";
+import { TextEntry } from "./types";
 
 describe("encodedByteLength", () => {
   it("calcula por encoding e devolve null quando nao codifica", () => {
@@ -41,5 +48,15 @@ describe("defaultProjectDir", () => {
 
   it("aceita separador Windows", () => {
     expect(defaultProjectDir("C:\\roms\\Game.smc")).toBe("C:\\roms\\Game.rtsproj");
+  });
+});
+
+describe("pointerCount", () => {
+  const entry = (metadata: unknown) => ({ metadata }) as unknown as TextEntry;
+  it("conta ponteiros em tabela e tolera metadata sem eles", () => {
+    expect(pointerCount(entry({ terminated: true, pointers: [2048, 2176] }))).toBe(2);
+    expect(pointerCount(entry({ terminated: true }))).toBe(0);
+    expect(pointerCount(entry(null))).toBe(0);
+    expect(pointerCount(entry({ pointers: "lixo" }))).toBe(0);
   });
 });

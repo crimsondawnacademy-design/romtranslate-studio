@@ -80,6 +80,13 @@ ponteiros do RTSF). **Nunca** faça busca/substituição global de bytes.
   o arquivo pode não ser o mesmo de quando extraiu).
 - Atualize o que o formato exigir: ponteiros, terminadores, **checksums**
   (o GBA recalcula o header checksum; o RTSF, o checksum do arquivo).
+- Tradução maior que o espaço original: só realoque se souber ONDE estão os
+  ponteiros. `adapters::pointers` resolve ponteiros absolutos de 32 bits LE
+  (reconhece **tabelas** — 2+ ponteiros seguidos pra inícios de string —,
+  nunca busca/troca global de bytes, que a spec proíbe; e `relocate` faz
+  anti-drift + auto-checagem). O GBA é o exemplo: marque as entries com
+  `metadata.pointers`, chame `plan_in_place(.., true)` e depois `relocate`.
+  Sem tabela conhecida → `Err` pedindo texto menor.
 - Entries sem tradução mantêm o original (`kept_original`); entries de outro
   scanner que você não entende → `ignored_generic`, nunca erro silencioso.
 - Erros orientam o usuário: diga QUAL entry, QUANTOS bytes, o que fazer

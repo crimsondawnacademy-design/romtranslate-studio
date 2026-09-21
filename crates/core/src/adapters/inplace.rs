@@ -1,8 +1,11 @@
 //! Reinsercao IN-PLACE compartilhada (padrao do GBA, reusado pelo NDS):
 //! cada traducao ocupa exatamente o espaco da string original (mesmo tamanho
-//! ou menor), sem relocacao. All-or-nothing; `finalize` recalcula o que o
-//! formato exigir (checksums de header) depois de todas as escritas.
+//! ou menor). All-or-nothing; `finalize` recalcula o que o formato exigir
+//! (checksums de header) depois de todas as escritas. Traducao maior so
+//! passa se o adapter permitir relocacao E a string tiver ponteiros em
+//! tabela (`adapters::pointers`) — senao e erro pedindo texto menor.
 
+use super::pointers::Relocation;
 use crate::adapter::{AppliedImage, ApplyReport};
 use crate::error::{CoreError, Result};
 use crate::types::{TextEncoding, TextEntry};
@@ -35,21 +38,26 @@ fn encode(entry_id: &str, text: &str, encoding: &TextEncoding) -> Result<Option<
 /// (`apply_in_place`) ou direto num arquivo (reinsercao streaming).
 pub struct InPlacePlan {
     pub writes: Vec<(usize, Vec<u8>)>,
+    /// Traducoes que nao cabem mas tem ponteiros em tabela — o adapter que
+    /// conhece o formato do ponteiro grava via `pointers::relocate`.
+    pub relocations: Vec<Relocation>,
     pub report: ApplyReport,
 }
 
 /// Valida e monta o plano de escritas. Regras:
 /// - sanity anti-drift: os bytes atuais precisam ser identicos a `original_bytes`;
-/// - traducao serializada tem que caber no espaco original;
+/// - traducao serializada tem que caber no espaco original, exceto string
+///   terminada com ponteiros em tabela quando `allow_relocation`;
 /// - sobra preenchida com terminador (0x00) se o run original era terminado,
 ///   senao espaco (fixed-width) — em ASCII/UTF-8; UTF-16 sempre 0x00 (par).
-pub fn plan_in_place(data: &[u8], entries: &[TextEntry]) -> Result<InPlacePlan> {
+pub fn plan_in_place(
+    data: &[u8],
+    entries: &[TextEntry],
+    allow_relocation: bool,
+) -> Result<InPlacePlan> {
     let mut writes = Vec::new();
-    let mut report = ApplyReport {
-        applied: 0,
-        kept_original: 0,
-        ignored_generic: 0,
-    };
+    let mut relocations = Vec::new();
+    let mut report = ApplyReport::default();
 
     for entry in entries {
         let Some(offset) = entry.offset.map(|o| o as usize) else {
@@ -77,18 +85,10 @@ pub fn plan_in_place(data: &[u8], entries: &[TextEntry]) -> Result<InPlacePlan> 
                 entry.id
             )));
         }
-        let Some(bytes) = encode(&entry.id, translation, &entry.encoding)? else {
+        let Some(mut bytes) = encode(&entry.id, translation, &entry.encoding)? else {
             report.ignored_generic += 1;
             continue;
         };
-        if bytes.len() > slot {
-            return Err(CoreError::Project(format!(
-                "entry {}: traducao ocupa {} bytes; o espaco original tem {slot} — encurte \
-                 o texto (reinsercao conservadora nao realoca)",
-                entry.id,
-                bytes.len()
-            )));
-        }
         let terminated = entry
             .metadata
             .get("terminated")
@@ -98,6 +98,29 @@ pub fn plan_in_place(data: &[u8], entries: &[TextEntry]) -> Result<InPlacePlan> 
             entry.encoding,
             TextEncoding::Utf16Le | TextEncoding::Utf16Be
         );
+        if bytes.len() > slot {
+            let pointers = entry.pointer_offsets();
+            // So string terminada: quem le por tamanho fixo nao aceita texto maior.
+            if !allow_relocation || !terminated || pointers.is_empty() {
+                return Err(CoreError::Project(format!(
+                    "entry {}: traducao ocupa {} bytes; o espaco original tem {slot} — encurte \
+                     o texto (sem tabela de ponteiros conhecida, esta string nao pode ser \
+                     realocada)",
+                    entry.id,
+                    bytes.len()
+                )));
+            }
+            bytes.resize(bytes.len() + if is_utf16 { 2 } else { 1 }, 0);
+            relocations.push(Relocation {
+                entry_id: entry.id.clone(),
+                original_offset: offset,
+                bytes,
+                pointers,
+            });
+            report.applied += 1;
+            report.relocated += 1;
+            continue;
+        }
         let pad = if terminated || is_utf16 { 0x00 } else { 0x20 };
         let mut patch = vec![pad; slot];
         patch[..bytes.len()].copy_from_slice(&bytes);
@@ -105,17 +128,21 @@ pub fn plan_in_place(data: &[u8], entries: &[TextEntry]) -> Result<InPlacePlan> 
         report.applied += 1;
     }
 
-    Ok(InPlacePlan { writes, report })
+    Ok(InPlacePlan {
+        writes,
+        relocations,
+        report,
+    })
 }
 
-/// Aplica o plano numa copia em memoria; `finalize` roda por ultimo
-/// (recalculo de checksums do formato).
+/// Aplica o plano numa copia em memoria, sem relocacao; `finalize` roda por
+/// ultimo (recalculo de checksums do formato).
 pub fn apply_in_place(
     data: &[u8],
     entries: &[TextEntry],
     finalize: impl FnOnce(&mut [u8]),
 ) -> Result<AppliedImage> {
-    let plan = plan_in_place(data, entries)?;
+    let plan = plan_in_place(data, entries, false)?;
     let mut out = data.to_vec();
     for (offset, patch) in &plan.writes {
         out[*offset..offset + patch.len()].copy_from_slice(patch);
