@@ -6,6 +6,7 @@
 
 | data | maquina | ferramenta | modelo | o_que_fez | arquivos_tocados |
 |---|---|---|---|---|---|
+| 2026-09-20 | Mac mini M1 (casa) | claude | claude-opus-5 | Release v0.1.0 cortado: 4 plataformas ok, 1 release rascunho com 9 anexos; acentos corrigidos no corpo do release | `.github/workflows/release.yml`, `.ctx/STATE.md` |
 | 2026-09-20 | Mac mini M1 (casa) | claude | claude-opus-5 | CI de release: tag v* monta 4 bundles e abre release rascunho; dispatch = dry run; guard de versão; aviso de binário não assinado no README | `.github/workflows/release.yml`, `README.md` |
 | 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | Screenshot do README: UI real via Chrome headless + Tauri mockado (dados fictícios), PNG retina em docs/assets | `README.md`, `docs/assets/screenshot.png` |
 | 2026-09-15 | Mac mini M1 (casa) | claude | claude-fable-5 | Streaming PS2: mmap (fileio::read_view) na extração/verify/patch, reinserção streaming p/ ISO >2 GiB (plan_in_place + escrita pontual), verify_bps_against sem materializar target | `crates/core/src/{fileio,reinsert,patch}.rs`, `crates/core/src/adapters/{inplace,ps2}.rs`, `crates/core/tests/{streaming,bps}.rs` |

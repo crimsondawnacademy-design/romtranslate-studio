@@ -98,7 +98,7 @@ jobs:
           retryAttempts: 3
           args: ${{ matrix.args }}
           releaseBody: |
-            Alpha. Binarios **nao assinados** — projeto pessoal, sem certificado
+            Alpha. Binários **não assinados** — projeto pessoal, sem certificado
             de desenvolvedor (Apple e Microsoft cobram por isso).
 
             **Qual arquivo baixar**
@@ -109,20 +109,20 @@ jobs:
             - Linux: `*_amd64.deb` ou `*.x86_64.rpm` (~6 MB) — ou
               `*_amd64.AppImage` (~80 MB, roda sem instalar)
 
-            **A primeira execucao vai dar aviso** — e esperado, por causa da
+            **A primeira execução vai dar aviso** — é esperado, por causa da
             falta de assinatura:
 
-            - macOS ("o app esta danificado" ou "nao pode ser aberto"): depois
+            - macOS ("o app está danificado" ou "não pode ser aberto"): depois
               de arrastar pra Aplicativos, rode no Terminal
               `xattr -cr "/Applications/RomTranslate Studio.app"`
-            - Windows (SmartScreen): "Mais informacoes" > "Executar assim mesmo"
+            - Windows (SmartScreen): "Mais informações" → "Executar assim mesmo"
             - Linux: `chmod +x RomTranslate*.AppImage`
 
-            **Antes de usar**: o suporte por plataforma e experimental e a
-            reinsercao e conservadora — a traducao precisa caber no espaco em
-            bytes da original. O arquivo de origem NUNCA e modificado: o app
-            grava numa copia de trabalho e exporta patch IPS/BPS. A matriz de
-            compatibilidade por plataforma esta no README.
+            **Antes de usar**: o suporte por plataforma é experimental e a
+            reinserção é conservadora — a tradução precisa caber no espaço em
+            bytes da original. O arquivo de origem NUNCA é modificado: o app
+            grava numa cópia de trabalho e exporta patch IPS/BPS. A matriz de
+            compatibilidade por plataforma está no README.
 
             ---
 
