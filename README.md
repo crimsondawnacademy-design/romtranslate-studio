@@ -14,10 +14,28 @@ cópia de trabalho → **patch IPS** com manifest.
 
 *Projeto fictício de demonstração — nenhum dado de jogo real.*
 
+## Baixar
+
+Binários prontos saem em
+[Releases](https://github.com/crimsondawnacademy-design/romtranslate-studio/releases):
+`.dmg` para macOS (Apple Silicon e Intel), `-setup.exe` ou `.msi` para Windows,
+`.AppImage` ou `.deb` para Linux.
+
+Os binários **não são assinados** — projeto pessoal, e certificado de
+desenvolvedor é pago. Na primeira execução o sistema reclama; é esperado:
+
+- **macOS** ("o app está danificado"): depois de arrastar pra Aplicativos, rode
+  no Terminal `xattr -cr "/Applications/RomTranslate Studio.app"`
+- **Windows** (SmartScreen): "Mais informações" → "Executar assim mesmo"
+- **Linux**: `chmod +x RomTranslate*.AppImage`
+
+Prefere compilar do código? Veja [Rodando](#rodando).
+
 ## O que funciona hoje
 
-- **Detecção** de plataforma com confiança e evidências (GBA, NES, SNES e a
-  fixture sintética RTSF);
+- **Detecção** de plataforma com confiança e evidências em 11 formatos (GBA,
+  NES, SNES, NDS, GameCube, Wii, Wii U, PS1, PS2, PSP e a fixture sintética
+  RTSF);
 - **Extração**: scanner genérico (ASCII, UTF-8, UTF-16 LE/BE, tabelas `.tbl`)
   para descoberta + extração estruturada com limites reais nos adapters que a
   suportam;

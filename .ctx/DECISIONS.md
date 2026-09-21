@@ -268,3 +268,44 @@ resultado byte a byte idêntico ao caminho em memória.
 **Consequência:** extração/reinserção/patch de DVD dual layer inteiro com
 RAM limitada ao page cache. Premissa documentada do mmap: ninguém altera
 o arquivo durante a operação (a mesma da leitura normal).
+
+## 2026-09-20 — Release: rascunho, binário não assinado e ubuntu-22.04
+
+**Contexto:** o projeto estava sem binário — pra testar era preciso Rust +
+pnpm + compilar, o que elimina quase todo o público de rom hacking.
+
+**Decisões:**
+
+1. **Release sai como RASCUNHO** (`releaseDraft: true`). Com matriz de 4
+   plataformas e `fail-fast: false`, se o Windows quebrar o macOS ainda
+   sobe — e um release público com 3 de 4 binários é pior que nenhum.
+   Rascunho = o Rhuan confere os 4 anexos e clica em Publish.
+
+2. **`workflow_dispatch` é dry run.** A tauri-action só cria release se
+   receber `tagName`; passando vazio ela apenas compila. Com
+   `uploadWorkflowArtifacts` os bundles ficam baixáveis na página do run.
+   Dá pra testar o pipeline inteiro sem criar tag nem release.
+
+3. **Guard de versão como primeiro step.** Tag `v0.2.0` com
+   `tauri.conf.json` em 0.1.0 gera release rotulado errado, e o conserto é
+   apagar tag + release. Falha em 1s, em vez de descobrir depois de 4
+   builds. Ficou como step (não job separado) pra evitar a ginástica de
+   `needs` + `if: always()` — roda 4x e custa nada.
+
+4. **`ubuntu-22.04`, não `ubuntu-latest`.** glibc mais velha: o AppImage e
+   o .deb rodam também em distro antiga. Conferido no actions/runner-images
+   que 22.04 segue ativo e sem marca de deprecação (o macOS 14 é que está).
+
+5. **Binários não assinados, e isso é documentado em voz alta.** Certificado
+   Apple/Microsoft é pago e o projeto é custo zero. O efeito prático é o
+   macOS dizer "o app está danificado" — quem não souber do `xattr -cr`
+   conclui que o programa é quebrado. Por isso o aviso vai no README E no
+   corpo do release, com o comando exato, em PT-BR e um resumo em inglês.
+
+6. **Dois builds de macOS em vez de universal.** É o padrão do exemplo
+   oficial da tauri-action; downloads menores e fica explícito pro usuário
+   qual é o dele.
+
+**Verificação:** build release local no M1 antes de shipar o workflow —
+DMG de 5 MB, `.app` com identifier e versão corretos, assinatura
+`adhoc/linker-signed` (confirma o aviso de não assinado).

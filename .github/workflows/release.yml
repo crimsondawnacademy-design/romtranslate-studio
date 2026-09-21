@@ -1,0 +1,133 @@
+name: Release
+
+# Tag `v*` publica os binarios num release RASCUNHO (revisar e clicar em
+# Publish). O dispatch manual e dry run: compila as 4 plataformas e sobe os
+# bundles como artifact do workflow, sem criar release nenhum.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bundle:
+    strategy:
+      # Sem fail-fast: se o Windows quebrar, ainda quero ver o resto.
+      # O release fica em rascunho justamente pra nao publicar incompleto.
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+            rust_targets: aarch64-apple-darwin
+          - platform: macos-latest
+            args: --target x86_64-apple-darwin
+            rust_targets: x86_64-apple-darwin
+          # 22.04 de proposito (e nao ubuntu-latest): glibc mais velha, entao
+          # o AppImage/deb tambem roda em distro antiga.
+          - platform: ubuntu-22.04
+            args: ""
+            rust_targets: ""
+          - platform: windows-latest
+            args: ""
+            rust_targets: ""
+
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Tag que nao bate com a versao do app gera release rotulado errado, e
+      # isso so se conserta apagando tag + release. Falha em 1s, antes do build.
+      - name: Confere tag contra a versao do app
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          conf=$(grep -m1 '"version"' apps/desktop/src-tauri/tauri.conf.json \
+            | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]+)".*/\1/')
+          tag="${GITHUB_REF_NAME#v}"
+          if [ "$conf" != "$tag" ]; then
+            echo "::error::tag $GITHUB_REF_NAME nao bate com a versao $conf do tauri.conf.json"
+            exit 1
+          fi
+          echo "tag $GITHUB_REF_NAME confere com a versao $conf"
+
+      - name: Dependencias de sistema (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev \
+            patchelf xdg-utils
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          # Os dois builds de macOS rodam no mesmo OS: sem isso brigam pelo
+          # mesmo cache.
+          key: ${{ matrix.args }}
+
+      - uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          # Sem tagName a action so compila — e isso que faz o dispatch
+          # manual virar dry run.
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: RomTranslate Studio __VERSION__
+          releaseDraft: true
+          prerelease: true
+          # O app nao tem auto-update: nada de latest.json nem assinatura.
+          uploadUpdaterJson: false
+          uploadUpdaterSignatures: false
+          uploadWorkflowArtifacts: ${{ !startsWith(github.ref, 'refs/tags/') }}
+          # 4 jobs correndo juntos disputam a criacao do release; retry cobre
+          # a corrida e falha de upload passageira.
+          retryAttempts: 3
+          args: ${{ matrix.args }}
+          releaseBody: |
+            Alpha. Binarios **nao assinados** — projeto pessoal, sem certificado
+            de desenvolvedor (Apple e Microsoft cobram por isso).
+
+            **Qual arquivo baixar**
+
+            - macOS Apple Silicon (M1 em diante): `*_aarch64.dmg`
+            - macOS Intel: `*_x64.dmg`
+            - Windows: `*-setup.exe` (instalador) ou `*_x64_en-US.msi`
+            - Linux: `*.AppImage` (roda direto) ou `*.deb`
+
+            **A primeira execucao vai dar aviso** — e esperado, por causa da
+            falta de assinatura:
+
+            - macOS ("o app esta danificado" ou "nao pode ser aberto"): depois
+              de arrastar pra Aplicativos, rode no Terminal
+              `xattr -cr "/Applications/RomTranslate Studio.app"`
+            - Windows (SmartScreen): "Mais informacoes" > "Executar assim mesmo"
+            - Linux: `chmod +x RomTranslate*.AppImage`
+
+            **Antes de usar**: o suporte por plataforma e experimental e a
+            reinsercao e conservadora — a traducao precisa caber no espaco em
+            bytes da original. O arquivo de origem NUNCA e modificado: o app
+            grava numa copia de trabalho e exporta patch IPS/BPS. A matriz de
+            compatibilidade por plataforma esta no README.
+
+            ---
+
+            *English*: unsigned builds. On macOS run
+            `xattr -cr "/Applications/RomTranslate Studio.app"` after installing;
+            on Windows use SmartScreen > More info > Run anyway. Alpha software:
+            per-platform support is experimental, translations must fit the
+            original byte space, and the source file is never modified — the app
+            writes a working copy and exports an IPS/BPS patch.
