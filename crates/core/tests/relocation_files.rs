@@ -14,7 +14,9 @@ use romtranslate_core::patch::{apply_bps, apply_ips, export_patch};
 use romtranslate_core::project::{create_project, CreateProjectArgs};
 use romtranslate_core::reinsert::reinsert_project;
 use romtranslate_core::synth;
-use romtranslate_core::types::{Platform, ResourceDescriptor, TextEntry, TranslationStatus};
+use romtranslate_core::types::{
+    Platform, Pointer, ResourceDescriptor, TextEntry, TranslationStatus,
+};
 use romtranslate_core::validate::{validate_entry, IssueKind, Severity};
 
 struct TempDir(PathBuf);
@@ -297,4 +299,60 @@ fn validator_uses_the_slack_as_ceiling_on_ps1() {
     assert!(over
         .iter()
         .any(|i| i.kind == IssueKind::ByteOverflow && i.severity == Severity::Error));
+}
+
+// -------------------------------------------------------- u16 e padding ----
+
+/// Offset u16 (em +2i+2) da tabela de `message_table_u16_file`.
+fn u16_entry(file: &[u8], i: usize) -> usize {
+    u16::from_le_bytes(file[2 + i * 2..4 + i * 2].try_into().unwrap()) as usize
+}
+
+#[test]
+fn u16_table_needs_four_and_relocates_on_nds_and_ps1() {
+    // NDS: a tabela de 4 conta; a de 3 (em +0x2C) nao.
+    let rom = synth::make_nds_rom_with_message_table();
+    let mut entries = NdsAdapter.extract_structured(&rom).unwrap();
+    let msg16 = resource(&NdsAdapter, &rom, "msg16.bin").offset as usize;
+    assert_eq!(
+        find(&entries, "msg16.bin", "NEW GAME").pointers(),
+        vec![Pointer {
+            at: msg16 + 0x02,
+            width: 2
+        }],
+        "so a tabela de 4"
+    );
+    translate_in(&mut entries, "msg16.bin", &[("EXIT", "SAIR DO JOGO")]); // 12 > 4
+    let out = NdsAdapter.apply_text(&rom, &entries).unwrap().bytes;
+    let moved = resource(&NdsAdapter, &out, "msg16.bin");
+    let file = &out[moved.offset as usize..(moved.offset + moved.size) as usize];
+    assert_eq!(&file[u16_entry(file, 3)..][..13], b"SAIR DO JOGO\0");
+    assert_eq!(u16_entry(file, 0), 0x0C, "as outras entradas nao mudam");
+    assert!(NdsAdapter.verify(&out).unwrap().ok);
+
+    // PS1: mesma tabela u16, relocacao na sobra do setor final.
+    let bin = synth::make_ps1_bin_with_message_table();
+    let mut entries = Ps1Adapter.extract_structured(&bin).unwrap();
+    translate_in(&mut entries, "MSG16.DAT", &[("EXIT", "SAIR DO JOGO")]);
+    let out = Ps1Adapter.apply_text(&bin, &entries).unwrap().bytes;
+    let msg = resource(&Ps1Adapter, &out, "MSG16.DAT");
+    let file = &out[msg.offset as usize..(msg.offset + msg.size) as usize];
+    assert_eq!(&file[u16_entry(file, 3)..][..13], b"SAIR DO JOGO\0");
+    let verification = Ps1Adapter.verify(&out).unwrap();
+    assert!(verification.ok, "{:?}", verification.problems);
+}
+
+#[test]
+fn zero_padding_after_a_leading_string_is_not_a_table() {
+    let rom = synth::make_nds_rom_with_message_table();
+    let entries = NdsAdapter.extract_structured(&rom).unwrap();
+    assert!(find(&entries, "title.bin", "TITLE SCREEN")
+        .pointers()
+        .is_empty());
+
+    let bin = synth::make_ps1_bin_with_message_table();
+    let entries = Ps1Adapter.extract_structured(&bin).unwrap();
+    assert!(find(&entries, "TITLE.DAT", "TITLE SCREEN")
+        .pointers()
+        .is_empty());
 }

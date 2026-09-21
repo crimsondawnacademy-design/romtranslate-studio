@@ -36,10 +36,11 @@ export function encodedByteLength(
   }
 }
 
-/** Ponteiros em tabela que o adapter achou pra string (0 = so in-place). */
+/** Ponteiros em tabela (u32 e u16) que o adapter achou pra string (0 = so in-place). */
 export function pointerCount(entry: TextEntry): number {
-  const pointers = (entry.metadata as { pointers?: unknown } | null)?.pointers;
-  return Array.isArray(pointers) ? pointers.length : 0;
+  const meta = entry.metadata as { pointers?: unknown; pointers16?: unknown } | null;
+  const count = (list: unknown) => (Array.isArray(list) ? list.length : 0);
+  return count(meta?.pointers) + count(meta?.pointers16);
 }
 
 export function formatOffset(offset: number | null): string {

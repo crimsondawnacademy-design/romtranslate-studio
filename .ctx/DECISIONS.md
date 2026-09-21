@@ -428,3 +428,42 @@ aparecer em jogo real.
 **Salvaguarda geral:** `plan_in_place` recusa duas traduções gravando nos
 mesmos bytes (vale pra todo adapter e protege projeto antigo com entries já
 fundidas no banco). Projeto de NDS criado antes disto: re-extrair.
+
+## 2026-09-21 — Offsets u16 e as duas regras do modo relativo
+
+**Contexto:** arquivo de texto pequeno de DS/PS1 costuma usar offset de 16
+bits na tabela. Valor de 16 bits pequeno é ainda mais comum que o de 32 em
+dado binário, e num arquivo pequeno quase todo valor cai dentro dele.
+
+**A conta revelou um bug no u32 relativo (de hoje de manhã):** se o arquivo
+começa com uma string (offset 0), toda palavra zerada é "ponteiro" pra ela.
+Padding de zeros vira tabela, e realocar essa string reescreveria os zeros —
+que podem ser campo de dado de verdade (contagem = 0). As fixtures não
+tinham string no offset 0 seguida de zeros, por isso passou.
+
+**Decisão — duas regras, só pro modo relativo** (`PointerFormat.relative`):
+
+1. **Alvo 0 não conta.** Custo: string no offset 0 do arquivo não reloca por
+   tabela (raro — a tabela costuma abrir o arquivo, com as strings depois).
+2. **Run estritamente crescente.** Tabela de texto real vem na ordem em que
+   as strings foram gravadas; padding, campo constante e número solto quase
+   nunca formam sequência crescente de inícios de string. Corta os falsos
+   positivos por ~k! (run de k). Custo: tabela com string repetida ou fora de
+   ordem não é detectada — a string fica in-place (falha segura).
+
+O GBA (absoluto) NÃO ganha a regra de ordem: tabela de struct {nome,
+descrição} intercala dois blocos de strings e não é crescente — e ponteiro
+de ROM (0x08xxxxxx) já é distintivo o bastante.
+
+**u16:** run mínimo 4 (u32 fica em 3). Pior caso — arquivo de 4 KB com uma
+string a cada 40 bytes — run crescente falso de 3 sai ~1 a cada 200
+arquivos; de 4, ~1 a cada 35 mil. Só procura u16 em arquivo cuja primeira
+posição de anexo (fim alinhado em 4) cabe em 64 KiB; `relocate` recusa com
+erro claro se um ponteiro de 16 bits não alcançar o destino.
+
+**Formato de dado:** metadata ganha `pointers16` ao lado de `pointers` (u32).
+Projeto antigo continua lendo igual. O formato de ponteiro do GBA foi pro
+`gba.rs` — conhecimento de plataforma não mora no módulo compartilhado.
+
+**Prova:** teste de mutação — com as regras desligadas, o teste do padding
+falha. O bug era real e o teste o pega.

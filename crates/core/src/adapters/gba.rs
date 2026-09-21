@@ -15,7 +15,7 @@ use std::collections::HashSet;
 
 use super::pointers::{
     ensure_pointers_untouched, find_pointer_tables, is_terminated, mark_relocatable, relocate,
-    MIN_RUN_ABSOLUTE,
+    PointerFormat,
 };
 use crate::adapter::{AppliedImage, GameAdapter, GameInput, VerificationReport};
 use crate::error::{CoreError, Result};
@@ -28,8 +28,16 @@ const HEADER_LEN: usize = 0xC0;
 const FIXED_VALUE_OFFSET: usize = 0xB2;
 const CHECKSUM_OFFSET: usize = 0xBD;
 const TITLE_RANGE: std::ops::Range<usize> = 0xA0..0xAC;
-/// ROM mapeada em 0x08000000 (GBATEK): ponteiro pra texto = base + offset.
-const ROM_BASE: u32 = 0x0800_0000;
+/// ROM mapeada em 0x08000000 (GBATEK): ponteiro pra texto = base + offset,
+/// u32. Ponteiro de ROM quase nunca aparece por acaso — 2 seguidos ja sao
+/// estrutura. Sem exigir ordem: tabela de struct {nome, descricao} intercala
+/// dois blocos de strings.
+const ROM_POINTERS: PointerFormat = PointerFormat {
+    width: 4,
+    base: 0x0800_0000,
+    min_run: 2,
+    relative: false,
+};
 /// Janela de ROM do cartucho: 32 MiB (0x08000000-0x09FFFFFF).
 const MAX_ROM_LEN: usize = 32 * 1024 * 1024;
 
@@ -138,7 +146,7 @@ impl GameAdapter for GbaAdapter {
             .filter(|e| is_terminated(e))
             .filter_map(|e| e.offset.map(|o| o as usize))
             .collect();
-        let tables = find_pointer_tables(data, ROM_BASE, &starts, MIN_RUN_ABSOLUTE);
+        let tables = find_pointer_tables(data, &ROM_POINTERS, &starts);
 
         for e in entries.iter_mut() {
             let pointers = e.offset.and_then(|o| tables.get(&(o as usize)));
@@ -170,7 +178,7 @@ impl GameAdapter for GbaAdapter {
             out[*offset..offset + patch.len()].copy_from_slice(patch);
         }
         ensure_pointers_untouched(data, &out, entries)?;
-        relocate(&mut out, &plan.relocations, ROM_BASE, MAX_ROM_LEN)?;
+        relocate(&mut out, &plan.relocations, ROM_POINTERS.base, MAX_ROM_LEN)?;
         out[CHECKSUM_OFFSET] = header_checksum(&out);
         Ok(AppliedImage {
             bytes: out,

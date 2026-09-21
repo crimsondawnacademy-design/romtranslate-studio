@@ -89,11 +89,16 @@ encoding da outra. Resolva a sobreposição na extração (veja
   (o GBA recalcula o header checksum; o RTSF, o checksum do arquivo).
 - Tradução maior que o espaço original: só realoque se souber ONDE estão os
   ponteiros E onde o texto novo pode morar. `adapters::pointers` reconhece
-  **tabelas** de ponteiros u32 LE (nunca busca/troca global de bytes, que a
-  spec proíbe): `find_pointer_tables` com base absoluta (GBA, run mínimo 2)
-  ou `file_relative_tables` pra offsets dentro de um arquivo (NDS, PS1, run
-  mínimo 3 — número pequeno aparece à toa em dado binário). `relocate` faz
-  anti-drift + auto-checagem. Fluxo: marque as entries com
+  **tabelas** de ponteiros LE (nunca busca/troca global de bytes, que a spec
+  proíbe), descritas por um `PointerFormat` (largura 4 ou 2, base, run
+  mínimo, relativo ou não): `find_pointer_tables` com base absoluta (o GBA
+  define o dele: u32, run 2) ou `file_relative_tables` pra offsets dentro de
+  um arquivo (NDS, PS1: u32 com run 3 e u16 com run 4). Em offset relativo a
+  tabela tem que ser **estritamente crescente** e alvo 0 não conta — número
+  pequeno aparece à toa em dado binário, e sem isso padding de zeros vira
+  "tabela" apontando pra string que abre o arquivo. `relocate` faz
+  anti-drift, confere se o ponteiro de 16 bits alcança o destino, e
+  auto-checagem. Fluxo: marque as entries com
   `mark_relocatable`, chame `plan_in_place(.., true)`,
   `ensure_pointers_untouched` e `relocate` no buffer certo (a imagem no GBA,
   o arquivo no NDS/PS1). Sem tabela → `Err` pedindo texto menor.

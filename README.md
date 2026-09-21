@@ -99,13 +99,15 @@ corromperia o jogo em silêncio. Onde o texto novo vai depende da plataforma:
 - **GBA**: fim do ROM (o cartucho é lido direto pela CPU). Ponteiro de ROM
   quase nunca aparece por acaso, então 2 seguidos já contam como tabela.
 - **Nintendo DS**: fim do arquivo do filesystem; o arquivo inteiro vai pro
-  fim do ROM e a FAT passa a apontar pra ele. Como o ponteiro ali é um
-  deslocamento pequeno dentro do arquivo (número comum em dado binário), a
-  tabela precisa de 3 seguidos.
+  fim do ROM e a FAT passa a apontar pra ele. O ponteiro ali é um
+  deslocamento pequeno dentro do arquivo, de 32 ou 16 bits — e número pequeno
+  aparece à toa em dado binário. Por isso a tabela precisa estar em **ordem
+  crescente**, com 3 seguidos (32 bits) ou 4 (16 bits); ponteiro de 16 bits
+  só alcança os primeiros 64 KB do arquivo.
 - **PS1**: sobra do último setor do arquivo — o hardware lê setores
   inteiros, então esse espaço sempre chega na RAM. É pouco (menos de 2 KB por
   arquivo, dividido entre as strings realocadas); o editor mostra o teto de
-  cada uma.
+  cada uma. Mesmas tabelas de 32 ou 16 bits do DS.
 
 **Fica de fora, de propósito**: o binário ARM9 do DS e o executável do PS1.
 Os dois são copiados pra RAM, e logo depois deles vêm variáveis que o jogo

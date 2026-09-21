@@ -195,10 +195,39 @@ fn message_table_file() -> Vec<u8> {
     msg
 }
 
-/// NDS com `msg.bin` (tabela de offsets relativos) alem dos arquivos base.
+/// Mesmo tipo de arquivo com offsets u16: tabela de 4 (conta) e depois uma
+/// de 3 (nao conta: em u16 o run minimo e 4).
+fn message_table_u16_file() -> Vec<u8> {
+    let mut msg = vec![0u8; 0x34];
+    msg[0..2].copy_from_slice(&4u16.to_le_bytes());
+    for (i, target) in [0x0Cu16, 0x15, 0x1E, 0x26].into_iter().enumerate() {
+        msg[2 + i * 2..4 + i * 2].copy_from_slice(&target.to_le_bytes());
+    }
+    plant(&mut msg, 0x0C, b"NEW GAME\0");
+    plant(&mut msg, 0x15, b"CONTINUE\0");
+    plant(&mut msg, 0x1E, b"OPTIONS\0");
+    plant(&mut msg, 0x26, b"EXIT\0");
+    for (i, target) in [0x0Cu16, 0x15, 0x1E].into_iter().enumerate() {
+        msg[0x2C + i * 2..0x2E + i * 2].copy_from_slice(&target.to_le_bytes());
+    }
+    msg
+}
+
+/// String no offset 0 do arquivo + padding de zeros: sem a regra "alvo 0 nao
+/// conta", cada palavra zerada viraria ponteiro pra ela.
+fn zero_padded_title_file() -> Vec<u8> {
+    let mut title = b"TITLE SCREEN\0".to_vec();
+    title.resize(32, 0);
+    title
+}
+
+/// NDS com tabelas de offsets relativos alem dos arquivos base: `msg.bin`
+/// (u32), `msg16.bin` (u16) e `title.bin` (string no offset 0 + zeros).
 pub fn make_nds_rom_with_message_table() -> Vec<u8> {
     let mut files = base_nds_files();
     files.push(("msg.bin", message_table_file()));
+    files.push(("msg16.bin", message_table_u16_file()));
+    files.push(("title.bin", zero_padded_title_file()));
     build_nds(&files)
 }
 
@@ -512,8 +541,9 @@ pub fn make_ps1_bin() -> Vec<u8> {
     wrap_raw_2352(&plain)
 }
 
-/// PS1 com `MSG.DAT` (tabela de offsets relativos, sobra no setor final) e
-/// `FULL.DAT` (mesma estrutura com 2048 bytes exatos: nenhuma sobra).
+/// PS1 com `MSG.DAT` (tabela u32 de offsets relativos, sobra no setor final),
+/// `FULL.DAT` (mesma estrutura com 2048 bytes exatos: nenhuma sobra),
+/// `MSG16.DAT` (tabela u16) e `TITLE.DAT` (string no offset 0 + zeros).
 pub fn make_ps1_bin_with_message_table() -> Vec<u8> {
     let mut full = message_table_file();
     full.resize(2048, 0);
@@ -527,6 +557,8 @@ pub fn make_ps1_bin_with_message_table() -> Vec<u8> {
             ),
             ("MSG.DAT", message_table_file()),
             ("FULL.DAT", full),
+            ("MSG16.DAT", message_table_u16_file()),
+            ("TITLE.DAT", zero_padded_title_file()),
         ],
     );
     wrap_raw_2352(&plain)

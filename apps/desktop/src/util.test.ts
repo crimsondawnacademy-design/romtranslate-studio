@@ -55,6 +55,8 @@ describe("pointerCount", () => {
   const entry = (metadata: unknown) => ({ metadata }) as unknown as TextEntry;
   it("conta ponteiros em tabela e tolera metadata sem eles", () => {
     expect(pointerCount(entry({ terminated: true, pointers: [2048, 2176] }))).toBe(2);
+    expect(pointerCount(entry({ pointers16: [4, 8] }))).toBe(2);
+    expect(pointerCount(entry({ pointers: [16], pointers16: [4] }))).toBe(2);
     expect(pointerCount(entry({ terminated: true }))).toBe(0);
     expect(pointerCount(entry(null))).toBe(0);
     expect(pointerCount(entry({ pointers: "lixo" }))).toBe(0);

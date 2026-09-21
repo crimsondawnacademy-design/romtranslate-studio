@@ -6,6 +6,7 @@
 
 | data | maquina | ferramenta | modelo | o_que_fez | arquivos_tocados |
 |---|---|---|---|---|---|
+| 2026-09-21 | Mac mini M1 (casa) | claude | claude-opus-5 | Offsets u16 nas tabelas (run 4) + corrige bug latente do u32 relativo (padding de zeros virava tabela): alvo 0 não conta e run tem que ser crescente | `crates/core/src/adapters/{pointers,gba,inplace}.rs`, `crates/core/src/{types,synth}.rs`, `crates/core/tests/relocation_files.rs`, `apps/desktop/src/util*.ts`, `README.md`, `docs/ADAPTERS.md` |
 | 2026-09-21 | Mac mini M1 (casa) | claude | claude-opus-5 | Aviso no topo das notas da v0.1.0 (usar v0.1.1 por causa do bug do DS) | `.ctx/STATE.md` |
 | 2026-09-21 | Mac mini M1 (casa) | claude | claude-opus-5 | v0.1.1 publicada (pelo Rhuan) com notas de versão; download conferido sem login | `.ctx/STATE.md` |
 | 2026-09-21 | Mac mini M1 (casa) | claude | claude-opus-5 | Versão 0.1.1 + tag v0.1.1 (correção do NDS + relocação GBA/NDS/PS1) | `Cargo.toml`, `Cargo.lock`, `apps/desktop/package.json`, `apps/desktop/src-tauri/tauri.conf.json` |

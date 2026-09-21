@@ -186,20 +186,36 @@ pub struct TextEntry {
     pub metadata: serde_json::Value,
 }
 
+/// Ponteiro little-endian num offset da imagem: `width` 4 (u32) ou 2 (u16).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Pointer {
+    pub at: usize,
+    pub width: usize,
+}
+
 impl TextEntry {
-    /// Offsets dos ponteiros (em tabelas detectadas pelo adapter) que apontam
-    /// pro inicio desta string. Vazio = so reinsercao in-place.
+    /// Ponteiros (em tabelas detectadas pelo adapter) que apontam pro inicio
+    /// desta string. `metadata.pointers` sao u32; `metadata.pointers16`, u16.
+    /// Vazio = so reinsercao in-place.
+    pub fn pointers(&self) -> Vec<Pointer> {
+        let read = |key: &str, width: usize| {
+            self.metadata
+                .get(key)
+                .and_then(|v| v.as_array())
+                .into_iter()
+                .flatten()
+                .filter_map(|p| p.as_u64())
+                .map(move |at| Pointer {
+                    at: at as usize,
+                    width,
+                })
+        };
+        read("pointers", 4).chain(read("pointers16", 2)).collect()
+    }
+
+    /// So as posicoes dos ponteiros, de qualquer largura.
     pub fn pointer_offsets(&self) -> Vec<usize> {
-        self.metadata
-            .get("pointers")
-            .and_then(|v| v.as_array())
-            .map(|a| {
-                a.iter()
-                    .filter_map(|p| p.as_u64())
-                    .map(|p| p as usize)
-                    .collect()
-            })
-            .unwrap_or_default()
+        self.pointers().iter().map(|p| p.at).collect()
     }
 }
 

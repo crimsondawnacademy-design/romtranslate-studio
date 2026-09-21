@@ -100,7 +100,7 @@ pub fn plan_in_place(
             TextEncoding::Utf16Le | TextEncoding::Utf16Be
         );
         if bytes.len() > slot {
-            let pointers = entry.pointer_offsets();
+            let pointers = entry.pointers();
             // So string terminada: quem le por tamanho fixo nao aceita texto maior.
             if !allow_relocation || !terminated || pointers.is_empty() {
                 return Err(CoreError::Project(format!(
