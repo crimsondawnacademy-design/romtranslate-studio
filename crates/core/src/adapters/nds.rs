@@ -6,8 +6,16 @@
 //!
 //! Extracao: lista o filesystem e roda o scanner (ASCII + UTF-16LE, o encoding
 //! tipico de texto em DS) POR ARQUIVO, com `resource_path` preenchido.
-//! Reinsercao: in-place conservadora (mesmo espaco), CRC do header recalculado.
+//! Reinsercao: in-place (mesmo espaco), CRC do header recalculado. Traducao
+//! maior passa se a string tiver ponteiros numa TABELA de offsets relativos
+//! ao arquivo: o arquivo cresce e vai pro fim do ROM com a FAT reapontada.
+//! O binario ARM9 fica de fora (nem e extraido): ele divide a RAM principal
+//! com BSS e heap, e texto anexado nele seria zerado no boot.
 
+use super::pointers::{
+    ensure_pointers_untouched, file_relative_tables, mark_relocatable, relocate, to_file_relative,
+    Relocation,
+};
 use crate::adapter::{AppliedImage, GameAdapter, GameInput, VerificationReport};
 use crate::error::{CoreError, Result};
 use crate::scan::{scan_bytes, ScanConfig, ScanEncoding};
@@ -20,6 +28,16 @@ pub struct NdsAdapter;
 pub const HEADER_LEN: usize = 0x200;
 const LOGO_CRC_OFFSET: usize = 0x15C;
 const HEADER_CRC_OFFSET: usize = 0x15E;
+/// GBATEK: 014h = capacidade (128 KB << n); 080h = total usado do ROM.
+const CAPACITY_OFFSET: usize = 0x14;
+const USED_SIZE_OFFSET: usize = 0x80;
+/// Unidade da capacidade do chip (GBATEK: 128 KB << n).
+const CHIP_UNIT: usize = 128 * 1024;
+/// Maior cartao de DS: 4 Gbit.
+const MAX_ROM_LEN: usize = 512 * 1024 * 1024;
+/// Alinhamento de arquivo que as ferramentas de rebuild usam (bloco de leitura
+/// do cartao); o resto e preenchido com 0xFF, como o padding do proprio ROM.
+const FILE_ALIGN: usize = 0x200;
 /// Valor fixo do CRC do logo em ROMs validas (GBATEK).
 pub const LOGO_CRC_EXPECTED: u16 = 0xCF56;
 const MAX_FILES: usize = 8192;
@@ -161,6 +179,137 @@ fn walk_filesystem(data: &[u8], layout: &FsLayout) -> Result<Vec<ResourceDescrip
     Ok(files)
 }
 
+/// Uma leitura por trecho. Texto ASCII lido como UTF-16LE vira "CJK" falso
+/// na MESMA posicao (e o id e so o offset): no banco as duas leituras se
+/// fundiam e a traducao de uma era gravada com o encoding da outra —
+/// "NOVO JOGO" virava N\0O\0V\0... por cima do ASCII. O inverso tambem
+/// existe: kana UTF-16 lido como ASCII vira "B0D0F0". Regra: se as strings
+/// ASCII cobrem >= 3/4 do run UTF-16 e ele nao tem cara de kana (byte alto
+/// 0x30 em metade das unidades), e texto ASCII; senao, e UTF-16.
+/// ponytail: heuristica — texto japones UTF-16 so de kanji com bytes
+/// imprimiveis pode ser lido como ASCII; resolver por idioma de origem se
+/// isso aparecer em jogo real.
+fn resolve_encoding_overlaps(ascii: Vec<TextEntry>, utf16: Vec<TextEntry>) -> Vec<TextEntry> {
+    let span = |e: &TextEntry| {
+        let start = e.offset.unwrap_or(0) as usize;
+        (start, start + e.original_bytes.len())
+    };
+    let mut drop_ascii = vec![false; ascii.len()];
+    let mut kept_utf16 = Vec::new();
+    for u in utf16 {
+        let (us, ue) = span(&u);
+        // Runs de um scan sao ordenados e disjuntos: busca binaria no inicio.
+        let first = ascii.partition_point(|a| span(a).1 <= us);
+        let hits: Vec<usize> = (first..ascii.len())
+            .take_while(|&i| span(&ascii[i]).0 < ue)
+            .collect();
+        if hits.is_empty() {
+            kept_utf16.push(u);
+            continue;
+        }
+        let covered: usize = hits
+            .iter()
+            .map(|&i| {
+                let (s, e) = span(&ascii[i]);
+                e.min(ue) - s.max(us)
+            })
+            .sum();
+        let units = u.original_bytes.as_chunks::<2>().0;
+        let kana = units.iter().filter(|c| c[1] == 0x30).count() * 2 >= units.len();
+        if covered * 4 >= (ue - us) * 3 && !kana {
+            continue; // ASCII lido como UTF-16: descarta o run falso
+        }
+        for i in hits {
+            drop_ascii[i] = true;
+        }
+        kept_utf16.push(u);
+    }
+    ascii
+        .into_iter()
+        .zip(drop_ascii)
+        .filter(|(_, dropped)| !dropped)
+        .map(|(a, _)| a)
+        .chain(kept_utf16)
+        .collect()
+}
+
+/// Traducao que nao cabe cresce o ARQUIVO dela: a copia nova (strings
+/// anexadas + tabela reapontada) vai pro fim do ROM e a FAT passa a apontar
+/// pra ela — o que as ferramentas de rebuild de DS fazem, ja que o jogo acha
+/// arquivo pela FAT. A copia antiga fica no lugar, inofensiva.
+fn relocate_files(data: &[u8], out: &mut Vec<u8>, relocations: &[Relocation]) -> Result<()> {
+    let layout = fs_layout(data)?;
+    let mut files: Vec<(usize, usize, String)> = walk_filesystem(data, &layout)?
+        .into_iter()
+        .map(|f| (f.offset as usize, f.size as usize, f.path))
+        .collect();
+    // Arquivos-alias (mesmo range na FAT) sao um so: move uma vez.
+    files.sort();
+    files.dedup_by_key(|f| (f.0, f.1));
+
+    let mut consumed = 0;
+    for (start, len, path) in files {
+        let in_file = |abs: usize| abs.checked_sub(start).filter(|&r| r < len);
+        let mine: Vec<Relocation> = relocations
+            .iter()
+            .filter(|r| in_file(r.original_offset).is_some())
+            .cloned()
+            .collect();
+        if mine.is_empty() {
+            continue;
+        }
+        consumed += mine.len();
+        let relative = to_file_relative(&mine, in_file)?;
+        let mut bytes = out[start..start + len].to_vec();
+        let new_start = out.len().next_multiple_of(FILE_ALIGN);
+        let room = MAX_ROM_LEN
+            .checked_sub(new_start)
+            .ok_or_else(|| err("ROM ja no tamanho maximo de um cartao de DS"))?;
+        relocate(&mut bytes, &relative, 0, room).map_err(|e| err(format!("{path}: {e}")))?;
+        out.resize(new_start, 0xFF);
+        out.extend_from_slice(&bytes);
+        let new_end = out.len();
+        repoint_fat(out, &layout, (start, start + len), (new_start, new_end))?;
+    }
+    if consumed != relocations.len() {
+        return Err(err(
+            "string realocavel fora de qualquer arquivo do filesystem",
+        ));
+    }
+
+    let used = u32::try_from(out.len()).map_err(|_| err("ROM passaria de 4 GiB"))?;
+    out[USED_SIZE_OFFSET..USED_SIZE_OFFSET + 4].copy_from_slice(&used.to_le_bytes());
+    while out[CAPACITY_OFFSET] < 12 && CHIP_UNIT << out[CAPACITY_OFFSET] < out.len() {
+        out[CAPACITY_OFFSET] += 1;
+    }
+    Ok(())
+}
+
+/// Troca (start, end) de toda entrada da FAT que apontava pro arquivo antigo.
+fn repoint_fat(
+    out: &mut [u8],
+    layout: &FsLayout,
+    old: (usize, usize),
+    new: (usize, usize),
+) -> Result<()> {
+    let to_u32 = |v: usize| u32::try_from(v).map_err(|_| err("offset passa de 4 GiB"));
+    let old = (to_u32(old.0)?, to_u32(old.1)?);
+    let (new_start, new_end) = (to_u32(new.0)?, to_u32(new.1)?);
+    let mut hits = 0;
+    for k in 0..layout.fat_size / 8 {
+        let at = layout.fat_offset + k * 8;
+        if (read_u32(out, at)?, read_u32(out, at + 4)?) == old {
+            out[at..at + 4].copy_from_slice(&new_start.to_le_bytes());
+            out[at + 4..at + 8].copy_from_slice(&new_end.to_le_bytes());
+            hits += 1;
+        }
+    }
+    if hits == 0 {
+        return Err(err("entrada da FAT do arquivo realocado nao encontrada"));
+    }
+    Ok(())
+}
+
 impl GameAdapter for NdsAdapter {
     fn id(&self) -> &'static str {
         "nds.generic"
@@ -178,10 +327,10 @@ impl GameAdapter for NdsAdapter {
         AdapterCapabilities {
             detect: true,
             extract: true,
-            reinsert: true, // conservadora: in-place, sem relocacao
+            reinsert: true, // in-place; relocacao via crescimento do arquivo + FAT
             patch: true,
             compression: false,
-            pointer_relocation: false,
+            pointer_relocation: true,
             font_table: false,
             experimental: true,
             support_level: SupportLevel::Experimental,
@@ -265,26 +414,59 @@ impl GameAdapter for NdsAdapter {
         );
 
         let mut entries: Vec<TextEntry> = Vec::new();
-        'outer: for (path, start, end) in regions {
-            for encoding in [ScanEncoding::Ascii, ScanEncoding::Utf16Le] {
-                let outcome = scan_bytes(
+        // (inicio, fim, faixa de entries) de cada ARQUIVO — o header nao e
+        // arquivo da FAT e nao reloca.
+        let mut spans: Vec<(usize, usize, std::ops::Range<usize>)> = Vec::new();
+        for (path, start, end) in regions {
+            let first = entries.len();
+            let remaining = MAX_ENTRIES_TOTAL - entries.len();
+            let scan = |encoding| {
+                scan_bytes(
                     data,
                     &ScanConfig {
                         encoding,
                         region_start: Some(start),
                         region_end: Some(end),
-                        max_entries: MAX_ENTRIES_TOTAL - entries.len(),
+                        max_entries: remaining,
                         ..ScanConfig::default()
                     },
-                )?;
-                for mut e in outcome.entries {
-                    e.resource_path = Some(path.clone());
-                    e.max_bytes = Some(e.original_bytes.len());
-                    e.context = Some("in-place: traducao limitada ao espaco original".to_string());
-                    entries.push(e);
-                }
-                if entries.len() >= MAX_ENTRIES_TOTAL {
-                    break 'outer;
+                )
+                .map(|o| o.entries)
+            };
+            let mut found =
+                resolve_encoding_overlaps(scan(ScanEncoding::Ascii)?, scan(ScanEncoding::Utf16Le)?);
+            found.truncate(remaining);
+            for mut e in found {
+                e.resource_path = Some(path.clone());
+                e.max_bytes = Some(e.original_bytes.len());
+                e.context = Some("in-place: traducao limitada ao espaco original".to_string());
+                entries.push(e);
+            }
+            if path != "header" {
+                spans.push((start as usize, end as usize, first..entries.len()));
+            }
+            if entries.len() >= MAX_ENTRIES_TOTAL {
+                break;
+            }
+        }
+
+        for (start, end, range) in spans {
+            let len = end - start;
+            let found = file_relative_tables(
+                &data[start..end],
+                &entries[range.clone()],
+                |abs| abs.checked_sub(start).filter(|&r| r < len),
+                |rel| (rel < len).then_some(start + rel),
+            );
+            for (i, pointers) in found {
+                let e = &mut entries[range.start + i];
+                if mark_relocatable(e, &pointers) {
+                    e.max_bytes = None;
+                    e.context = Some(format!(
+                        "realocavel: {} ponteiro(s) em tabela no arquivo — se nao couber, o \
+                         arquivo cresce",
+                        pointers.len()
+                    ));
                 }
             }
         }
@@ -295,10 +477,21 @@ impl GameAdapter for NdsAdapter {
         if data.len() < HEADER_LEN {
             return Err(err("arquivo menor que o header NDS"));
         }
-        super::inplace::apply_in_place(data, entries, |out| {
-            // Traducao do titulo (0x00..0x0C) muda o CRC do header: recalcula.
-            let crc = crc16(&out[..HEADER_CRC_OFFSET]);
-            out[HEADER_CRC_OFFSET..HEADER_CRC_OFFSET + 2].copy_from_slice(&crc.to_le_bytes());
+        let plan = super::inplace::plan_in_place(data, entries, true)?;
+        let mut out = data.to_vec();
+        for (offset, patch) in &plan.writes {
+            out[*offset..offset + patch.len()].copy_from_slice(patch);
+        }
+        ensure_pointers_untouched(data, &out, entries)?;
+        if !plan.relocations.is_empty() {
+            relocate_files(data, &mut out, &plan.relocations)?;
+        }
+        // Titulo (0x00..0x0C) e os campos de tamanho mudam o CRC do header.
+        let crc = crc16(&out[..HEADER_CRC_OFFSET]);
+        out[HEADER_CRC_OFFSET..HEADER_CRC_OFFSET + 2].copy_from_slice(&crc.to_le_bytes());
+        Ok(AppliedImage {
+            bytes: out,
+            report: plan.report,
         })
     }
 
@@ -329,5 +522,51 @@ impl GameAdapter for NdsAdapter {
             checks,
             problems,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::types::TextEncoding;
+
+    /// (leitura e ASCII?, texto) de cada string que sobrevive ao desempate.
+    fn resolve(buf: &[u8]) -> Vec<(bool, String)> {
+        let scan = |encoding| {
+            let config = ScanConfig {
+                encoding,
+                ..ScanConfig::default()
+            };
+            scan_bytes(buf, &config).unwrap().entries
+        };
+        resolve_encoding_overlaps(scan(ScanEncoding::Ascii), scan(ScanEncoding::Utf16Le))
+            .into_iter()
+            .map(|e| (e.encoding == TextEncoding::Ascii, e.source_text))
+            .collect()
+    }
+
+    fn utf16(text: &str) -> Vec<u8> {
+        let mut bytes: Vec<u8> = text.encode_utf16().flat_map(u16::to_le_bytes).collect();
+        bytes.extend_from_slice(&[0, 0]);
+        bytes
+    }
+
+    #[test]
+    fn one_reading_per_byte_range() {
+        // ASCII lido como UTF-16 vira CJK falso: fica so a leitura ASCII.
+        assert_eq!(
+            resolve(b"WELCOME HOME!\0\0\0"),
+            vec![(true, "WELCOME HOME!".into())]
+        );
+        // Kana UTF-16 lido como ASCII vira "B0D0F0": fica so a leitura UTF-16.
+        assert_eq!(
+            resolve(&utf16("あいうえお")),
+            vec![(false, "あいうえお".into())]
+        );
+        // UTF-16 latino nao colide com ASCII (o 0x00 quebra o run): fica.
+        assert_eq!(
+            resolve(&utf16("START GAME")),
+            vec![(false, "START GAME".into())]
+        );
     }
 }

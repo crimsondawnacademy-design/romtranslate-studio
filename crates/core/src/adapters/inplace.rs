@@ -58,6 +58,7 @@ pub fn plan_in_place(
     let mut writes = Vec::new();
     let mut relocations = Vec::new();
     let mut report = ApplyReport::default();
+    let mut claimed: Vec<(usize, usize, &str)> = Vec::new();
 
     for entry in entries {
         let Some(offset) = entry.offset.map(|o| o as usize) else {
@@ -124,8 +125,20 @@ pub fn plan_in_place(
         let pad = if terminated || is_utf16 { 0x00 } else { 0x20 };
         let mut patch = vec![pad; slot];
         patch[..bytes.len()].copy_from_slice(&bytes);
+        claimed.push((offset, end, entry.id.as_str()));
         writes.push((offset, patch));
         report.applied += 1;
+    }
+
+    // Duas traducoes nunca gravam nos mesmos bytes: a segunda apagaria a
+    // primeira em silencio.
+    claimed.sort_unstable();
+    if let Some(pair) = claimed.windows(2).find(|p| p[1].0 < p[0].1) {
+        return Err(CoreError::Project(format!(
+            "as entries {} e {} disputam os mesmos bytes em 0x{:X} — re-extraia o projeto \
+             (extracoes antigas podiam ler o mesmo trecho em dois encodings)",
+            pair[0].2, pair[1].2, pair[1].0
+        )));
     }
 
     Ok(InPlacePlan {

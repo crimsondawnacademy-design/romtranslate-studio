@@ -360,3 +360,71 @@ novos), teto de 32 MiB (janela de ROM do GBA). All-or-nothing como o resto.
 **Limites honestos:** ponteiro isolado (literal pool com 1 string) não
 reloca; ponteiros pros espelhos de wait-state 0x0A/0x0C000000 não são
 reconhecidos; só ASCII terminada (é o que o adapter GBA extrai).
+
+## 2026-09-21 — Relocação no NDS e PS1: dentro dos ARQUIVOS, nunca no ARM9/EXE
+
+**Corrige a decisão anterior** (item 8 da relocação do GBA), que dizia que
+"NDS ARM9 e PS1 EXE cabem no mesmo motor mudando a base". Errado. A detecção
+de tabela funcionaria; o que não funciona é ONDE gravar o texto novo.
+
+**Por que o GBA é especial:** o cartucho é mapeado na memória e lido direto
+pela CPU — o que se anexa ao arquivo fica acessível em `0x08000000+offset`.
+No NDS e no PS1 o código é COPIADO pra RAM por um carregador com tamanho
+declarado (ARM9: até 0x3BFE00, praticamente a RAM principal inteira; EXE
+PS1: `t_size` no header). Logo depois da imagem na RAM vêm a BSS (zerada no
+boot pelo crt0) e o heap. Texto anexado ali seria apagado ou sobrescrito.
+No PS1 ainda há outro problema: o MIPS monta endereço com `lui` + `addiu`
+em duas instruções, invisíveis pra busca de tabela.
+
+**Decisão — relocar dentro dos arquivos de dados**, onde está a maior parte
+do texto e o ponteiro é offset RELATIVO ao arquivo:
+
+1. **NDS: o arquivo cresce.** Cópia nova no fim do ROM (alinhada 0x200,
+   padding 0xFF como o do próprio ROM), FAT reapontada (toda entrada-alias),
+   header 0x080 e 0x014 atualizados, CRC do header recalculado. É o que as
+   ferramentas de rebuild de DS fazem: o jogo acha arquivo pela FAT. Campos
+   conferidos no GBATEK antes de codar. Risco residual: jogo que aloca buffer
+   de tamanho FIXO pro arquivo não vê o texto novo.
+2. **PS1: sobra do último setor do arquivo.** O hardware lê setores inteiros
+   (CdRead), então a sobra sempre chega à RAM, dentro do buffer que o jogo já
+   aloca arredondado. Recusa se a sobra não estiver zerada (pode ser dado
+   escondido). Tamanho atualizado no directory record nos dois endians.
+   Capacidade pequena (< 2 KB por arquivo, dividida entre as realocadas) —
+   vira `max_bytes` pra IA e pro validador. Risco residual: jogo que copia só
+   `tamanho` bytes de um tamanho hardcoded.
+3. **PS2/PSP: só in-place.** Leem arquivo byte a byte; a sobra do setor não
+   chega garantida à memória.
+4. **Run mínimo 3 pra offset relativo** (2 no GBA). Offset dentro de arquivo
+   é número pequeno, comum em dado binário (tamanho, contagem, coordenada).
+   Conta: metade das palavras pequenas e 1 início de string por KB → run
+   falso de 2 sai ~1 a cada 15 arquivos de 1 MB; de 3, ~1 a cada 30 mil.
+   Custo aceito: tabela de 2 entradas (menu sim/não) em arquivo não é
+   detectada — a string fica in-place.
+
+**Não coberto (e documentado):** offsets u16 (comuns em arquivo pequeno),
+offset relativo a seção em vez de ao arquivo (ex.: BMG), ponteiro absoluto
+em arquivo carregado em endereço fixo. Todos falham do jeito seguro: sem
+detecção, a string fica in-place.
+
+## 2026-09-21 — Uma leitura por trecho de bytes (bug antigo do NDS)
+
+**Contexto:** o NDS varre cada arquivo em ASCII E em UTF-16LE. Texto ASCII
+lido como UTF-16 vira "CJK" falso (`䕎⁗䅇䕍`) no MESMO offset, e o id da
+entry é só o offset (`scan-<offset>`). No banco as duas leituras se fundiam
+pelo id: a tradução da string ASCII ficava com o encoding UTF-16 da falsa, e
+a reinserção gravava `N\0O\0V\0O\0...` por cima do ASCII — o jogo mostraria
+só "N". A UI ainda exibia o texto falso no lugar do real. Existia desde o
+Sprint 8; o teste de fluxo da relocação é que pegou.
+
+**Decisão:** resolver na extração (`resolve_encoding_overlaps`): quando as
+leituras se sobrepõem, fica UMA. É ASCII se as strings ASCII cobrem ≥ 3/4 do
+run UTF-16 e ele não tem assinatura de kana (byte alto 0x30 em metade das
+unidades); senão, é UTF-16. Não há regra universal: kana UTF-16 lido como
+ASCII também vira lixo (`B0D0F0`), e a regra do kana cobre isso. Limite
+conhecido (`ponytail` no código): texto japonês UTF-16 só de kanji com bytes
+imprimíveis pode ser lido como ASCII — resolver por idioma de origem se
+aparecer em jogo real.
+
+**Salvaguarda geral:** `plan_in_place` recusa duas traduções gravando nos
+mesmos bytes (vale pra todo adapter e protege projeto antigo com entries já
+fundidas no banco). Projeto de NDS criado antes disto: re-extrair.

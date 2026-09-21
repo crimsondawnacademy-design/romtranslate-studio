@@ -3,10 +3,13 @@
 //! e o discriminador canonico). Extracao por arquivo do filesystem; a
 //! reinsercao e in-place nos dois formatos — no raw, cada setor alterado tem
 //! EDC/ECC regenerado (modulo `cdrom`, ECMA-130) e o verify confere o EDC.
+//! Traducao maior passa se a string tiver ponteiro numa tabela de offsets do
+//! arquivo: vai pra sobra do setor final dele (o hardware le setor inteiro).
+//! So o PS1: PS2/PSP leem bytes, e a sobra nao chega garantida na RAM.
 
 use super::iso9660::{
-    self, apply_iso, detect_map, extract_ascii_by_file, identify_playstation, parse_pvd, walk,
-    PsKind, SectorMap,
+    self, annotate_sector_slack, apply_iso, detect_map, extract_ascii_by_file,
+    identify_playstation, parse_pvd, walk, PsKind, SectorMap,
 };
 use crate::adapter::{AppliedImage, GameAdapter, GameInput, VerificationReport};
 use crate::error::{CoreError, Result};
@@ -36,7 +39,7 @@ impl GameAdapter for Ps1Adapter {
             reinsert: true, // in-place; raw 2352 regenera EDC/ECC dos setores alterados
             patch: true,
             compression: false,
-            pointer_relocation: false,
+            pointer_relocation: true, // so dentro da sobra do setor final do arquivo
             font_table: false,
             experimental: true,
             support_level: SupportLevel::Experimental,
@@ -91,14 +94,17 @@ impl GameAdapter for Ps1Adapter {
     }
 
     fn extract_structured(&self, data: &[u8]) -> Result<Vec<TextEntry>> {
-        extract_ascii_by_file(data, detect_map(data))
+        let map = detect_map(data);
+        let mut entries = extract_ascii_by_file(data, map)?;
+        annotate_sector_slack(data, map, &mut entries)?;
+        Ok(entries)
     }
 
     fn apply_text(&self, data: &[u8], entries: &[TextEntry]) -> Result<AppliedImage> {
         let map = detect_map(data);
         parse_pvd(data, map)
             .map_err(|_| CoreError::Project("ps1: imagem sem ISO 9660 valido".to_string()))?;
-        apply_iso(data, map, entries)
+        apply_iso(data, map, entries, true)
     }
 
     fn verify(&self, data: &[u8]) -> Result<VerificationReport> {

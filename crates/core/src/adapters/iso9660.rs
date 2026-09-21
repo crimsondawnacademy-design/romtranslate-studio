@@ -7,8 +7,12 @@
 //! Suporta imagens 2048/setor (ISO) e raw 2352/setor (BIN de CD: sync 12 +
 //! header 4 [+ subheader 8 no Mode 2]; dados form1 = 2048 por setor).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
+use super::pointers::{
+    ensure_pointers_untouched, file_relative_tables, mark_relocatable, relocate, to_file_relative,
+    Relocation,
+};
 use crate::error::{CoreError, Result};
 use crate::types::ResourceDescriptor;
 
@@ -141,6 +145,9 @@ pub struct IsoFile {
     pub path: String,
     pub extent: u32,
     pub size: u32,
+    /// Offset absoluto (na imagem) do directory record deste arquivo — o
+    /// tamanho mora em +10 (LE) e +14 (BE).
+    pub record_offset: usize,
 }
 
 /// Percorre o filesystem a partir do root directory record do PVD.
@@ -170,6 +177,7 @@ pub fn walk(data: &[u8], map: SectorMap) -> Result<Vec<IsoFile>> {
         }
         let sectors = (size as usize).div_ceil(SECTOR_DATA);
         for i in 0..sectors {
+            let sector_base = sector_data_offset(data, map, extent as usize + i)?;
             let sector = read_sector(data, map, extent as usize + i)?;
             let limit = SECTOR_DATA.min(size as usize - i * SECTOR_DATA);
             let mut pos = 0usize;
@@ -191,6 +199,7 @@ pub fn walk(data: &[u8], map: SectorMap) -> Result<Vec<IsoFile>> {
                 let name_bytes = record
                     .get(33..33 + name_len)
                     .ok_or_else(|| err("nome do record truncado"))?;
+                let record_offset = sector_base + pos;
                 pos += len;
 
                 // "\0" = self, "\x01" = parent.
@@ -208,6 +217,7 @@ pub fn walk(data: &[u8], map: SectorMap) -> Result<Vec<IsoFile>> {
                         path: format!("{prefix}{name}"),
                         extent: entry_extent,
                         size: entry_size,
+                        record_offset,
                     });
                     if files.len() > MAX_FILES {
                         return Err(err("arquivos demais (filesystem corrompido?)"));
@@ -276,23 +286,206 @@ pub fn extract_ascii_by_file(data: &[u8], map: SectorMap) -> Result<Vec<crate::t
     Ok(entries)
 }
 
-/// Reinsercao comum: in-place; em raw 2352 (BIN) cada setor alterado tem o
-/// EDC/ECC regenerado (ECMA-130, modulo `cdrom`) depois da escrita.
+/// Um arquivo setor a setor: onde comecam os 2048 bytes de dados de cada
+/// setor dele na imagem (no raw 2352 os setores nao sao contiguos).
+struct FileLayout {
+    sector_starts: Vec<usize>,
+    size: usize,
+}
+
+impl FileLayout {
+    fn new(data: &[u8], map: SectorMap, file: &IsoFile) -> Result<Self> {
+        let size = file.size as usize;
+        let sector_starts = (0..size.div_ceil(SECTOR_DATA))
+            .map(|k| {
+                let start = sector_data_offset(data, map, file.extent as usize + k)?;
+                if start + SECTOR_DATA > data.len() {
+                    return Err(err(format!("{}: setor {k} fora da imagem", file.path)));
+                }
+                Ok(start)
+            })
+            .collect::<Result<_>>()?;
+        Ok(FileLayout {
+            sector_starts,
+            size,
+        })
+    }
+
+    /// Setores inteiros do arquivo — o que o hardware do PS1 le.
+    fn capacity(&self) -> usize {
+        self.sector_starts.len() * SECTOR_DATA
+    }
+
+    fn rel_to_abs(&self, rel: usize) -> Option<usize> {
+        self.sector_starts
+            .get(rel / SECTOR_DATA)
+            .map(|s| s + rel % SECTOR_DATA)
+    }
+
+    fn abs_to_rel(&self, abs: usize) -> Option<usize> {
+        self.sector_starts
+            .iter()
+            .enumerate()
+            .find(|(_, &s)| (s..s + SECTOR_DATA).contains(&abs))
+            .map(|(k, &s)| k * SECTOR_DATA + abs - s)
+    }
+
+    /// A sobra depois do fim logico precisa estar zerada: qualquer byte ali
+    /// pode ser dado escondido que o jogo usa.
+    fn slack_is_zero(&self, image: &[u8]) -> bool {
+        (self.size..self.capacity())
+            .all(|rel| self.rel_to_abs(rel).and_then(|a| image.get(a)) == Some(&0))
+    }
+
+    /// Maior string (sem o terminador) que cabe na sobra, alinhada em 4.
+    fn slack_room(&self) -> usize {
+        self.capacity()
+            .saturating_sub(self.size.next_multiple_of(4) + 1)
+    }
+}
+
+/// PS1: string num arquivo de dados com ponteiro numa TABELA de offsets
+/// relativos ao arquivo pode crescer pro espaco livre do ULTIMO SETOR dele —
+/// o hardware le setores inteiros, entao essa sobra sempre chega na RAM. O
+/// EXE fica de fora sozinho: ponteiro dele e endereco de RAM (0x80..), nao
+/// offset, e ele divide a RAM com BSS e heap.
+pub fn annotate_sector_slack(
+    data: &[u8],
+    map: SectorMap,
+    entries: &mut [crate::types::TextEntry],
+) -> Result<()> {
+    let files = walk(data, map)?;
+    let by_path: HashMap<&str, &IsoFile> = files.iter().map(|f| (f.path.as_str(), f)).collect();
+    // `extract_ascii_by_file` devolve as entries de cada arquivo juntas.
+    let mut i = 0;
+    while i < entries.len() {
+        let path = entries[i].resource_path.clone();
+        let end = i + entries[i..]
+            .iter()
+            .take_while(|e| e.resource_path == path)
+            .count();
+        if let Some(file) = path.as_deref().and_then(|p| by_path.get(p)) {
+            let layout = FileLayout::new(data, map, file)?;
+            let room = layout.slack_room();
+            if room > 0 && layout.slack_is_zero(data) {
+                let bytes = read_file(data, map, file.extent, file.size)?;
+                let found = file_relative_tables(
+                    &bytes,
+                    &entries[i..end],
+                    |abs| layout.abs_to_rel(abs),
+                    |rel| layout.rel_to_abs(rel),
+                );
+                for (k, pointers) in found {
+                    let e = &mut entries[i + k];
+                    if mark_relocatable(e, &pointers) {
+                        e.max_bytes = Some(e.original_bytes.len().max(room));
+                        e.context = Some(format!(
+                            "realocavel: {} ponteiro(s) em tabela — cabe ate {room} bytes no \
+                             espaco livre do setor final do arquivo (dividido entre as realocadas)",
+                            pointers.len()
+                        ));
+                    }
+                }
+            }
+        }
+        i = end;
+    }
+    Ok(())
+}
+
+/// Grava as relocacoes na sobra do setor final de cada arquivo, reaponta a
+/// tabela (offset relativo) e atualiza o tamanho no directory record.
+fn relocate_into_slack(
+    data: &[u8],
+    map: SectorMap,
+    out: &mut [u8],
+    relocations: &[Relocation],
+) -> Result<()> {
+    let mut consumed = 0;
+    for file in walk(data, map)?.into_iter().filter(|f| f.size > 0) {
+        let layout = FileLayout::new(data, map, &file)?;
+        let in_file = |abs: usize| layout.abs_to_rel(abs).filter(|&r| r < layout.size);
+        let mine: Vec<Relocation> = relocations
+            .iter()
+            .filter(|r| in_file(r.original_offset).is_some())
+            .cloned()
+            .collect();
+        if mine.is_empty() {
+            continue;
+        }
+        consumed += mine.len();
+        if !layout.slack_is_zero(out) {
+            return Err(err(format!(
+                "{}: o espaco livre do setor final nao esta zerado (pode ser dado escondido) \
+                 — relocacao recusada",
+                file.path
+            )));
+        }
+        let relative = to_file_relative(&mine, |abs| layout.abs_to_rel(abs))?;
+        let mut bytes = read_file(out, map, file.extent, file.size)?;
+        relocate(&mut bytes, &relative, 0, layout.capacity()).map_err(|e| {
+            err(format!(
+                "{} (espaco livre no setor final: {} bytes): {e}",
+                file.path,
+                layout.capacity() - layout.size
+            ))
+        })?;
+        for (k, chunk) in bytes.chunks(SECTOR_DATA).enumerate() {
+            let start = layout.sector_starts[k];
+            out[start..start + chunk.len()].copy_from_slice(chunk);
+        }
+        write_file_size(out, file.record_offset, bytes.len())?;
+    }
+    if consumed != relocations.len() {
+        return Err(err(
+            "string realocavel fora de qualquer arquivo do filesystem",
+        ));
+    }
+    Ok(())
+}
+
+/// ISO 9660 guarda o tamanho nos dois endians: +10 LE, +14 BE.
+fn write_file_size(out: &mut [u8], record: usize, size: usize) -> Result<()> {
+    let size = u32::try_from(size).map_err(|_| err("arquivo passaria de 4 GiB"))?;
+    let field = out
+        .get_mut(record + 10..record + 18)
+        .ok_or_else(|| err("directory record fora da imagem"))?;
+    field[..4].copy_from_slice(&size.to_le_bytes());
+    field[4..].copy_from_slice(&size.to_be_bytes());
+    Ok(())
+}
+
+/// Reinsercao comum: in-place; com `allow_relocation` (PS1), string com
+/// ponteiro em tabela que nao cabe vai pra sobra do setor final do arquivo.
+/// Em raw 2352 (BIN) cada setor alterado tem o EDC/ECC regenerado
+/// (ECMA-130, modulo `cdrom`) depois de todas as escritas.
 pub fn apply_iso(
     data: &[u8],
     map: SectorMap,
     entries: &[crate::types::TextEntry],
+    allow_relocation: bool,
 ) -> Result<crate::adapter::AppliedImage> {
-    let mut applied = super::inplace::apply_in_place(data, entries, |_| {})?;
+    let plan = super::inplace::plan_in_place(data, entries, allow_relocation)?;
+    let mut out = data.to_vec();
+    for (offset, patch) in &plan.writes {
+        out[*offset..offset + patch.len()].copy_from_slice(patch);
+    }
+    ensure_pointers_untouched(data, &out, entries)?;
+    if !plan.relocations.is_empty() {
+        relocate_into_slack(data, map, &mut out, &plan.relocations)?;
+    }
     if map == SectorMap::Raw2352 {
-        let sectors = applied.bytes.as_chunks_mut::<SECTOR_RAW>().0;
+        let sectors = out.as_chunks_mut::<SECTOR_RAW>().0;
         for (i, sector) in sectors.iter_mut().enumerate() {
             if sector[..] != data[i * SECTOR_RAW..(i + 1) * SECTOR_RAW] {
                 super::cdrom::regenerate_sector(sector)?;
             }
         }
     }
-    Ok(applied)
+    Ok(crate::adapter::AppliedImage {
+        bytes: out,
+        report: plan.report,
+    })
 }
 
 /// Confere o EDC de todos os setores de dados de uma imagem raw 2352.
@@ -334,5 +527,35 @@ pub fn identify_playstation(data: &[u8], map: SectorMap) -> Option<(PsKind, Stri
         Some((PsKind::Two, boot_line))
     } else {
         Some((PsKind::One, boot_line))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adapter::GameAdapter;
+    use crate::adapters::ps1::Ps1Adapter;
+    use crate::synth;
+
+    #[test]
+    fn slack_relocation_updates_size_in_both_endians() {
+        let bin = synth::make_ps1_bin_with_message_table();
+        let mut entries = Ps1Adapter.extract_structured(&bin).unwrap();
+        for e in entries.iter_mut().filter(|e| {
+            e.resource_path.as_deref() == Some("MSG.DAT") && e.source_text == "NEW GAME"
+        }) {
+            e.translated_text = Some("NOVO JOGO".into());
+        }
+        let out = Ps1Adapter.apply_text(&bin, &entries).unwrap().bytes;
+        let msg = walk(&out, detect_map(&out))
+            .unwrap()
+            .into_iter()
+            .find(|f| f.path == "MSG.DAT")
+            .unwrap();
+        let r = msg.record_offset;
+        let le = u32::from_le_bytes(out[r + 10..r + 14].try_into().unwrap());
+        let be = u32::from_be_bytes(out[r + 14..r + 18].try_into().unwrap());
+        assert_eq!(le, be, "ISO 9660 exige o mesmo tamanho nos dois endians");
+        assert!(le > 0x38, "arquivo cresceu pra sobra do setor: {le}");
     }
 }

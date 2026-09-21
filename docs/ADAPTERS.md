@@ -72,6 +72,13 @@ Cada `TextEntry` precisa carregar o suficiente para reinserção segura:
 Se a plataforma tem tabela de ponteiros, modele-a explicitamente (veja o blob +
 ponteiros do RTSF). **Nunca** faça busca/substituição global de bytes.
 
+**Uma leitura por trecho de bytes.** Se você varre o mesmo trecho em dois
+encodings (o NDS faz ASCII + UTF-16LE), as leituras se sobrepõem — texto
+ASCII lido como UTF-16 vira "CJK" falso no mesmo offset, e o `id` é só o
+offset. No banco as duas se fundem e a tradução de uma é gravada com o
+encoding da outra. Resolva a sobreposição na extração (veja
+`resolve_encoding_overlaps` no `nds.rs`).
+
 ## apply_text — all-or-nothing
 
 - Qualquer tradução que não serializa (não cabe, encoding errado, ponteiro
@@ -81,12 +88,20 @@ ponteiros do RTSF). **Nunca** faça busca/substituição global de bytes.
 - Atualize o que o formato exigir: ponteiros, terminadores, **checksums**
   (o GBA recalcula o header checksum; o RTSF, o checksum do arquivo).
 - Tradução maior que o espaço original: só realoque se souber ONDE estão os
-  ponteiros. `adapters::pointers` resolve ponteiros absolutos de 32 bits LE
-  (reconhece **tabelas** — 2+ ponteiros seguidos pra inícios de string —,
-  nunca busca/troca global de bytes, que a spec proíbe; e `relocate` faz
-  anti-drift + auto-checagem). O GBA é o exemplo: marque as entries com
-  `metadata.pointers`, chame `plan_in_place(.., true)` e depois `relocate`.
-  Sem tabela conhecida → `Err` pedindo texto menor.
+  ponteiros E onde o texto novo pode morar. `adapters::pointers` reconhece
+  **tabelas** de ponteiros u32 LE (nunca busca/troca global de bytes, que a
+  spec proíbe): `find_pointer_tables` com base absoluta (GBA, run mínimo 2)
+  ou `file_relative_tables` pra offsets dentro de um arquivo (NDS, PS1, run
+  mínimo 3 — número pequeno aparece à toa em dado binário). `relocate` faz
+  anti-drift + auto-checagem. Fluxo: marque as entries com
+  `mark_relocatable`, chame `plan_in_place(.., true)`,
+  `ensure_pointers_untouched` e `relocate` no buffer certo (a imagem no GBA,
+  o arquivo no NDS/PS1). Sem tabela → `Err` pedindo texto menor.
+- **Nunca anexe texto a algo que o jogo COPIA pra RAM com tamanho
+  declarado** (ARM9 do DS, EXE do PS1): logo depois vêm BSS e heap, e o texto
+  é zerado no boot ou sobrescrito. Só é seguro onde o dado novo comprovadamente
+  chega à memória: ROM mapeada (GBA), arquivo que o jogo acha pela FAT (NDS),
+  sobra de setor lido inteiro (PS1).
 - Entries sem tradução mantêm o original (`kept_original`); entries de outro
   scanner que você não entende → `ignored_generic`, nunca erro silencioso.
 - Erros orientam o usuário: diga QUAL entry, QUANTOS bytes, o que fazer

@@ -100,7 +100,7 @@ impl GameAdapter for Ps2Adapter {
         let map = detect_map(data);
         parse_pvd(data, map)
             .map_err(|_| CoreError::Project("ps2: imagem sem ISO 9660 valido".to_string()))?;
-        apply_iso(data, map, entries)
+        apply_iso(data, map, entries, false)
     }
 
     fn verify(&self, data: &[u8]) -> Result<VerificationReport> {

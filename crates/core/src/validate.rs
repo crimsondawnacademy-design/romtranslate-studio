@@ -193,28 +193,33 @@ pub fn validate_entry(entry: &TextEntry) -> Vec<ValidationIssue> {
             "traducao tem caracteres fora do encoding destino".to_string(),
         ),
         EncodedLen::Bytes(n) => {
-            if let Some(max) = entry.max_bytes {
-                if n > max {
-                    push(
-                        Severity::Error,
-                        IssueKind::ByteOverflow,
-                        format!("traducao ocupa {n} bytes; limite do campo e {max}"),
-                    );
-                }
-            } else if n > entry.original_bytes.len() {
-                let original = entry.original_bytes.len();
-                // Realocar resolve o espaco no ROM, nao na tela: caixa de texto
+            let original = entry.original_bytes.len();
+            let relocatable = !entry.pointer_offsets().is_empty();
+            // Realocavel pode ter teto (PS1: a sobra do setor final do arquivo):
+            // passar dele e erro; entre o original e o teto, aviso.
+            match entry.max_bytes {
+                Some(max) if n > max => push(
+                    Severity::Error,
+                    IssueKind::ByteOverflow,
+                    format!("traducao ocupa {n} bytes; limite do campo e {max}"),
+                ),
+                // Realocar resolve o espaco na imagem, nao na tela: caixa de texto
                 // ou buffer de RAM do jogo podem nao comportar o texto maior.
-                let message = if entry.pointer_offsets().is_empty() {
+                _ if n > original && relocatable => push(
+                    Severity::Warning,
+                    IssueKind::ByteOverflow,
+                    format!(
+                        "traducao ocupa {n} bytes (original {original}): sera realocada com os ponteiros atualizados — confira no emulador se cabe na caixa de texto"
+                    ),
+                ),
+                None if n > original => push(
+                    Severity::Warning,
+                    IssueKind::ByteOverflow,
                     format!(
                         "traducao ocupa {n} bytes; o espaco original tem {original} (reinsercao fixa exigiria texto menor)"
-                    )
-                } else {
-                    format!(
-                        "traducao ocupa {n} bytes (original {original}): sera realocada pro fim do ROM — confira no emulador se cabe na caixa de texto"
-                    )
-                };
-                push(Severity::Warning, IssueKind::ByteOverflow, message);
+                    ),
+                ),
+                _ => {}
             }
         }
         EncodedLen::Unsupported => {}

@@ -9,27 +9,35 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::error::{CoreError, Result};
+use crate::types::TextEntry;
 
-/// Dois ponteiros seguidos pra inicios de string ja e estrutura (menu
-/// sim/nao, struct {nome, descricao}); coincidencia dupla e desprezivel.
-const MIN_RUN: usize = 2;
+/// Ponteiro absoluto de ROM (GBA: 0x08xxxxxx) quase nunca aparece por acaso:
+/// dois seguidos pra inicios de string ja sao estrutura (menu sim/nao,
+/// struct {nome, descricao}).
+pub const MIN_RUN_ABSOLUTE: usize = 2;
+/// Offset relativo ao inicio de um arquivo e numero PEQUENO, comum em dado
+/// binario (tamanho, contagem, coordenada). Com metade das palavras pequenas
+/// e 1 inicio de string por KB, um run falso de 2 sai ~1 a cada 15 arquivos
+/// de 1 MB; de 3, ~1 a cada 30 mil. Por isso 3.
+pub const MIN_RUN_RELATIVE: usize = 3;
 
 fn err(msg: impl Into<String>) -> CoreError {
     CoreError::Project(format!("ponteiros: {}", msg.into()))
 }
 
 /// Offset de cada string -> offsets dos ponteiros (em tabelas) pra ela.
-/// `base` = endereco que o jogo usa pro offset 0 do arquivo.
+/// `base` = endereco que o jogo usa pro offset 0 dos dados (0 = relativo).
 pub fn find_pointer_tables(
     data: &[u8],
     base: u32,
     string_starts: &HashSet<usize>,
+    min_run: usize,
 ) -> HashMap<usize, Vec<usize>> {
     let mut tables: HashMap<usize, Vec<usize>> = HashMap::new();
     // (onde o ponteiro esta, pra onde aponta)
     let mut run: Vec<(usize, usize)> = Vec::new();
     let mut flush = |run: &mut Vec<(usize, usize)>| {
-        if run.len() >= MIN_RUN {
+        if run.len() >= min_run {
             for &(at, target) in run.iter() {
                 tables.entry(target).or_default().push(at);
             }
@@ -85,8 +93,8 @@ pub fn relocate(
         let at = out.len().next_multiple_of(4);
         if at + r.bytes.len() > max_len {
             return Err(err(format!(
-                "entry {}: sem espaco enderecavel pra realocar (a imagem passaria de \
-                 {max_len} bytes) — encurte as traducoes",
+                "entry {}: sem espaco pra realocar — as strings realocadas passariam do \
+                 limite de {max_len} bytes; encurte as traducoes",
                 r.entry_id
             )));
         }
@@ -115,6 +123,106 @@ pub fn relocate(
         }
     }
     Ok(())
+}
+
+/// So string terminada pode crescer: quem le por tamanho fixo nao aceita.
+pub fn is_terminated(entry: &TextEntry) -> bool {
+    entry.metadata.get("terminated").and_then(|v| v.as_bool()) == Some(true)
+}
+
+/// Tabelas dentro de UM arquivo cujos ponteiros sao offsets relativos ao
+/// inicio dele (NDS, PS1). `file` = bytes logicos do arquivo; as funcoes
+/// traduzem enderecos da imagem <-> do arquivo. Devolve (indice da entry,
+/// ponteiros em enderecos absolutos da imagem).
+pub fn file_relative_tables(
+    file: &[u8],
+    entries: &[TextEntry],
+    abs_to_rel: impl Fn(usize) -> Option<usize>,
+    rel_to_abs: impl Fn(usize) -> Option<usize>,
+) -> Vec<(usize, Vec<usize>)> {
+    let rel_of = |e: &TextEntry| {
+        e.offset
+            .and_then(|o| abs_to_rel(o as usize))
+            .filter(|&r| r < file.len())
+    };
+    let starts: HashSet<usize> = entries
+        .iter()
+        .filter(|e| is_terminated(e))
+        .filter_map(rel_of)
+        .collect();
+    if starts.is_empty() {
+        return Vec::new();
+    }
+    let tables = find_pointer_tables(file, 0, &starts, MIN_RUN_RELATIVE);
+    entries
+        .iter()
+        .enumerate()
+        .filter_map(|(i, e)| {
+            let pointers = tables.get(&rel_of(e)?)?;
+            let absolute: Option<Vec<usize>> = pointers.iter().map(|&p| rel_to_abs(p)).collect();
+            Some((i, absolute?))
+        })
+        .collect()
+}
+
+/// Grava os ponteiros no metadata (a entry vira realocavel). Falso se o
+/// metadata nao e objeto — ai a entry segue so in-place.
+pub fn mark_relocatable(entry: &mut TextEntry, pointers: &[usize]) -> bool {
+    match entry.metadata.as_object_mut() {
+        Some(meta) => {
+            meta.insert("pointers".to_string(), serde_json::json!(pointers));
+            true
+        }
+        None => false,
+    }
+}
+
+/// Nenhuma escrita in-place pode ter pisado num ponteiro de tabela: isso
+/// corromperia outra string em silencio (ex.: campo de nome sem terminador
+/// colado no ponteiro).
+pub fn ensure_pointers_untouched(original: &[u8], out: &[u8], entries: &[TextEntry]) -> Result<()> {
+    for entry in entries {
+        for p in entry.pointer_offsets() {
+            let end = p
+                .checked_add(4)
+                .ok_or_else(|| err(format!("ponteiro invalido na entry {}", entry.id)))?;
+            if out.get(p..end) != original.get(p..end) {
+                return Err(err(format!(
+                    "uma traducao in-place sobrescreveria o ponteiro em 0x{p:X} (que aponta \
+                     pra entry {}) — encurte o texto logo antes desse endereco",
+                    entry.id
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Converte relocacoes em enderecos absolutos (da imagem) pra relativos ao
+/// arquivo que as contem — quando o ponteiro e offset dentro do arquivo.
+pub fn to_file_relative(
+    relocations: &[Relocation],
+    abs_to_rel: impl Fn(usize) -> Option<usize>,
+) -> Result<Vec<Relocation>> {
+    relocations
+        .iter()
+        .map(|r| {
+            let map = |abs: usize| {
+                abs_to_rel(abs).ok_or_else(|| {
+                    err(format!(
+                        "entry {}: 0x{abs:X} fora do arquivo da string",
+                        r.entry_id
+                    ))
+                })
+            };
+            Ok(Relocation {
+                entry_id: r.entry_id.clone(),
+                original_offset: map(r.original_offset)?,
+                bytes: r.bytes.clone(),
+                pointers: r.pointers.iter().map(|&p| map(p)).collect::<Result<_>>()?,
+            })
+        })
+        .collect()
 }
 
 fn pointer_value(base: u32, offset: usize) -> Result<u32> {
@@ -154,16 +262,20 @@ mod tests {
         put_ptr(&mut buf, 0x30, 0x41); // meio de string + inicio: run nao fecha
         put_ptr(&mut buf, 0x34, 0x48);
 
-        let tables = find_pointer_tables(&buf, BASE, &starts);
+        let tables = find_pointer_tables(&buf, BASE, &starts, MIN_RUN_ABSOLUTE);
         assert_eq!(tables.get(&0x40), Some(&vec![0x10]));
         assert_eq!(tables.get(&0x48), Some(&vec![0x14]), "0x34 nao conta");
         assert!(!tables.contains_key(&0x50), "ponteiro isolado nao e tabela");
 
+        // Offset relativo (numero pequeno) exige run de 3: a tabela de 2 cai.
+        let strict = find_pointer_tables(&buf, BASE, &starts, MIN_RUN_RELATIVE);
+        assert!(strict.is_empty(), "{strict:?}");
+
         // Entrada truncada/vazia/lixo nunca panica.
         for len in 0..buf.len() {
-            let _ = find_pointer_tables(&buf[..len], BASE, &starts);
+            let _ = find_pointer_tables(&buf[..len], BASE, &starts, MIN_RUN_ABSOLUTE);
         }
-        assert!(find_pointer_tables(&[0xFF; 7], BASE, &starts).is_empty());
+        assert!(find_pointer_tables(&[0xFF; 7], BASE, &starts, MIN_RUN_ABSOLUTE).is_empty());
     }
 
     #[test]
@@ -196,6 +308,6 @@ mod tests {
         // Sem espaco enderecavel: recusa em vez de gravar ponteiro invalido.
         let mut full = data.clone();
         let e = relocate(&mut full, std::slice::from_ref(&reloc), BASE, 0x44).unwrap_err();
-        assert!(e.to_string().contains("espaco enderecavel"), "{e}");
+        assert!(e.to_string().contains("sem espaco pra realocar"), "{e}");
     }
 }

@@ -62,13 +62,13 @@ universal**. O que cada plataforma tem hoje:
 |---|---|---|---|---|---|
 | Fixture RTSF (demo) | ✅ | ✅ | ✅ completa | ✅ com relocação + ponteiros | ✅ |
 | Game Boy Advance | ✅ | ✅ | ⚠️ experimental (detecta tabelas de ponteiros) | ⚠️ experimental (in-place + **relocação** de strings com ponteiro em tabela) | ✅ (BPS se o ROM de 16 MiB crescer) |
-| Nintendo DS | ✅ (CRC do header) | ✅ | ⚠️ experimental (por arquivo do filesystem, ASCII + UTF-16) | ⚠️ experimental (in-place) | ✅ (BPS acima de 16 MiB) |
+| Nintendo DS | ✅ (CRC do header) | ✅ | ⚠️ experimental (por arquivo do filesystem, ASCII + UTF-16) | ⚠️ experimental (in-place + **relocação**: o arquivo cresce e a FAT é reapontada) | ✅ (BPS acima de 16 MiB) |
 | NES | ✅ | ✅ | ⚠️ experimental (in-place; jogos com tabela própria: use `.tbl`) | ⚠️ experimental (in-place) | ✅ |
 | Super Nintendo | ✅ | ✅ | ⚠️ experimental (in-place) | ⚠️ experimental (in-place, checksum interno recalculado) | ✅ |
 | GameCube | ✅ (magic + FST) | — | ⚠️ experimental (por arquivo do filesystem FST) | ⚠️ experimental (in-place) | ✅ (BPS p/ ISO real) |
 | Wii | ✅ (ISO e WBFS) | — | — | — | — |
 | Wii U | ✅ (WUX e RPX/RPL) | — | — | — | — |
-| PlayStation (PS1) | ✅ (ISO 9660 + SYSTEM.CNF) | ✅ | ⚠️ experimental (por arquivo; BIN raw por setor) | ⚠️ experimental (in-place; BIN raw com EDC/ECC regenerado)* | ✅ |
+| PlayStation (PS1) | ✅ (ISO 9660 + SYSTEM.CNF) | ✅ | ⚠️ experimental (por arquivo; BIN raw por setor) | ⚠️ experimental (in-place + **relocação** na sobra do setor final; BIN raw com EDC/ECC regenerado)* | ✅ |
 | PlayStation 2 | ✅ (BOOT2 no SYSTEM.CNF) | ✅ | ⚠️ experimental (por arquivo; DVD inteiro via mmap, sem teto de RAM) | ⚠️ experimental (in-place; >2 GiB em streaming) | ✅ (BPS, round-trip streaming) |
 | PSP | ✅ (UMD + PARAM.SFO com título) | ✅ | ⚠️ experimental (por arquivo) | ⚠️ experimental (in-place) | ✅ (BPS) |
 
@@ -88,19 +88,37 @@ de disco Wii são cifradas: extração exigiria keys, que este projeto não incl
 tamanho ou menor) — cobre menus e textos curtos de muitos jogos. O validador
 avisa o que não cabe antes de qualquer escrita.
 
-**Relocação de ponteiros (GBA)**: tradução maior que o original é gravada no
-fim do ROM e os ponteiros pra ela são reapontados — desde que a string seja
-referenciada por uma **tabela** de ponteiros (2+ ponteiros de ROM seguidos,
-cada um apontando pro início de uma string). O app **não** caça cada
-ocorrência do endereço no ROM inteiro: uma palavra de código pode ter o mesmo
-valor de um ponteiro por coincidência, e trocá-la corromperia o jogo em
-silêncio. Por isso ponteiro isolado (literal pool) não conta, e a string fica
-limitada ao espaço original. O texto antigo continua no lugar, então uma
-referência que a detecção não viu mostra o original em vez de lixo.
-Realocar resolve o espaço **no ROM**, não **na tela**: o validador avisa cada
-string realocada pra você conferir no emulador se ela cabe na caixa de texto.
-Projetos antigos: rode a extração estruturada de novo pra detectar as tabelas
-(as traduções são preservadas).
+**Relocação de ponteiros**: quando a tradução não cabe no espaço da
+original, o texto novo vai pra outro lugar e os ponteiros pra ele são
+reapontados. Só vale pra string referenciada por uma **tabela** de ponteiros
+(vários seguidos, cada um apontando pro início de uma string). O app **não**
+caça cada ocorrência do endereço no arquivo: uma palavra de código ou de dado
+pode ter o mesmo valor de um ponteiro por coincidência, e trocá-la
+corromperia o jogo em silêncio. Onde o texto novo vai depende da plataforma:
+
+- **GBA**: fim do ROM (o cartucho é lido direto pela CPU). Ponteiro de ROM
+  quase nunca aparece por acaso, então 2 seguidos já contam como tabela.
+- **Nintendo DS**: fim do arquivo do filesystem; o arquivo inteiro vai pro
+  fim do ROM e a FAT passa a apontar pra ele. Como o ponteiro ali é um
+  deslocamento pequeno dentro do arquivo (número comum em dado binário), a
+  tabela precisa de 3 seguidos.
+- **PS1**: sobra do último setor do arquivo — o hardware lê setores
+  inteiros, então esse espaço sempre chega na RAM. É pouco (menos de 2 KB por
+  arquivo, dividido entre as strings realocadas); o editor mostra o teto de
+  cada uma.
+
+**Fica de fora, de propósito**: o binário ARM9 do DS e o executável do PS1.
+Os dois são copiados pra RAM, e logo depois deles vêm variáveis que o jogo
+zera ao ligar e o heap — texto anexado ali seria apagado ou sobrescrito. PS2
+e PSP também ficam só in-place: eles leem arquivos byte a byte, e a sobra do
+setor não chega garantida na memória.
+
+Em qualquer plataforma, o texto antigo continua no lugar: uma referência que
+a detecção não viu mostra o original em vez de lixo. E relocar resolve o
+espaço **na imagem**, não **na tela**: o validador avisa cada string
+realocada pra você conferir no emulador se ela cabe na caixa de texto.
+Projetos antigos: rode a extração estruturada de novo pra detectar as
+tabelas (as traduções são preservadas).
 
 ## Rodando
 

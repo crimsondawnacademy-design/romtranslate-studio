@@ -840,9 +840,10 @@ function EntryEditor({
 }: EntryEditorProps) {
   const draftBytes = encodedByteLength(draft, entry.encoding);
   const originalBytes = entry.originalBytes.length / 2;
-  const limit = entry.maxBytes ?? originalBytes;
   const relocatable = pointerCount(entry) > 0;
-  const overflow = draftBytes !== null && draftBytes > limit && !relocatable;
+  // Realocavel so tem teto quando o adapter declara (PS1: sobra do setor).
+  const limit = entry.maxBytes ?? (relocatable ? null : originalBytes);
+  const overflow = draftBytes !== null && limit !== null && draftBytes > limit;
   const dirty = draft !== (entry.translatedText ?? "");
 
   return (
@@ -866,12 +867,10 @@ function EntryEditor({
             {draftBytes === null
               ? t("editor.noEncoder")
               : `${t("editor.bytes", { n: draftBytes })} · ${
-                  relocatable
-                    ? `${t("editor.bytesOriginal", { n: originalBytes })} · ${t("editor.relocatable")}`
-                    : entry.maxBytes !== null
-                      ? t("editor.bytesLimit", { max: entry.maxBytes })
-                      : t("editor.bytesOriginal", { n: originalBytes })
-                }`}
+                  entry.maxBytes !== null
+                    ? t("editor.bytesLimit", { max: entry.maxBytes })
+                    : t("editor.bytesOriginal", { n: originalBytes })
+                }${relocatable ? ` · ${t("editor.relocatable")}` : ""}`}
           </p>
         </div>
       </div>

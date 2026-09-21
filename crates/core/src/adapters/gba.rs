@@ -13,7 +13,10 @@
 
 use std::collections::HashSet;
 
-use super::pointers::{find_pointer_tables, relocate};
+use super::pointers::{
+    ensure_pointers_untouched, find_pointer_tables, is_terminated, mark_relocatable, relocate,
+    MIN_RUN_ABSOLUTE,
+};
 use crate::adapter::{AppliedImage, GameAdapter, GameInput, VerificationReport};
 use crate::error::{CoreError, Result};
 use crate::scan::{scan_bytes, ScanConfig, ScanEncoding};
@@ -130,29 +133,24 @@ impl GameAdapter for GbaAdapter {
             },
         )?;
         let mut entries = outcome.entries;
-        // So string terminada pode crescer: quem le por tamanho fixo nao aceita.
         let starts: HashSet<usize> = entries
             .iter()
-            .filter(|e| e.metadata.get("terminated").and_then(|v| v.as_bool()) == Some(true))
+            .filter(|e| is_terminated(e))
             .filter_map(|e| e.offset.map(|o| o as usize))
             .collect();
-        let tables = find_pointer_tables(data, ROM_BASE, &starts);
+        let tables = find_pointer_tables(data, ROM_BASE, &starts, MIN_RUN_ABSOLUTE);
 
         for e in entries.iter_mut() {
             let pointers = e.offset.and_then(|o| tables.get(&(o as usize)));
-            match (pointers, e.metadata.as_object_mut()) {
-                (Some(pointers), Some(meta)) => {
-                    meta.insert("pointers".to_string(), serde_json::json!(pointers));
-                    e.max_bytes = None;
-                    e.context = Some(format!(
-                        "realocavel: {} ponteiro(s) em tabela — nao precisa caber no espaco original",
-                        pointers.len()
-                    ));
-                }
-                _ => {
-                    e.max_bytes = Some(e.original_bytes.len());
-                    e.context = Some("in-place: traducao limitada ao espaco original".to_string());
-                }
+            if let Some(pointers) = pointers.filter(|p| mark_relocatable(e, p)) {
+                e.max_bytes = None;
+                e.context = Some(format!(
+                    "realocavel: {} ponteiro(s) em tabela — nao precisa caber no espaco original",
+                    pointers.len()
+                ));
+            } else {
+                e.max_bytes = Some(e.original_bytes.len());
+                e.context = Some("in-place: traducao limitada ao espaco original".to_string());
             }
         }
         Ok(entries)
@@ -171,19 +169,7 @@ impl GameAdapter for GbaAdapter {
         for (offset, patch) in &plan.writes {
             out[*offset..offset + patch.len()].copy_from_slice(patch);
         }
-        // Escrita in-place que pisasse num ponteiro de tabela corromperia outro
-        // texto em silencio (ex.: campo de nome sem terminador colado no ponteiro).
-        for entry in entries {
-            for p in entry.pointer_offsets() {
-                if out.get(p..p + 4) != data.get(p..p + 4) {
-                    return Err(CoreError::Project(format!(
-                        "gba: uma traducao in-place sobrescreveria o ponteiro em 0x{p:X} (que \
-                         aponta pra entry {}) — encurte o texto logo antes desse endereco",
-                        entry.id
-                    )));
-                }
-            }
-        }
+        ensure_pointers_untouched(data, &out, entries)?;
         relocate(&mut out, &plan.relocations, ROM_BASE, MAX_ROM_LEN)?;
         out[CHECKSUM_OFFSET] = header_checksum(&out);
         Ok(AppliedImage {

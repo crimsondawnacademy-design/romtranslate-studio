@@ -158,44 +158,81 @@ pub fn make_rtsf_fixture() -> Vec<u8> {
 /// NDS sintetico: header com CRC-16 valido e campo do logo = 0xCF56, filesystem
 /// FNT/FAT com 2 arquivos na raiz — um com strings ASCII, outro com UTF-16LE.
 pub fn make_nds_rom() -> Vec<u8> {
-    use crate::adapters::nds::{crc16, LOGO_CRC_EXPECTED};
+    build_nds(&base_nds_files())
+}
 
-    let fnt_offset = 0x200usize;
-    let fat_offset = 0x220usize;
-    let file1_offset = 0x240usize;
-    let file2_offset = 0x280usize;
-
-    let file1: Vec<u8> = b"WELCOME TO THE SYNTH DS!\0PRESS START BUTTON\0".to_vec();
-    let mut file2: Vec<u8> = Vec::new();
+fn base_nds_files() -> Vec<(&'static str, Vec<u8>)> {
+    let mut menu: Vec<u8> = Vec::new();
     for text in ["START GAME", "OPTIONS MENU"] {
         for u in text.encode_utf16() {
-            file2.extend_from_slice(&u.to_le_bytes());
+            menu.extend_from_slice(&u.to_le_bytes());
         }
-        file2.extend_from_slice(&[0, 0]);
+        menu.extend_from_slice(&[0, 0]);
     }
+    vec![
+        (
+            "intro.txt",
+            b"WELCOME TO THE SYNTH DS!\0PRESS START BUTTON\0".to_vec(),
+        ),
+        ("menu.bin", menu),
+    ]
+}
 
-    let mut rom = vec![0u8; 0x300];
-    rom[0..7].copy_from_slice(b"SYNTHDS");
-    rom[0x0C..0x10].copy_from_slice(b"ASYP");
-    rom[0x10..0x12].copy_from_slice(b"01");
+/// Arquivo de mensagens: contagem + TABELA de 3 offsets u32 relativos ao
+/// arquivo + strings, e depois uma tabela de so 2 (nao pode ser aceita: em
+/// offset relativo o run minimo e 3).
+fn message_table_file() -> Vec<u8> {
+    let mut msg = vec![0u8; 0x38];
+    msg[0..4].copy_from_slice(&3u32.to_le_bytes());
+    for (i, target) in [0x10u32, 0x19, 0x22].into_iter().enumerate() {
+        msg[4 + i * 4..8 + i * 4].copy_from_slice(&target.to_le_bytes());
+    }
+    plant(&mut msg, 0x10, b"NEW GAME\0");
+    plant(&mut msg, 0x19, b"CONTINUE\0");
+    plant(&mut msg, 0x22, b"OPTIONS\0");
+    msg[0x2C..0x30].copy_from_slice(&0x10u32.to_le_bytes());
+    msg[0x30..0x34].copy_from_slice(&0x19u32.to_le_bytes());
+    msg
+}
+
+/// NDS com `msg.bin` (tabela de offsets relativos) alem dos arquivos base.
+pub fn make_nds_rom_with_message_table() -> Vec<u8> {
+    let mut files = base_nds_files();
+    files.push(("msg.bin", message_table_file()));
+    build_nds(&files)
+}
+
+/// NDS minimo: header + FNT (so a raiz) + FAT + arquivos alinhados em 0x40.
+fn build_nds(files: &[(&str, Vec<u8>)]) -> Vec<u8> {
+    use crate::adapters::nds::{crc16, LOGO_CRC_EXPECTED};
 
     // FNT: main table da raiz (subtable em +8, first file id 0, 1 diretorio).
     let mut fnt = Vec::new();
     fnt.extend_from_slice(&8u32.to_le_bytes());
     fnt.extend_from_slice(&0u16.to_le_bytes());
     fnt.extend_from_slice(&1u16.to_le_bytes());
-    for name in ["intro.txt", "menu.bin"] {
+    for (name, _) in files {
         fnt.push(name.len() as u8);
         fnt.extend_from_slice(name.as_bytes());
     }
     fnt.push(0);
 
+    let fnt_offset = 0x200usize;
+    let fat_offset = (fnt_offset + fnt.len()).next_multiple_of(0x20);
     let mut fat = Vec::new();
-    for (start, len) in [(file1_offset, file1.len()), (file2_offset, file2.len())] {
-        fat.extend_from_slice(&(start as u32).to_le_bytes());
-        fat.extend_from_slice(&((start + len) as u32).to_le_bytes());
+    let mut starts = Vec::new();
+    let mut cursor = (fat_offset + files.len() * 8).next_multiple_of(0x40);
+    for (_, bytes) in files {
+        starts.push(cursor);
+        fat.extend_from_slice(&(cursor as u32).to_le_bytes());
+        fat.extend_from_slice(&((cursor + bytes.len()) as u32).to_le_bytes());
+        cursor = (cursor + bytes.len()).next_multiple_of(0x40);
     }
 
+    let mut rom = vec![0u8; cursor.next_multiple_of(0x100)];
+    rom[0..7].copy_from_slice(b"SYNTHDS");
+    rom[0x0C..0x10].copy_from_slice(b"ASYP");
+    rom[0x10..0x12].copy_from_slice(b"01");
     rom[0x40..0x44].copy_from_slice(&(fnt_offset as u32).to_le_bytes());
     rom[0x44..0x48].copy_from_slice(&(fnt.len() as u32).to_le_bytes());
     rom[0x48..0x4C].copy_from_slice(&(fat_offset as u32).to_le_bytes());
@@ -204,8 +241,9 @@ pub fn make_nds_rom() -> Vec<u8> {
 
     rom[fnt_offset..fnt_offset + fnt.len()].copy_from_slice(&fnt);
     rom[fat_offset..fat_offset + fat.len()].copy_from_slice(&fat);
-    rom[file1_offset..file1_offset + file1.len()].copy_from_slice(&file1);
-    rom[file2_offset..file2_offset + file2.len()].copy_from_slice(&file2);
+    for ((_, bytes), start) in files.iter().zip(starts) {
+        rom[start..start + bytes.len()].copy_from_slice(bytes);
+    }
 
     // CRC do header por ultimo (cobre 0x000..0x15E, incluindo o campo do logo).
     let crc = crc16(&rom[..0x15E]);
@@ -469,6 +507,26 @@ pub fn make_ps1_bin() -> Vec<u8> {
                     .to_vec(),
             ),
             ("GAME.DAT", game),
+        ],
+    );
+    wrap_raw_2352(&plain)
+}
+
+/// PS1 com `MSG.DAT` (tabela de offsets relativos, sobra no setor final) e
+/// `FULL.DAT` (mesma estrutura com 2048 bytes exatos: nenhuma sobra).
+pub fn make_ps1_bin_with_message_table() -> Vec<u8> {
+    let mut full = message_table_file();
+    full.resize(2048, 0);
+    let plain = build_iso9660(
+        "PLAYSTATION",
+        "SYNTH_PS1",
+        &[
+            (
+                "SYSTEM.CNF",
+                b"BOOT = cdrom:\\SLUS_012.34;1\r\nTCB = 4\r\n".to_vec(),
+            ),
+            ("MSG.DAT", message_table_file()),
+            ("FULL.DAT", full),
         ],
     );
     wrap_raw_2352(&plain)
