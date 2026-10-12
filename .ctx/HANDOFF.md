@@ -192,9 +192,11 @@ com posição relativa a uma seção do arquivo em vez do arquivo inteiro.
   tabela leva no pedido quantos caracteres cabem (`maxChars`) e o estouro é
   erro de validação na frase, sem corte (`.ctx/DECISIONS.md`, "Texto de
   tabela: o espaço da original vai pro prompt"). Medido de novo: o
-  `llama3.2:3b` continua passando em 6 de 7. O próximo passo desse fluxo é
-  medir com um modelo maior e, se não bastar, repergunta com o tamanho
-  medido.
+  `llama3.2:3b` continua passando (5 a 7 de 7, com ou sem o limite). Com
+  modelo capaz (ChatGPT pelo Codex CLI, `gpt-6-astra`, 12/10) as 7 couberam
+  nas 4 rodadas com o limite e as 7 estouraram sem ele; por isso a
+  repergunta automática não foi construída (`.ctx/DECISIONS.md`, "com modelo
+  capaz o limite basta"). Falta medir em jogo real e com diálogo longo.
 - **Descompressão só detecta.** O Raio-X acha blocos LZ77 tipo 0x10 e conta
   as frases dentro deles; o app não extrai nem reinsere esse texto, e não
   reconhece outros compressores (LZ11 do DS mais novo, Huffman, os próprios

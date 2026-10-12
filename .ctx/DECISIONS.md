@@ -993,3 +993,106 @@ modelo maior (não medi; o `qwen3:4b` não roda em tempo útil neste Mac de
 **Não conferido:** a interface no app compilado (mudou só o texto
 `relative.writeBack`, nos dois idiomas; o erro chega pelo canal de sempre,
 como texto do core); modelo maior; jogo real.
+
+## 2026-10-12 — Texto de tabela: com modelo capaz o limite basta; a repergunta automática não foi construída
+
+**Contexto:** a entrada anterior deixou aberto medir com um modelo maior
+quanto ele obedece ao `maxChars` e, se nem assim coubesse, perguntar de novo
+ao provider só as frases que estouraram, com o tamanho medido. O
+`llama3.2:3b` passava do espaço em 6 de 7 com o limite no pedido.
+
+**Como foi medido.** O teste manual de `tests/table_translate.rs` (agora
+`real_model_is_told_the_table_characters`; era `real_ollama_...`) ganhou duas
+variáveis de ambiente:
+
+- `TABLE_TEST_PROVIDER=codex`: quem responde é o provider `codex_cli`, com o
+  Codex CLI logado neste Mac (codex-cli 0.153.4, login do ChatGPT, sem chave
+  de API). O modelo é o padrão do Codex com `--ignore-user-config`, que em
+  12/10/2026 é `gpt-6-astra` com esforço de raciocínio `none` (lido no
+  cabeçalho do `codex exec`). `CODEX_TEST_MODEL` troca o modelo.
+- `TABLE_TEST_NO_LIMIT=1`: um provider de passagem, só do teste, tira o
+  `maxChars` de cada item antes de repassar. Sem o campo o prompt também
+  perde o bloco `Length limit`: é o pedido de antes do `6ae4bcc`. É o
+  controle — sem ele não dá pra dizer se o modelo cabe por causa do limite
+  ou sozinho.
+
+O caminho é o do app: `run_translation`, lotes de 4 (duas chamadas por
+rodada), rede do acento, validação. Só as 7 frases de
+`synth::make_custom_table_rom` saem da máquina. Espaço de cada uma: 10, 11,
+8, 31, 36, 28, 35.
+
+**Resultado** (caracteres de cada tradução, na ordem das frases):
+
+| Modelo | Pedido | Rodada | Caracteres | Maiores que o espaço | A mais, somando as 7 |
+|---|---|---|---|---|---|
+| Codex `gpt-6-astra` | com o limite | 1 | 7, 11, 8, 30, 34, 28, 30 | 0 de 7 | 0 |
+| | | 2 | 7, 11, 8, 31, 34, 28, 29 | 0 de 7 | 0 |
+| | | 3 | 7, 11, 8, 31, 34, 28, 29 | 0 de 7 | 0 |
+| | | 4 | 7, 11, 8, 31, 34, 28, 30 | 0 de 7 | 0 |
+| Codex `gpt-6-astra` | sem o limite | 1 | 12, 15, 9, 40, 42, 32, 39 | 7 de 7 | 30 |
+| | | 2 | 12, 15, 9, 40, 42, 29, 38 | 7 de 7 | 26 |
+| | | 3 | 12, 15, 9, 40, 42, 32, 39 | 7 de 7 | 30 |
+| `llama3.2:3b` | com o limite | 1 | 13, 13, 9, 34, 42, 44, 44 | 7 de 7 | 40 |
+| | | 2 | 12, 14, 9, 19, 42, 26, 44 | 5 de 7 | 21 |
+| | | 3 | 13, 17, 9, 18, 42, 46, 44 | 6 de 7 | 43 |
+| `llama3.2:3b` | sem o limite | 1 | 12, 14, 9, 36, 42, 44, 39 | 7 de 7 | 37 |
+| | | 2 | 12, 14, 9, 36, 42, 44, 44 | 7 de 7 | 42 |
+
+Caractere fora da tabela: no Codex, nenhum e nenhum acento nas 7 rodadas
+(zero avisos, zero `Unencodable`). No `llama3.2:3b`, nenhuma pontuação fora;
+3 respostas com acento por rodada com o limite e 4 sem, todas gravadas sem
+ele, com o aviso.
+
+O que o Codex escreveu com o limite: `INICIAR`, `TECLE START`, `CONTINUE`,
+`Aperte Start e inicie sua busca` (31 de 31; na rodada 1, `Tecle Start e
+comece a jornada`), `O heroi foi a velha torre ao norte`, `a vila esta calma
+esta noite` (28 de 28), `Recomece do ultimo ponto salvo` ou `Recomece do
+ultimo salvamento`. Sem o limite: `INICIAR JOGO`, `PRESSIONE START`,
+`CONTINUAR`, `Pressione Start para iniciar sua jornada`.
+
+**O que a medição diz:**
+
+- No modelo capaz o limite funciona, e é ele que faz caber: 28 de 28
+  traduções cabem com o limite, 0 de 21 sem. Duas frases param no número
+  exato (31 de 31, 28 de 28): esse modelo conta.
+- No modelo de 3B o limite não muda o resultado de forma que dê pra medir.
+  Juntando com as 4 rodadas da sessão anterior (6 de 7 nas quatro; 17, 17, 26
+  e 17 a mais) e a rodada sem limite dela (7 de 7; 30 a mais): com o limite,
+  de 5 a 7 de 7 e de 17 a 43 caracteres a mais; sem ele, 7 de 7 e de 30 a
+  42. As faixas se sobrepõem. Isso corrige a leitura da entrada anterior
+  ("o modelo reage"): a frase que às vezes cabe, cabe encolhendo demais
+  (`INICIAR Sua Jornada`, 19 de 31).
+- Caber não é traduzir bem. `CONTINUE` voltou `CONTINUE` nas 4 rodadas do
+  Codex com o limite: `CONTINUAR` tem 9 pra 8 de espaço, e o modelo preferiu
+  devolver o original a passar do número. A validação não acusa nada; quem
+  vê é quem revisa (`SEGUIR` cabe).
+
+**Decisão: a repergunta não foi construída.** A condição era o modelo capaz
+ainda estourar, e ele não estourou. Construir seria um segundo pedido por
+lote com estouro (chamada paga em provider remoto), outro formato de pedido e
+um número de tentativas pra manter e testar — pra um caso que a medição não
+mostrou. No modelo pequeno, onde o estouro existe, não há evidência de que
+perguntar de novo ajude: ele já recebe o número no primeiro pedido e o
+resultado não muda. Isso **não foi medido** (não há repergunta pra medir); é
+o motivo de não construir no escuro, não uma prova de que não ajudaria.
+
+Segue valendo a decisão 6 da entrada anterior: nada é cortado e nada é
+perguntado de novo; a tradução maior fica inteira, com `ByteOverflow` de
+severidade `Error`.
+
+**O que reabre:** um modelo capaz estourando em uso real — jogo de verdade,
+diálogo longo, tabela com caractere de 2 bytes (o `maxChars` cai pra
+metade), outro par de idiomas — ou a medição de que um modelo local médio
+melhora com a segunda pergunta. O desenho fica anotado: medir cada resposta
+com `TblTable::encode` depois da rede do acento, mandar de volta só os itens
+que passaram, com a tradução que veio, o tamanho dela e o limite; tentativas
+poucas e fixas (cada uma é uma chamada paga); o que continuar maior fica
+inteiro e vira o erro de validação que já existe.
+
+**O que a medição não diz:** são 7 frases curtas e sintéticas, inglês pra
+pt-BR, numa tabela de 1 byte por caractere só com letras e espaço; um
+modelo, um dia, 4 rodadas (28 traduções). Não é garantia de que cabe sempre.
+O modelo padrão do Codex muda com o tempo. Nada sobre jogo real.
+
+**Mudança no repo:** só o teste manual (`#[ignore]`) e a documentação.
+Nenhuma linha de `src/` mudou e nenhum teste entrou no conjunto normal.
