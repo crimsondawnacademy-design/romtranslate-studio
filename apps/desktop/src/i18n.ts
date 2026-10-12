@@ -59,7 +59,9 @@ const messages = {
     "extract.discarded":
       "{n} sequências descartadas por não parecerem texto. Para ver tudo, desmarque “Só o que parece texto” e escaneie de novo. O que já estava no projeto continua na lista.",
     "extract.discardedStructured":
-      "{n} sequências descartadas por não parecerem texto. A extração estruturada sempre filtra, porque o que ela devolve é regravado no jogo; string com ponteiro em tabela nunca é descartada. Para ver tudo, use Escanear com “Só o que parece texto” desmarcado. O que já estava no projeto continua na lista.",
+      "{n} sequências descartadas por não parecerem texto. A extração estruturada sempre filtra, porque o que ela devolve é regravado no jogo; string com ponteiro em tabela nunca é descartada. Para ver tudo, use Escanear com “Só o que parece texto” desmarcado.",
+    "extract.removedOld":
+      "{n} strings antigas sem tradução saíram do projeto por não parecerem texto. Ficou o que tem tradução, o que tem ponteiro em tabela e o que foi lido por tabela de caracteres.",
     "extract.none": "Nenhuma string com essa configuração.",
     "extract.filter": "Filtrar texto...",
     "extract.showing": "Mostrando {shown} de {total}",
@@ -241,7 +243,9 @@ const messages = {
     "extract.discarded":
       "{n} sequences dropped because they do not look like text. To see everything, untick “Only what looks like text” and scan again. Whatever was already in the project stays in the list.",
     "extract.discardedStructured":
-      "{n} sequences dropped because they do not look like text. Structured extraction always filters, because what it returns is written back into the game; a string with a pointer in a table is never dropped. To see everything, use Scan with “Only what looks like text” unticked. Whatever was already in the project stays in the list.",
+      "{n} sequences dropped because they do not look like text. Structured extraction always filters, because what it returns is written back into the game; a string with a pointer in a table is never dropped. To see everything, use Scan with “Only what looks like text” unticked.",
+    "extract.removedOld":
+      "{n} old strings with no translation left the project because they do not look like text. Whatever has a translation, a pointer in a table or was read through a character table stayed.",
     "extract.none": "No strings with this configuration.",
     "extract.filter": "Filter text...",
     "extract.showing": "Showing {shown} of {total}",

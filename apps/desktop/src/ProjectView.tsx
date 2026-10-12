@@ -73,6 +73,8 @@ export default function ProjectView({
     found: number;
     truncated: boolean;
     discarded: number;
+    /** So a extracao estruturada tira entry antiga do projeto. */
+    removed: number;
     structured: boolean;
   } | null>(null);
   const [encoding, setEncoding] = useState<ScanEncoding>("ascii");
@@ -201,6 +203,7 @@ export default function ProjectView({
         found: outcome.entries.length,
         truncated: outcome.truncated,
         discarded: outcome.discarded,
+        removed: 0,
         structured: false,
       });
       await reloadEntries();
@@ -270,6 +273,7 @@ export default function ProjectView({
         found: outcome.saved,
         truncated: outcome.truncated,
         discarded: outcome.discarded,
+        removed: outcome.removed,
         structured: true,
       });
       await reloadEntries();
@@ -690,6 +694,9 @@ export default function ProjectView({
             n: scanInfo.discarded,
           })}
         </p>
+      )}
+      {scanInfo && scanInfo.removed > 0 && (
+        <p className="hint left">{t("extract.removedOld", { n: scanInfo.removed })}</p>
       )}
       {savedPath && <div className="ok">{t("export.saved", { path: savedPath })}</div>}
 

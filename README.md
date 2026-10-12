@@ -116,9 +116,12 @@ cima de gráfico ou de código. Limites:
   que a regra descarta aparece no Escanear sem filtro, mas esse caminho não
   regrava no jogo;
 - foi calibrada num jogo só, em inglês;
-- extrair de novo um projeto antigo não tira dele o lixo que já estava lá.
-  Para uma lista limpa, crie um projeto novo: a memória de tradução devolve o
-  que já foi traduzido;
+- projeto criado antes do filtro: a **Extração estruturada** tira dele as
+  strings antigas que não parecem texto e diz na tela quantas saíram. Só sai o
+  que não tem tradução, não tem ponteiro em tabela, não foi lido por tabela de
+  caracteres (`.tbl`) e não veio na extração que acabou de rodar. Lixo que já
+  recebeu tradução (da IA inclusive) fica na lista, e o **Escanear** nunca
+  apaga nada;
 - no Nintendo DS, a leitura UTF-16 falsa de um trecho binário passa pela regra
   (para ela, kanji é letra).
 

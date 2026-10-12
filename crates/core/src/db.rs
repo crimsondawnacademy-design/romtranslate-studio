@@ -2,15 +2,16 @@
 //! extraidas, translation memory e glossario (spec §13, §20). Um DB por
 //! projeto; TM global cross-projeto fica para depois.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::error::{CoreError, Result};
 use crate::provider::GlossaryTerm;
-use crate::types::{TextEntry, TranslationStatus};
+use crate::scan::looks_like_text;
+use crate::types::{TextEncoding, TextEntry, TranslationStatus};
 
 pub const DB_FILE: &str = "translations.sqlite";
 
@@ -123,6 +124,35 @@ impl ProjectDb {
         }
         tx.commit()?;
         Ok(entries.len())
+    }
+
+    /// Apaga as entries antigas de lixo que a extracao estruturada deixou de
+    /// devolver e diz quantas sairam. So sai a entry que cumpre TUDO: sem
+    /// traducao, fora de `extracted`, sem ponteiro em tabela, nao lida por
+    /// tabela de caracteres (essa veio de um scan com `.tbl` que o usuario
+    /// pediu, e a regra e fraca pra ela) e que nao passa em
+    /// `scan::looks_like_text`.
+    pub fn remove_stale_junk(&mut self, extracted: &[TextEntry]) -> Result<usize> {
+        let extracted: HashSet<&str> = extracted.iter().map(|e| e.id.as_str()).collect();
+        // Mesma conexao: a leitura abaixo ja roda dentro da transacao.
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        let mut removed = 0;
+        {
+            let mut delete =
+                tx.prepare("DELETE FROM entries WHERE id=?1 AND translated_text IS NULL")?;
+            for e in self.load_entries()? {
+                if e.translated_text.is_none()
+                    && !extracted.contains(e.id.as_str())
+                    && e.pointers().is_empty()
+                    && !matches!(e.encoding, TextEncoding::Table(_))
+                    && !looks_like_text(&e.source_text)
+                {
+                    removed += delete.execute([&e.id])?;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(removed)
     }
 
     pub fn load_entries(&self) -> Result<Vec<TextEntry>> {

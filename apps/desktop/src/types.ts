@@ -102,6 +102,8 @@ export interface ExtractOutcome {
   saved: number;
   discarded: number;
   truncated: boolean;
+  /** Entries antigas sem traducao que sairam do projeto por nao parecerem texto. */
+  removed: number;
 }
 
 export interface OpenProjectReport {

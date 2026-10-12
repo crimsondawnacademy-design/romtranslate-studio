@@ -54,12 +54,16 @@ pub struct ExtractOutcome {
     pub discarded: usize,
     /// A varredura parou no teto: pode haver mais texto.
     pub truncated: bool,
+    /// Entries antigas, sem traducao, que sairam do banco por nao parecerem
+    /// texto (`ProjectDb::remove_stale_junk`).
+    pub removed: usize,
 }
 
 /// Extracao estruturada do arquivo de origem de um projeto, gravada no banco.
 /// O upsert e por id (`scan-<offset>` nos adapters que varrem), entao extrair
 /// de novo atualiza limites e ponteiros e mantem as traducoes ja feitas.
-/// Entry antiga que a extracao nao devolve mais continua no banco.
+/// Entry antiga que a extracao nao devolve mais so sai do banco se for lixo
+/// sem traducao (projeto de antes do filtro); o resto continua.
 pub fn extract_project(project_dir: &Path) -> Result<ExtractOutcome> {
     let game = crate::project::load_project(project_dir)?;
     let adapter = find(&game.adapter_id)
@@ -67,9 +71,13 @@ pub fn extract_project(project_dir: &Path) -> Result<ExtractOutcome> {
     // mmap: DVD de PS2 (>2 GiB) extrai sem carregar o arquivo em RAM.
     let data = crate::fileio::read_view(&game.source_path)?;
     let extraction = adapter.extract(&data)?;
+    let mut db = ProjectDb::open(project_dir)?;
+    let saved = db.upsert_entries(&extraction.entries)?;
+    let removed = db.remove_stale_junk(&extraction.entries)?;
     Ok(ExtractOutcome {
-        saved: ProjectDb::open(project_dir)?.upsert_entries(&extraction.entries)?,
+        saved,
         discarded: extraction.discarded,
         truncated: extraction.truncated,
+        removed,
     })
 }
