@@ -10,7 +10,8 @@ const messages = {
     "home.selectFile": "Selecionar arquivo de jogo",
     "home.openProject": "Abrir projeto",
     "home.hint":
-      "Selecione uma ROM ou dump obtido legalmente por você. O arquivo nunca sai do seu computador nesta etapa.",
+      "Selecione ou arraste para esta janela uma ROM ou dump obtido legalmente por você (ou uma pasta de projeto .rtsproj). O arquivo nunca sai do seu computador nesta etapa.",
+    "home.drop": "Solte para abrir.",
     "inspect.loading": "Inspecionando arquivo...",
     "inspect.title": "Resultado da detecção",
     "inspect.platform": "Plataforma",
@@ -150,7 +151,10 @@ const messages = {
       "Aplica as traduções numa cópia em working/ do projeto — o arquivo original nunca é modificado. Entries com erro de validação bloqueiam a reinserção.",
     "reinsert.run": "Reinserir na cópia de trabalho",
     "reinsert.running": "Reinserindo...",
-    "reinsert.done": "Cópia de trabalho gerada e verificada: {path}",
+    "reinsert.done": "Jogo traduzido pronto e verificado. Abra este arquivo no emulador:",
+    "reinsert.reveal": "Mostrar o arquivo",
+    "reinsert.personal":
+      "Este arquivo é para o seu uso. Para compartilhar a tradução, exporte o patch: quem tem o jogo original aplica o patch e chega no mesmo arquivo.",
     "reinsert.applied": "{applied} traduções aplicadas · {kept} mantidas no original",
     "reinsert.relocated": "{n} realocadas, com os ponteiros atualizados",
     "reinsert.advanced": "Modo avançado: reinserir mesmo com erros de validação",
@@ -175,7 +179,8 @@ const messages = {
     "home.selectFile": "Select game file",
     "home.openProject": "Open project",
     "home.hint":
-      "Select a ROM or dump you legally own. The file never leaves your computer in this step.",
+      "Select or drag into this window a ROM or dump you legally obtained (or a .rtsproj project folder). The file never leaves your computer at this stage.",
+    "home.drop": "Drop to open.",
     "inspect.loading": "Inspecting file...",
     "inspect.title": "Detection result",
     "inspect.platform": "Platform",
@@ -314,7 +319,10 @@ const messages = {
       "Applies translations to a copy under the project's working/ folder — the original file is never modified. Entries with validation errors block reinsertion.",
     "reinsert.run": "Reinsert into working copy",
     "reinsert.running": "Reinserting...",
-    "reinsert.done": "Working copy written and verified: {path}",
+    "reinsert.done": "Translated game ready and verified. Open this file in your emulator:",
+    "reinsert.reveal": "Show the file",
+    "reinsert.personal":
+      "This file is for your own use. To share the translation, export the patch: anyone who owns the original game applies it and gets the same file.",
     "reinsert.applied": "{applied} translations applied · {kept} kept original",
     "reinsert.relocated": "{n} relocated, with pointers updated",
     "reinsert.advanced": "Advanced mode: reinsert even with validation errors",

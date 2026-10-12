@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { makeT, MessageId } from "./i18n";
 import {
   defaultProjectDir,
@@ -892,7 +893,17 @@ export default function ProjectView({
           {reinsertOutcome && (
             <>
               <div className="ok">
-                {t("reinsert.done", { path: reinsertOutcome.workingPath })}
+                {t("reinsert.done")}
+                <span className="path">{reinsertOutcome.workingPath}</span>
+                <button
+                  onClick={() =>
+                    revealItemInDir(reinsertOutcome.workingPath).catch((e) =>
+                      setError(String(e)),
+                    )
+                  }
+                >
+                  {t("reinsert.reveal")}
+                </button>
                 <br />
                 {t("reinsert.applied", {
                   applied: reinsertOutcome.apply.applied,
@@ -905,6 +916,7 @@ export default function ProjectView({
                   </>
                 )}
               </div>
+              <p className="hint left">{t("reinsert.personal")}</p>
               <ul className="evidence">
                 {reinsertOutcome.verification.checks.map((c) => (
                   <li key={c}>{c}</li>

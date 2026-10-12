@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { invoke, isTauri } from "@tauri-apps/api/core";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open } from "@tauri-apps/plugin-dialog";
 import { detectLocale, makeT, MessageId } from "./i18n";
 import { defaultProjectDir, formatBytes } from "./util";
@@ -35,10 +36,10 @@ export default function App() {
   );
   const [sourceLanguage, setSourceLanguage] = useState("");
 
-  async function pickFile() {
+  const [dropping, setDropping] = useState(false);
+
+  const inspectPath = useCallback(async (path: string) => {
     setError(null);
-    const path = await open({ multiple: false, directory: false });
-    if (typeof path !== "string") return;
     setScreen({ kind: "inspecting" });
     try {
       const report = await invoke<InspectionReport>("inspect_file", { path });
@@ -47,12 +48,10 @@ export default function App() {
       setError(String(e));
       setScreen({ kind: "home" });
     }
-  }
+  }, []);
 
-  async function openProject() {
+  const openProjectDir = useCallback(async (dir: string) => {
     setError(null);
-    const dir = await open({ multiple: false, directory: true });
-    if (typeof dir !== "string") return;
     try {
       const report = await invoke<OpenProjectReport>("open_project", { dir });
       const warning: MessageId | null = !report.sourceFound
@@ -64,7 +63,39 @@ export default function App() {
     } catch (e) {
       setError(String(e));
     }
+  }, []);
+
+  async function pickFile() {
+    const path = await open({ multiple: false, directory: false });
+    if (typeof path === "string") await inspectPath(path);
   }
+
+  async function openProject() {
+    const dir = await open({ multiple: false, directory: true });
+    if (typeof dir === "string") await openProjectDir(dir);
+  }
+
+  // Arrastar pra janela abre o arquivo. So na tela inicial e na de deteccao:
+  // dentro de um projeto, um arquivo solto por engano fecharia o editor.
+  const droppable = screen.kind === "home" || screen.kind === "report";
+  useEffect(() => {
+    // Fora do Tauri (build web aberto num navegador) nao ha janela pra ouvir.
+    if (!droppable || !isTauri()) return;
+    const unlisten = getCurrentWebview().onDragDropEvent(({ payload }) => {
+      if (payload.type !== "drop") {
+        setDropping(payload.type !== "leave");
+        return;
+      }
+      setDropping(false);
+      const path = payload.paths[0];
+      if (!path) return;
+      // Pasta de projeto reabre; qualquer outra coisa e um jogo a inspecionar.
+      void (/\.rtsproj[\\/]?$/i.test(path) ? openProjectDir(path) : inspectPath(path));
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
+  }, [droppable, inspectPath, openProjectDir]);
 
   async function createProject(report: InspectionReport) {
     if (!report.best) return;
@@ -107,14 +138,14 @@ export default function App() {
       )}
 
       {screen.kind === "home" && (
-        <section className="card center">
+        <section className={dropping ? "card center dropping" : "card center"}>
           <div className="actions center-actions">
             <button className="primary" onClick={pickFile}>
               {t("home.selectFile")}
             </button>
             <button onClick={openProject}>{t("home.openProject")}</button>
           </div>
-          <p className="hint">{t("home.hint")}</p>
+          <p className="hint">{t(dropping ? "home.drop" : "home.hint")}</p>
         </section>
       )}
 

@@ -58,6 +58,10 @@ body {
   padding: 48px 24px;
 }
 
+.card.dropping {
+  border: 1px dashed var(--accent);
+}
+
 .card h2 {
   margin: 0 0 16px;
   font-size: 17px;
