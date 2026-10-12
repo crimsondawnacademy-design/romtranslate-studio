@@ -206,18 +206,32 @@ fn longer_translation_is_refused_asking_for_shorter_text() {
     let tmp = TempDir::new("overflow");
     let (dir, _) = tmp.scanned_project(&synth::make_custom_table_rom());
 
-    // O validador mede em bytes da tabela e avisa antes.
+    // O validador mede em bytes da tabela e acusa o erro ja na frase: texto
+    // de tabela so e gravado no lugar.
     let issues = translate(&dir, "CONTINUE", "CONTINUAR JOGO");
     assert!(
         issues.iter().any(|i| i.kind == IssueKind::ByteOverflow
+            && i.severity == Severity::Error
             && i.message.contains("14 bytes")
             && i.message.contains("tem 8")),
         "{issues:?}"
     );
 
-    let err = reinsert_project(&dir, false).unwrap_err().to_string();
-    assert!(err.contains("encurte"), "{err}");
-    assert!(err.contains("14 bytes") && err.contains("tem 8"), "{err}");
+    // Sem o modo avancado quem barra e a validacao; com ele, o plano de
+    // escrita. Nos dois o pedido e encurtar, e nada e gravado.
+    let blocked = reinsert_project(&dir, false).unwrap_err().to_string();
+    assert!(blocked.contains("1 entries com erro"), "{blocked}");
+    assert!(blocked.contains("encurte"), "{blocked}");
+    assert!(
+        blocked.contains("14 bytes") && blocked.contains("tem 8"),
+        "{blocked}"
+    );
+    let forced = reinsert_project(&dir, true).unwrap_err().to_string();
+    assert!(forced.contains("nao pode ser realocada"), "{forced}");
+    assert!(
+        forced.contains("14 bytes") && forced.contains("tem 8"),
+        "{forced}"
+    );
     assert!(!working_copy(&dir).exists());
 }
 

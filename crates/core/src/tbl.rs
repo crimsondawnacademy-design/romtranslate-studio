@@ -155,6 +155,25 @@ impl TblTable {
         chars.into_iter().collect()
     }
 
+    /// Quantos caracteres uma traducao pode ter com a garantia de caber em
+    /// `slot` bytes — o numero que vai pro prompt, porque o modelo conta
+    /// caracteres e o espaco e em bytes da tabela. Conta pela entrada mais
+    /// cara (bytes por caractere), entao nunca passa do que cabe: tabela de
+    /// 1 byte por caractere devolve `slot`; dupla de letras num byte so
+    /// ("th") nao aumenta o numero. Quem decide se a traducao cabe e
+    /// `encode`, na validacao.
+    // ponytail: piso pela entrada mais cara da tabela INTEIRA. Com letras de
+    // 1 byte e kanji de 2 na mesma tabela, o prompt diz a metade do que cabe
+    // em letras; medir so os caracteres do idioma de destino se aparecer um
+    // jogo assim.
+    pub fn chars_that_fit(&self, slot: usize) -> usize {
+        self.reverse
+            .iter()
+            .map(|(text, key)| slot.saturating_mul(text.chars().count()) / key.len())
+            .min()
+            .unwrap_or(0)
+    }
+
     /// `text` com cada letra acentuada que a tabela nao escreve trocada pela
     /// letra sem acento ('ç' -> 'c', 'É' -> 'E') — so quando a tabela tem
     /// essa letra. `None` = nada a trocar. Caractere sem troca fica como veio
@@ -405,6 +424,37 @@ mod tests {
         let table =
             TblTable::parse("82=b\n81=a\nC1=a\n40= \n90=th\nFE=[FIM]\n00=\n83=é\n").unwrap();
         assert_eq!(table.charset(), " abé");
+    }
+
+    #[test]
+    fn chars_that_fit_never_promises_more_than_the_slot_holds() {
+        // Um byte por caractere: caracteres e bytes sao o mesmo numero.
+        let plain = TblTable::parse("80=A\n81=B\n40= \n").unwrap();
+        assert_eq!(plain.chars_that_fit(10), 10);
+        // Com dupla num byte so ou codigo de controle cabe mais do que o
+        // numero diz, nunca menos.
+        let pairs = TblTable::parse("80=t\n81=h\n90=th\nFE=[FIM]\n").unwrap();
+        assert_eq!(pairs.chars_that_fit(10), 10);
+        // Um caractere de 2 bytes basta pra valer a conta dele.
+        let wide = TblTable::parse("80=A\n81=B\nFF20= \n").unwrap();
+        assert_eq!(wide.chars_that_fit(10), 5);
+        assert_eq!(wide.chars_that_fit(11), 5);
+        // Entrada de 3 bytes pra 2 caracteres: 1,5 byte por caractere.
+        let odd = TblTable::parse("80=A\nC0C1C2=AB\n").unwrap();
+        assert_eq!(odd.chars_that_fit(10), 6);
+        // O que o numero promete, o codificador cumpre — no pior texto.
+        for (table, worst) in [(&plain, "A"), (&wide, " "), (&odd, "AB")] {
+            for slot in 0..12 {
+                let fit = table.chars_that_fit(slot);
+                let text: String = worst.chars().cycle().take(fit).collect();
+                assert!(
+                    table.encode(&text).unwrap().len() <= slot,
+                    "{text:?} em {slot}"
+                );
+            }
+        }
+        // So entrada de texto vazio: nada cabe.
+        assert_eq!(TblTable::parse("00=\n").unwrap().chars_that_fit(10), 0);
     }
 
     #[test]

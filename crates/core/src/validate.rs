@@ -26,8 +26,9 @@ pub enum IssueKind {
     /// Placeholder/control code/tag removido ou inventado ({0}, %s, <BR>, [ITEM], \n).
     PlaceholderMismatch,
     /// Traducao nao cabe: acima de max_bytes (Error) ou do espaco original
-    /// (Warning). Tambem a string de largura fixa lida por tabela cuja sobra
-    /// nao da pra preencher (Error).
+    /// (Warning; Error em texto de tabela, que so e gravado no lugar). Tambem
+    /// a string de largura fixa lida por tabela cuja sobra nao da pra
+    /// preencher (Error).
     ByteOverflow,
     /// Original tem texto, traducao esta vazia.
     EmptyTranslation,
@@ -235,6 +236,17 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
                     IssueKind::ByteOverflow,
                     format!(
                         "traducao ocupa {n} bytes (original {original}): sera realocada com os ponteiros atualizados — confira no emulador se cabe na caixa de texto"
+                    ),
+                ),
+                // Texto de tabela sem ponteiro em tabela so e gravado no lugar: a
+                // reinsercao recusa o que passa do espaco, modo avancado
+                // inclusive. E erro ja aqui, na frase.
+                _ if n > original && table.is_some() => push(
+                    Severity::Error,
+                    IssueKind::ByteOverflow,
+                    format!(
+                        "traducao ocupa {n} bytes na tabela; o espaco original tem {original} e \
+                         texto de tabela e gravado no lugar — encurte o texto"
                     ),
                 ),
                 None if n > original => push(
@@ -492,6 +504,40 @@ mod tests {
             encoded_len("ABC", &TextEncoding::ShiftJis, None),
             EncodedLen::Unsupported
         );
+    }
+
+    #[test]
+    fn table_text_over_its_space_is_an_error_unless_relocatable() {
+        let table = TblTable::parse("80=A\n81=B\n40= \n").unwrap();
+        let over = |e: &TextEntry| -> Vec<Severity> {
+            validate_entry(e, Some(&table))
+                .iter()
+                .filter(|i| i.kind == IssueKind::ByteOverflow)
+                .map(|i| i.severity)
+                .collect()
+        };
+        let mut e = entry("AB", "ABA", TextEncoding::Table("x".into()));
+        e.original_bytes = vec![0x80, 0x81];
+        assert_eq!(over(&e), [Severity::Error]);
+        let message = &validate_entry(&e, Some(&table))[0].message;
+        assert!(message.contains("3 bytes") && message.contains("tem 2"));
+        assert!(message.contains("encurte"), "{message}");
+
+        // Do tamanho do espaco ou menor: nada a dizer.
+        e.translated_text = Some("BA".into());
+        assert!(validate_entry(&e, Some(&table)).is_empty());
+        e.translated_text = Some("B".into());
+        assert!(validate_entry(&e, Some(&table)).is_empty());
+
+        // Com ponteiro em tabela a string pode ser realocada: aviso, como nos
+        // outros encodings.
+        e.translated_text = Some("ABA".into());
+        e.metadata = serde_json::json!({"pointers": [16]});
+        assert_eq!(over(&e), [Severity::Warning]);
+
+        // A tabela de outra entry nao muda a severidade do texto ASCII.
+        let ascii = entry("HI", "OLA MUNDO", TextEncoding::Ascii);
+        assert_eq!(over(&ascii), [Severity::Warning]);
     }
 
     #[test]

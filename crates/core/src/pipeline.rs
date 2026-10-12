@@ -144,6 +144,12 @@ pub async fn run_translation(
                     text: e.source_text.clone(),
                     context: e.context.clone(),
                     max_bytes: e.max_bytes,
+                    // Texto de tabela sem ponteiro em tabela so e gravado no
+                    // lugar: o espaco da original e o teto, e o modelo
+                    // precisa saber dele.
+                    max_chars: table
+                        .filter(|_| e.pointer_offsets().is_empty())
+                        .map(|table| table.chars_that_fit(e.original_bytes.len())),
                 })
                 .collect(),
             source_language: opts.source_language.clone(),

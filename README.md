@@ -141,14 +141,28 @@ cuja letra base a tabela não tem) é erro que diz qual caractere e em que
 posição — nunca um byte inventado. Limites: isso está provado de ponta a
 ponta numa fixture sintética de NES com um provider de mentira, não em jogo
 real; as outras plataformas in-place usam o mesmo caminho, mas não têm teste
-com tabela. Com um modelo de verdade só há uma rodada, num modelo local
-pequeno (`llama3.2:3b`, as 7 frases da fixture): nenhuma pontuação fora da
-tabela, e 4 respostas ainda vieram com acento e foram gravadas sem ele. A
-mesma rodada mostrou o que falta: a IA ainda **não recebe o tamanho** da
-string de tabela, as 7 traduções ficaram maiores que o espaço da original e
-a reinserção recusa até você encurtar. A troca só cobre letra latina
-acentuada num caractere só (`á`, `ç`, `É`); tradução escrita à mão não é
-mexida. E a sobra de
+com tabela. Com um modelo de verdade só há medição num modelo local pequeno
+(`llama3.2:3b`, as 7 frases da fixture): nenhuma pontuação fora da tabela, e
+4 respostas ainda vieram com acento e foram gravadas sem ele. A troca só
+cobre letra latina acentuada num caractere só (`á`, `ç`, `É`); tradução
+escrita à mão não é mexida.
+
+**Tamanho do texto de tabela**: ele é sempre gravado no lugar, então o
+espaço da original é o teto. A tradução por IA recebe esse teto em cada
+frase, em caracteres (`maxChars`), com a instrução de que é limite duro. O
+número é contado pela entrada mais cara da tabela: numa tabela de 1 byte por
+caractere é o próprio espaço; se algum caractere custa 2 bytes, é a metade —
+nunca mais do que cabe, às vezes menos. Quem decide se cabe é a validação,
+que mede em bytes da tabela: tradução maior que o espaço é **erro** na frase
+(antes era aviso, e a recusa só aparecia na reinserção), com os dois
+tamanhos. O app **não corta** texto: a tradução fica inteira no projeto até
+você encurtar. O que foi medido: o limite no pedido não fez o `llama3.2:3b`
+caber. Sem ele, as 7 traduções passavam do espaço; com ele, 6 de 7
+continuaram passando nas 4 rodadas (somando as 7 frases, 17 a 26
+caracteres a mais, contra 30), e a única que coube perdeu parte do sentido. Modelo maior não foi medido — conte com o
+erro de validação e com encurtar à mão. Limite conhecido: string de largura
+fixa numa tabela sem espaço precisa do tamanho exato, e o pedido só diz o
+máximo. E a sobra de
 uma tradução mais curta vira `0x00` quando o byte depois da string original
 é `0x00` (senão é preenchida com o espaço da tabela) — jogo com outro
 terminador pede conferência no emulador.
@@ -238,7 +252,7 @@ pnpm test && pnpm lint && pnpm web:build
 # prova de fogo com Ollama rodando:
 cargo test -p romtranslate-core --test translate -- --ignored --nocapture
 # a mesma, com o texto numa tabela de caracteres (mostra o que o modelo
-# respondeu, o que foi gravado e os avisos):
+# respondeu, o que foi gravado, quantas passaram do espaço e os avisos):
 cargo test -p romtranslate-core --test table_translate -- --ignored --nocapture
 ```
 

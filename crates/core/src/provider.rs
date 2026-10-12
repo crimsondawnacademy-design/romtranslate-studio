@@ -13,6 +13,13 @@ pub struct BatchItem {
     pub text: String,
     pub context: Option<String>,
     pub max_bytes: Option<usize>,
+    /// So em texto de tabela de caracteres gravado no lugar: quantos
+    /// caracteres a traducao pode ter pra caber, com certeza, no espaco da
+    /// original (`TblTable::chars_that_fit`). Limite duro, e em caracteres
+    /// porque e o que o modelo escreve — quanto cada um custa em bytes e
+    /// coisa da tabela. Fora desse caso o campo nem aparece no pedido.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_chars: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,6 +112,13 @@ pub fn build_system_prompt(req: &TranslationRequest) -> String {
              - This also applies to glossary terms: adapt them to the character set.\n",
         );
     }
+    if req.items.iter().any(|item| item.max_chars.is_some()) {
+        p.push_str(
+            "Length limit (STRICT): each text has a fixed space in the game.\n\
+             - \"maxChars\" is the maximum number of characters of that item's translation, spaces included: a longer translation cannot be stored in the game.\n\
+             - If the natural translation is longer, use shorter words or drop words until it fits. Shorter is always fine.\n",
+        );
+    }
     p.push_str(
         "Respond with ONLY valid JSON in this exact shape, one entry per input item, same ids:\n\
          {\"translations\":[{\"id\":\"...\",\"translation\":\"...\"}]}\n",
@@ -173,6 +187,7 @@ mod tests {
                 text: "Use the POTION, {0}!".into(),
                 context: None,
                 max_bytes: Some(24),
+                max_chars: None,
             }],
             source_language: Some("en-US".into()),
             target_language: "pt-BR".into(),
@@ -258,10 +273,35 @@ mod tests {
     }
 
     #[test]
+    fn table_item_with_a_limit_gets_the_hard_rule() {
+        let mut limited = TranslationRequest {
+            charset: Some(" ABCabc".into()),
+            ..req_with_glossary()
+        };
+        let unlimited = build_system_prompt(&limited);
+        assert!(!unlimited.contains("maxChars"), "{unlimited}");
+
+        limited.items[0].max_bytes = None;
+        limited.items[0].max_chars = Some(18);
+        let p = build_system_prompt(&limited);
+        assert!(p.contains("Length limit (STRICT)"), "{p}");
+        assert!(p.contains("\"maxChars\" is the maximum number of characters"));
+        // O bloco e a unica diferenca, e vem depois da lista de caracteres.
+        let block = &p[p.find("Length limit").unwrap()..p.find("Respond with").unwrap()];
+        assert_eq!(p.replace(block, ""), unlimited);
+        assert!(p.find("Character set").unwrap() < p.find("Length limit").unwrap());
+        assert!(build_user_prompt(&limited).contains("\"maxChars\": 18"));
+    }
+
+    #[test]
     fn user_prompt_is_item_json() {
-        let p = build_user_prompt(&req_with_glossary());
-        assert!(p.contains("\"id\": \"a\""));
-        assert!(p.contains("maxBytes"));
+        // Item sem limite em caracteres: o pedido e o de sempre, letra por
+        // letra.
+        assert_eq!(
+            build_user_prompt(&req_with_glossary()),
+            "[\n  {\n    \"id\": \"a\",\n    \"text\": \"Use the POTION, {0}!\",\n    \
+             \"context\": null,\n    \"maxBytes\": 24\n  }\n]"
+        );
     }
 
     #[test]

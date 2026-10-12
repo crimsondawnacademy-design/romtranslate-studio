@@ -59,6 +59,7 @@ fn request() -> TranslationRequest {
             text: "NEW GAME".to_string(),
             context: None,
             max_bytes: Some(12),
+            max_chars: None,
         }],
         source_language: None,
         target_language: "pt-BR".to_string(),
