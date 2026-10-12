@@ -4,7 +4,7 @@ handoff_gerado: 2026-10-12
 gerado_por: claude / opus-5.5
 motivo: pausa-longa
 branch: main
-ultimo_commit_de_codigo: 929503b (2026-09-21)
+ultimo_commit_de_codigo: 401457f (2026-10-12)
 versao_publicada: v0.1.1
 ---
 
@@ -15,7 +15,7 @@ O estado vivo fica em `.ctx/STATE.md`; o porquê de cada decisão, em
 `.ctx/DECISIONS.md`; a especificação do produto, em `docs/SPEC.md`.
 
 Este documento foi gerado a partir do repositório no GitHub, não de memória de
-conversa. O código não muda desde 21/09/2026.
+conversa. O último commit de código é o `401457f`, de 12/10/2026.
 
 ---
 
@@ -36,9 +36,9 @@ de trabalho do mantenedor (decisão registrada em `.ctx/DECISIONS.md`).
 | Repositório (público) | https://github.com/crimsondawnacademy-design/romtranslate-studio |
 | Versão publicada | https://github.com/crimsondawnacademy-design/romtranslate-studio/releases/tag/v0.1.1 |
 | Stack | Tauri 2, React 19, Vite 8, TypeScript (pnpm); Rust em workspace |
-| Tamanho | 8.650 linhas no core, 3.482 de testes, 610 na ponte Tauri, 1.860 de frontend |
-| Testes | 127 em Rust (125 rodam; 2 são manuais) e 9 no frontend |
-| CI | verde no commit `929503b` (jobs `rust`, `desktop`, `frontend`) |
+| Tamanho | 9.380 linhas no core, 3.739 de testes, 643 na ponte Tauri, 2.116 de frontend |
+| Testes | 144 em Rust (142 rodam; 2 são manuais) e 9 no frontend |
+| CI | jobs `rust`, `desktop` e `frontend`; verde no `929503b`. Confira a execução do `401457f` |
 
 A versão publicada é marcada como pré-lançamento (alpha). Por isso o endereço
 `/releases/latest` **não** leva a ela: para divulgar, use o link da tag.
@@ -84,8 +84,22 @@ tamanho anormal), modo avançado (reinserir mesmo com erros), chave de API no
 cofre do sistema operacional, interface em português e inglês, CI de release
 que gera binários para macOS (Apple Silicon e Intel), Windows e Linux.
 
-**No código mas ainda não publicado em binário** (commit `929503b`, depois da
-v0.1.1): tabelas com ponteiros de 16 bits e a correção descrita em 3.1.
+**Descoberta de texto fora do alcance do scanner** (12/10, commit `401457f`):
+
+- **Busca relativa.** O usuário digita uma palavra que aparece no jogo; o app
+  a procura pela distância entre as letras, descobre onde o alfabeto do jogo
+  começa e grava o `.tbl` em `<projeto>/tables/`. Fica no modo `table` da
+  extração.
+- **Raio-X.** Botão na extração. Mostra blocos LZ77 tipo 0x10 e quantas frases
+  estão presas neles, quanto do arquivo é denso (comprimido ou cifrado) e
+  quantas strings extraídas têm ponteiro em tabela.
+
+Os dois têm limite declarado na interface: texto lido por tabela **não é
+regravado** no jogo, e texto comprimido é só **contado**.
+
+**No código mas ainda não publicado em binário** (depois da v0.1.1): tabelas
+com ponteiros de 16 bits e a correção descrita em 3.1 (`929503b`); busca
+relativa e Raio-X (`401457f`).
 
 ---
 
@@ -102,6 +116,10 @@ jogo corrompe. É raro, mas é corrupção silenciosa.
 
 Falta só decidir e executar o passo a passo da seção 6.3. Ao publicar, vale
 pôr na v0.1.1 o mesmo tipo de aviso que a v0.1.0 já tem.
+
+Em 12/10 o mantenedor foi perguntado e não confirmou. A v0.1.2, quando sair,
+leva também a busca relativa e o Raio-X (`401457f`). Não crie a tag sem ele
+dizer.
 
 ### 3.2 Prioridade 1: nada foi testado em jogo real
 
@@ -134,8 +152,15 @@ com posição relativa a uma seção do arquivo em vez do arquivo inteiro.
 
 ### 3.4 Prioridade 2: limites de formato que travam uso real
 
-- **Sem descompressão.** Texto comprimido, comum em RPG japonês, não aparece
-  na extração.
+- **Texto em tabela própria não é regravado.** É a pendência que mais pesa:
+  a busca relativa lê o jogo, a IA traduz, mas `inplace::encode` devolve
+  `None` para `TextEncoding::Table` e `validate::encoded_len` devolve
+  `Unsupported`. Falta guardar o `.tbl` no projeto e codificar a tradução por
+  ele. Sem isso nenhum jogo de NES, SNES ou Game Boy vai de ponta a ponta.
+- **Descompressão só detecta.** O Raio-X acha blocos LZ77 tipo 0x10 e conta
+  as frases dentro deles; o app não extrai nem reinsere esse texto, e não
+  reconhece outros compressores (LZ11 do DS mais novo, Huffman, os próprios
+  de cada jogo).
 - **Sem Shift-JIS.** O tipo existe (`TextEncoding::ShiftJis`), mas o scanner
   não decodifica e a reinserção ignora essas entradas.
 - **Sem edição de fonte.** Se o jogo não tem os glifos de á, ç, ã, a tradução
@@ -151,15 +176,6 @@ Divulgue depois da v0.1.2, com o link da tag.
 
 ### 3.6 Miudezas
 
-- O gerador de arquivos de teste (`cargo run -p romtranslate-core --example gen_fixtures`)
-  não gera os três arquivos com tabela de ponteiros
-  (`make_gba_rom_with_pointers`, `make_nds_rom_with_message_table`,
-  `make_ps1_bin_with_message_table`). Sem eles não dá para experimentar a
-  relocação na interface sem um jogo real. São três entradas a mais na lista
-  de `crates/core/examples/gen_fixtures.rs`.
-- O `README.md` está defasado em quatro pontos: linha 11 e linha 139 falam só
-  em patch IPS (existe BPS); a linha 146 lista 5 extensões de arquivo de teste
-  (o gerador grava 14 arquivos); a linha 165 lista 4 adapters (são 11).
 - `apps/desktop/README.md` ainda é o texto do template do Tauri.
 - Os lotes de tradução rodam um por vez; rodar em paralelo foi adiado.
 - Arquivo `.cue` fora do padrão Redump (dados que não começam no início do
@@ -249,6 +265,9 @@ crates/core/src/
   detect.rs         inspeção (hash + probes)
   cue.rs            leitura de cue sheet
   scan.rs tbl.rs    scanner genérico e tabelas .tbl
+  relative.rs       busca relativa: descobre a tabela de caracteres
+  xray.rs           raio-X: comprimido, denso, strings com ponteiro
+  lz77.rs           LZ77 tipo 0x10 do BIOS do GBA/DS (unpack e pack)
   project.rs        projeto .rtsproj
   db.rs             SQLite do projeto e memória global
   provider.rs       trait do provedor, prompt, leitura da resposta
@@ -260,10 +279,10 @@ crates/core/src/
   fileio.rs         leitura por mapeamento em memória
   export.rs hash.rs types.rs error.rs
   synth.rs          arquivos sintéticos de teste (nenhum byte de jogo real)
-crates/core/tests/  16 arquivos de teste de integração
+crates/core/tests/  17 arquivos de teste de integração
 crates/core/examples/gen_fixtures.rs   grava os arquivos sintéticos em disco
 apps/desktop/src-tauri/src/
-  lib.rs            os 21 comandos expostos à interface
+  lib.rs            os 24 comandos expostos à interface
   settings.rs       configurações e chave de API
 apps/desktop/src/
   App.tsx           fluxo inicial: escolher arquivo, inspecionar, criar projeto
@@ -432,6 +451,8 @@ por cima.
 ## Commits mais recentes (o mais novo primeiro)
 
 ```
+401457f  feat(descoberta): busca relativa e raio-X — texto fora do alcance do scanner ASCII
+788fe5e  ctx: handoff regenerado do zero em 12/10
 929503b  feat(ponteiros): offsets u16 nas tabelas + corrige padding virando tabela
 6c2998a  ctx: aviso na v0.1.0 apontando pra v0.1.1
 75c47ee  ctx: v0.1.1 publicada e conferida sem login
