@@ -875,3 +875,121 @@ também passa); "Lv.99", "HP: 12/30" e "Nooooo!" caem.
 `gba.rs`. Mutação: teto antes do filtro no scanner, teto antes do filtro no
 GBA, `keep_text` sem a exceção do ponteiro e a regra antiga de 5+ caracteres
 — cada uma derruba pelo menos um teste.
+
+## 2026-10-12 — Texto de tabela: o espaço da original vai pro prompt, em caracteres, e o estouro é erro de validação
+
+**Contexto:** entry de `TextEncoding::Table(id)` só vem do scanner, que deixa
+`max_bytes` vazio. O item do lote ia sem limite, a validação dava
+`ByteOverflow` como `Warning` e a recusa ("encurte") só aparecia em
+`reinsert_project`. Texto de tabela não tem ponteiro detectado: é sempre
+gravado no lugar, e o teto real é `original_bytes.len()` em bytes **da
+tabela** (`TblTable::encode`).
+
+**Decisão 1 — a unidade do número que vai pro modelo é caractere, não byte.**
+O modelo escreve caracteres; quanto cada um custa em bytes é coisa da tabela,
+que ele não vê.
+
+| Opção | Por que não |
+|---|---|
+| `maxBytes` = bytes da tabela (o espaço cru) | o modelo lê como caracteres; se um caractere custa 2 bytes, o número é o dobro do que cabe |
+| `maxBytes` com a conta em caracteres | campo com nome de uma unidade e valor de outra; e em lote sem tabela `maxBytes` é dica ("prefer concise wording"), não limite |
+| **Escolhida:** campo novo `BatchItem.max_chars` (`maxChars` no JSON) | custo: um campo e três lugares que montam o struct |
+
+O campo só aparece no JSON quando tem valor (`skip_serializing_if`): pedido
+de lote sem tabela é o mesmo, letra por letra (teste com o JSON inteiro).
+
+**Decisão 2 — a conta (`TblTable::chars_that_fit`).** Para cada entrada da
+tabela, `espaço × caracteres da entrada ÷ bytes da chave`; vale o **menor**
+resultado. É o piso garantido: qualquer texto que a tabela escreve com esse
+número de caracteres cabe no espaço.
+
+- Tabela de 1 byte por caractere: o número é o próprio espaço.
+- Dupla num byte só (`th`) ou código de controle (`[FIM]`): não aumenta o
+  número — cabe mais do que ele diz, nunca menos.
+- Um caractere de 2 bytes na tabela: o número cai pra metade, pra tabela
+  inteira. É conservador de propósito e tem teto conhecido (comentário
+  `ponytail:` no código): tabela com letras de 1 byte e kanji de 2 diria a
+  metade do que cabe em letras. Saída, se aparecer um jogo assim: medir só os
+  caracteres do idioma de destino.
+- O número é só pro modelo. Quem decide se a tradução cabe continua sendo a
+  validação, que mede os bytes de verdade — tradução à mão pode usar o espaço
+  todo.
+
+**Decisão 3 — onde e pra quem.** `pipeline::run_translation` põe o limite no
+item quando a entry é de tabela e `pointer_offsets()` está vazio. Hoje toda
+entry de tabela cai aí; a condição existe porque string com ponteiro em
+tabela pode ser realocada e não tem esse teto (há teste com uma entry assim,
+montada à mão).
+
+**Decisão 4 — o prompt.** Lote com algum `maxChars` ganha um bloco
+`Length limit (STRICT)` depois da lista de caracteres: é o máximo de
+caracteres, espaços contam, tradução maior não cabe no jogo, encurtar
+trocando ou tirando palavras. A linha antiga (`When an item has "maxBytes",
+prefer concise wording`) não mudou, nem o prompt de lote sem tabela
+(`provider::tests::prompt_without_a_table_is_unchanged` segue passando).
+Testei uma segunda redação ("Count the characters of every translation
+before answering...") em 2 rodadas: não melhorou e piorou o texto; descartada.
+
+**Decisão 5 — estouro de texto de tabela gravado no lugar é `Error`, não
+`Warning`.** A reinserção recusa essa tradução sempre, modo avançado
+inclusive (é tudo ou nada). Aviso que garante a falha do passo seguinte é
+erro; agora ele aparece na frase, com os dois tamanhos, assim que a tradução
+é gravada ou validada. Efeitos: a entry vai pra status `Error` (dá pra
+filtrar), não pode ser marcada como revisada, e `reinsert_project` sem o
+modo avançado barra já na validação citando o tamanho; com ele, quem barra é
+o plano de escrita, como antes.
+
+- **Os outros encodings não mudaram.** Fora de tabela, `max_bytes` vazio
+  também é a string que o formato realoca sozinho (blob do RTSF), e o
+  validador não sabe qual adapter vai gravar. Em tabela dá pra saber pela
+  própria entry. Fica o mesmo buraco, sem mexer: texto ASCII que só passou
+  pelo scanner num adapter in-place continua com aviso e só é recusado na
+  reinserção.
+- String de tabela com ponteiro em tabela continua `Warning` (o ramo do
+  realocável vem antes).
+
+**Decisão 6 — nada é cortado e nada é perguntado de novo.** A resposta maior
+que o espaço é gravada inteira e fica visível com o erro; o usuário encurta.
+Repergunta automática ao modelo (mandar de volta só as que estouraram, com o
+tamanho medido) não entrou: são chamadas a mais ao provider, e é outra
+feature.
+
+**Fica de fora:** string de largura fixa em tabela sem espaço precisa do
+tamanho **exato** (decisão 4 da reinserção por tabela) e o pedido só diz o
+máximo; o contador de bytes do editor continua sem número pra tabela.
+
+**Prova:** `tests/table_translate.rs` (+2 testes e o primeiro ampliado: o
+limite em cada item, o lote sem tabela igual, a conta pela entrada mais cara,
+a resposta maior gravada inteira com `Error`, a realocável com `Warning`, a
+frase encurtada à mão voltando a entrar no jogo), `tests/table_reinsert.rs`
+(o teste do texto maior agora confere a severidade e os dois caminhos da
+recusa) e 3 unitários (`tbl.rs`, `provider.rs`, `validate.rs`). Mutação: 10
+mutações, as 10 quebram teste — item sem limite, limite também pra
+realocável, bytes crus no lugar da conta, estouro de volta a aviso, erro
+mesmo com ponteiro, erro pra qualquer encoding, `maxChars` sempre no JSON,
+prompt sem o bloco, bloco em todo lote, conta pela entrada mais barata.
+
+**Medido (12/10, Ollama local, `llama3.2:3b`, temperatura 0,2, as 7 frases
+da fixture; espaço de cada uma: 10, 11, 8, 31, 36, 28, 35):**
+
+| | Maiores que o espaço | Caracteres a mais, somando as 7 |
+|---|---|---|
+| Antes (sem limite no pedido; 1 rodada hoje — a da sessão anterior também deu 7 de 7) | 7 de 7 | 30 |
+| Depois (com `maxChars` e o bloco; 4 rodadas) | 6 de 7 nas 4 | 17, 17, 26, 17 |
+
+Rodada de antes: 12, 16, 9, 36, 42, 30, 44 caracteres. Primeira rodada de
+depois: 12, 14, 9, 21, 42, 29, 39. A única frase que passou a caber foi
+sempre a mesma (`Press Start to begin your quest` → `INICIAR SUA CERIMONIA`,
+`INICIE Sua Missao`), e coube perdendo o "Press Start". `CONTINUE` →
+`CONTINUAR` (9 pra 8) em todas as rodadas.
+
+**O que a medição diz:** o limite chega ao modelo e ele reage (encurta
+algumas), mas um modelo de 3B não conta caracteres — o prompt sozinho não
+resolve pra ele. O que passou a funcionar de fato é o usuário saber na hora,
+frase por frase, e não só na reinserção. **O que ela não diz:** nada sobre
+modelo maior (não medi; o `qwen3:4b` não roda em tempo útil neste Mac de
+8 GB) nem sobre tabela com caractere de 2 bytes num modelo de verdade.
+
+**Não conferido:** a interface no app compilado (mudou só o texto
+`relative.writeBack`, nos dois idiomas; o erro chega pelo canal de sempre,
+como texto do core); modelo maior; jogo real.

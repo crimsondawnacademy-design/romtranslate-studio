@@ -188,8 +188,13 @@ com posição relativa a uma seção do arquivo em vez do arquivo inteiro.
   é gravado como a letra base, com aviso de validação (`.ctx/DECISIONS.md`,
   "A tradução por IA respeita a tabela"). Medido uma vez, com `llama3.2:3b`
   local: sem pontuação fora da tabela, 4 de 7 respostas com acento (gravadas
-  sem ele) — e as 7 maiores que o espaço, porque a IA ainda não recebe o
-  tamanho da string de tabela. Esse é o próximo passo desse fluxo.
+  sem ele) — e as 7 maiores que o espaço. Também desde 12/10 cada frase de
+  tabela leva no pedido quantos caracteres cabem (`maxChars`) e o estouro é
+  erro de validação na frase, sem corte (`.ctx/DECISIONS.md`, "Texto de
+  tabela: o espaço da original vai pro prompt"). Medido de novo: o
+  `llama3.2:3b` continua passando em 6 de 7. O próximo passo desse fluxo é
+  medir com um modelo maior e, se não bastar, repergunta com o tamanho
+  medido.
 - **Descompressão só detecta.** O Raio-X acha blocos LZ77 tipo 0x10 e conta
   as frases dentro deles; o app não extrai nem reinsere esse texto, e não
   reconhece outros compressores (LZ11 do DS mais novo, Huffman, os próprios
