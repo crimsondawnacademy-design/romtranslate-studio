@@ -766,27 +766,65 @@ export default function ProjectView({
               >
                 <option value="ollama">Ollama (local)</option>
                 <option value="openai_compatible">OpenAI-compatible</option>
+                <option value="codex_cli">ChatGPT (Codex CLI)</option>
               </select>
             </label>
-            <label>
-              {t("translate.baseUrl")}
-              <input
-                type="text"
-                size={28}
-                value={endpoint.baseUrl}
-                onChange={(e) => updateEndpoint(endpointKey, "baseUrl", e.target.value)}
-              />
-            </label>
-            <label>
-              {t("translate.model")}
-              <input
-                type="text"
-                size={18}
-                value={endpoint.model}
-                placeholder={settings.provider === "ollama" ? "llama3.2:3b" : "gpt-5-mini"}
-                onChange={(e) => updateEndpoint(endpointKey, "model", e.target.value)}
-              />
-            </label>
+            {settings.provider === "codex_cli" ? (
+              <>
+                <label>
+                  {t("translate.codexCommand")}
+                  <input
+                    type="text"
+                    size={28}
+                    value={settings.codexCli.command}
+                    placeholder="codex"
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        codexCli: { ...settings.codexCli, command: e.target.value },
+                      })
+                    }
+                  />
+                </label>
+                <label>
+                  {t("translate.codexModel")}
+                  <input
+                    type="text"
+                    size={18}
+                    value={settings.codexCli.model}
+                    placeholder={t("translate.codexModelDefault")}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        codexCli: { ...settings.codexCli, model: e.target.value },
+                      })
+                    }
+                  />
+                </label>
+              </>
+            ) : (
+              <>
+                <label>
+                  {t("translate.baseUrl")}
+                  <input
+                    type="text"
+                    size={28}
+                    value={endpoint.baseUrl}
+                    onChange={(e) => updateEndpoint(endpointKey, "baseUrl", e.target.value)}
+                  />
+                </label>
+                <label>
+                  {t("translate.model")}
+                  <input
+                    type="text"
+                    size={18}
+                    value={endpoint.model}
+                    placeholder={settings.provider === "ollama" ? "llama3.2:3b" : "gpt-5-mini"}
+                    onChange={(e) => updateEndpoint(endpointKey, "model", e.target.value)}
+                  />
+                </label>
+              </>
+            )}
             {settings.provider === "openai_compatible" && (
               <label>
                 {t("translate.apiKey")} {apiKeySet && <em>{t("translate.apiKeySet")}</em>}
@@ -799,7 +837,10 @@ export default function ProjectView({
               </label>
             )}
           </div>
-          {settings.provider === "openai_compatible" && (
+          {settings.provider === "codex_cli" && (
+            <p className="hint left">{t("translate.codexHint")}</p>
+          )}
+          {settings.provider !== "ollama" && (
             <label className="checkline">
               <input
                 type="checkbox"

@@ -48,8 +48,9 @@ Prefere compilar do código? Veja [Rodando](#rodando).
   LZ77 (o do GBA e do DS) e quantas frases estão presas neles, quanto do
   arquivo é denso (comprimido ou cifrado), e quantas das strings extraídas
   têm ponteiro em tabela e podem crescer;
-- **Tradução por IA**: Ollama (local, padrão) ou qualquer endpoint
-  OpenAI-compatible; batching, retry, cancelamento, progresso; **translation
+- **Tradução por IA**: Ollama (local, padrão), qualquer endpoint
+  OpenAI-compatible, ou a sua assinatura do ChatGPT pelo Codex CLI (sem chave
+  de API); batching, retry, cancelamento, progresso; **translation
   memory** e **glossário** por projeto (SQLite); tradução remota exige opt-in
   explícito de privacidade;
 - **Validação e revisão**: placeholders/control codes/tags, limite de bytes no
@@ -143,6 +144,14 @@ Pré-requisitos: [Rust](https://rustup.rs) estável, Node 20+, [pnpm](https://pn
 e as [dependências do Tauri 2](https://tauri.app/start/prerequisites/) do seu SO.
 Para tradução local, [Ollama](https://ollama.com) com um modelo puxado
 (ex.: `ollama pull llama3.2:3b`).
+
+Para traduzir pela assinatura do ChatGPT, instale o
+[Codex CLI](https://github.com/openai/codex), rode `codex login` uma vez e
+escolha o provider **ChatGPT (Codex CLI)**. O app não faz o login nem guarda
+token: ele chama o `codex exec` com as ferramentas desligadas, só para
+traduzir. Os textos do jogo vão para a OpenAI, então a opção exige "permitir
+tradução remota". Cada lote é uma chamada do Codex — projeto grande gasta o
+limite da assinatura.
 
 ```bash
 pnpm install

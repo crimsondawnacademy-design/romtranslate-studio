@@ -77,6 +77,11 @@ const messages = {
     "translate.apiKey": "API key",
     "translate.apiKeySet": "(já salva — deixe vazio para manter)",
     "translate.allowRemote": "Permitir tradução remota (envia os TEXTOS ao endpoint configurado)",
+    "translate.codexCommand": "Comando do Codex",
+    "translate.codexModel": "Modelo (opcional)",
+    "translate.codexModelDefault": "padrão do Codex",
+    "translate.codexHint":
+      "Usa a sua assinatura do ChatGPT pelo Codex CLI, sem chave de API. Entre uma vez com `codex login` no terminal; o app não vê sua senha nem o token. Os textos do jogo vão para a OpenAI, por isso é preciso permitir tradução remota. Cada lote é uma chamada do Codex: projeto grande gasta o limite da assinatura.",
     "translate.saveSettings": "Salvar configuração",
     "translate.test": "Testar conexão",
     "translate.testOk": "Conexão OK — modelo: {model}",
@@ -246,6 +251,11 @@ const messages = {
     "translate.apiKey": "API key",
     "translate.apiKeySet": "(saved — leave empty to keep)",
     "translate.allowRemote": "Allow remote translation (sends the TEXTS to the configured endpoint)",
+    "translate.codexCommand": "Codex command",
+    "translate.codexModel": "Model (optional)",
+    "translate.codexModelDefault": "Codex default",
+    "translate.codexHint":
+      "Uses your ChatGPT subscription through the Codex CLI, with no API key. Sign in once with `codex login` in a terminal; the app never sees your password or token. The game text is sent to OpenAI, so remote translation must be allowed. Each batch is one Codex call: a large project uses up the subscription limit.",
     "translate.saveSettings": "Save settings",
     "translate.test": "Test connection",
     "translate.testOk": "Connection OK — model: {model}",

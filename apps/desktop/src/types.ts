@@ -122,10 +122,18 @@ export interface EndpointSettings {
   model: string;
 }
 
+export interface CodexCliSettings {
+  /** Nome ou caminho do executável do Codex CLI. */
+  command: string;
+  /** Vazio = o modelo padrão do Codex. */
+  model: string;
+}
+
 export interface AppSettings {
-  provider: "ollama" | "openai_compatible";
+  provider: "ollama" | "openai_compatible" | "codex_cli";
   ollama: EndpointSettings;
   openaiCompatible: EndpointSettings;
+  codexCli: CodexCliSettings;
   allowRemoteTranslation: boolean;
   batchSize: number;
   timeoutSecs: number;

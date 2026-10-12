@@ -16,12 +16,32 @@ pub struct EndpointSettings {
     pub model: String,
 }
 
+/// ChatGPT pelo Codex CLI: sem URL nem chave — o login e do proprio Codex.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CodexCliSettings {
+    /// Nome ou caminho do executavel.
+    pub command: String,
+    /// Vazio = o modelo padrao do Codex.
+    pub model: String,
+}
+
+impl Default for CodexCliSettings {
+    fn default() -> Self {
+        CodexCliSettings {
+            command: romtranslate_core::providers::codex_cli::DEFAULT_COMMAND.to_string(),
+            model: String::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct AppSettings {
     pub provider: String,
     pub ollama: EndpointSettings,
     pub openai_compatible: EndpointSettings,
+    pub codex_cli: CodexCliSettings,
     pub allow_remote_translation: bool,
     pub batch_size: usize,
     pub timeout_secs: u64,
@@ -39,6 +59,7 @@ impl Default for AppSettings {
                 base_url: "https://api.openai.com/v1".to_string(),
                 model: String::new(),
             },
+            codex_cli: CodexCliSettings::default(),
             allow_remote_translation: false,
             batch_size: 10,
             timeout_secs: 120,
@@ -164,6 +185,7 @@ mod tests {
         let dir = tempdir("cfg");
         let loaded = load_settings(&dir);
         assert_eq!(loaded.provider, "ollama");
+        assert_eq!(loaded.codex_cli.command, "codex");
 
         let mut s = AppSettings::default();
         s.openai_compatible.model = "gpt-5-mini".into();

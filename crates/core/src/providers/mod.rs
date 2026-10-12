@@ -1,3 +1,4 @@
+pub mod codex_cli;
 pub mod ollama;
 pub mod openai_compat;
 

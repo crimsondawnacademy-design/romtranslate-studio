@@ -13,6 +13,7 @@ use romtranslate_core::export;
 use romtranslate_core::pipeline::{run_translation, TranslateOptions, TranslateSummary};
 use romtranslate_core::project::{self, CreateProjectArgs, OpenProjectReport};
 use romtranslate_core::provider::{GlossaryTerm, TranslationProvider};
+use romtranslate_core::providers::codex_cli::CodexCliProvider;
 use romtranslate_core::providers::ollama::OllamaProvider;
 use romtranslate_core::providers::openai_compat::OpenAiCompatProvider;
 use romtranslate_core::relative::{self, RelativeCandidate};
@@ -75,6 +76,24 @@ fn build_provider(
             )
             .map_err(|e| e.to_string())?;
             Ok((Box::new(p), cfg.openai_compatible.model.clone()))
+        }
+        "codex_cli" => {
+            // O Codex manda os textos pra OpenAI: mesma guarda do endpoint remoto.
+            if !cfg.allow_remote_translation {
+                return Err(
+                    "traducao remota desabilitada: o Codex CLI envia os textos para a OpenAI \
+                     — ative 'permitir traducao remota' nas configuracoes"
+                        .to_string(),
+                );
+            }
+            let codex = &cfg.codex_cli;
+            let p = CodexCliProvider::new(&codex.command, &codex.model, cfg.timeout_secs)
+                .map_err(|e| e.to_string())?;
+            let label = match codex.model.trim() {
+                "" => "codex (modelo padrao)".to_string(),
+                model => format!("codex ({model})"),
+            };
+            Ok((Box::new(p), label))
         }
         other => Err(format!("provider desconhecido: {other}")),
     }
