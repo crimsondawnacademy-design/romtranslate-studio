@@ -35,6 +35,9 @@ pub enum IssueKind {
     LengthAnomaly,
     /// Traducao nao e codificavel no encoding destino (ex.: "ç" em ASCII).
     Unencodable,
+    /// A traducao automatica veio com acento que a tabela do jogo nao tem e
+    /// foi gravada com a letra base (Warning).
+    AccentDropped,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -264,6 +267,29 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
     issues
 }
 
+/// O aviso da troca de acento feita na traducao automatica
+/// (`pipeline::save_translation`). Vale enquanto a traducao for a que foi
+/// gravada la: editada a mao, o aviso some.
+fn accent_swap_issue(
+    entry: &TextEntry,
+    swaps: &HashMap<String, (String, String)>,
+) -> Option<ValidationIssue> {
+    let (answer, written) = swaps.get(&entry.id)?;
+    let TextEncoding::Table(id) = &entry.encoding else {
+        return None;
+    };
+    (entry.translated_text.as_ref() == Some(written)).then(|| ValidationIssue {
+        entry_id: entry.id.clone(),
+        severity: Severity::Warning,
+        kind: IssueKind::AccentDropped,
+        message: format!(
+            "a traducao veio como \"{answer}\" e foi gravada como \"{written}\": a tabela do \
+             jogo nao tem esses acentos — confira se o sentido se mantem; pra ter o acento no \
+             jogo, acrescente a linha dele em tables/{id}.tbl"
+        ),
+    })
+}
+
 /// Valida todas as entries traduzidas do banco e ajusta statuses:
 /// - com Error -> `Error`;
 /// - `Error` antigo que ficou limpo -> volta para `Machine`;
@@ -274,6 +300,7 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
 pub fn validate_project_db(db: &mut ProjectDb) -> Result<ValidationReport> {
     let entries = db.load_entries()?;
     let mut tables = ProjectTables::new(db.project_dir());
+    let swaps = db.accent_swaps()?;
     let mut issues = Vec::new();
     let mut checked = 0;
     for entry in &entries {
@@ -281,7 +308,8 @@ pub fn validate_project_db(db: &mut ProjectDb) -> Result<ValidationReport> {
             continue;
         }
         checked += 1;
-        let entry_issues = validate_entry(entry, tables.for_entry(entry)?);
+        let mut entry_issues = validate_entry(entry, tables.for_entry(entry)?);
+        entry_issues.extend(accent_swap_issue(entry, &swaps));
         let has_error = entry_issues.iter().any(|i| i.severity == Severity::Error);
         if has_error {
             db.set_status(&entry.id, TranslationStatus::Error)?;
@@ -333,10 +361,11 @@ pub fn apply_manual_translation(
             translation,
         )?;
     }
-    let issues = validate_entry(
+    let mut issues = validate_entry(
         &entry,
         ProjectTables::new(db.project_dir()).for_entry(&entry)?,
     );
+    issues.extend(accent_swap_issue(&entry, &db.accent_swaps()?));
     if issues.iter().any(|i| i.severity == Severity::Error) {
         db.set_status(id, TranslationStatus::Error)?;
     }

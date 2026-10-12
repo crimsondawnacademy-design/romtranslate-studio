@@ -3420,6 +3420,7 @@ version = "0.1.1"
 dependencies = [
  "async-trait",
  "chrono",
+ "icu_normalizer",
  "memmap2",
  "reqwest",
  "rusqlite",

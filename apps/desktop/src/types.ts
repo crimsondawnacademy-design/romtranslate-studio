@@ -153,7 +153,8 @@ export type IssueKind =
   | "byte_overflow"
   | "empty_translation"
   | "length_anomaly"
-  | "unencodable";
+  | "unencodable"
+  | "accent_dropped";
 
 export interface ValidationIssue {
   entryId: string;

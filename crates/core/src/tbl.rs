@@ -10,6 +10,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use icu_normalizer::DecomposingNormalizerBorrowed;
+
 use crate::error::{CoreError, Result};
 use crate::types::{TextEncoding, TextEntry};
 
@@ -98,19 +100,7 @@ impl TblTable {
         let mut out = Vec::new();
         let mut rest = text;
         while !rest.is_empty() {
-            // Onde terminam os prefixos de 1 a `max_text_chars` caracteres.
-            let ends: Vec<usize> = rest
-                .char_indices()
-                .skip(1)
-                .map(|(i, _)| i)
-                .chain([rest.len()])
-                .take(self.max_text_chars)
-                .collect();
-            let hit = ends
-                .iter()
-                .rev()
-                .find_map(|&end| self.reverse.get(&rest[..end]).map(|bytes| (end, bytes)));
-            let Some((end, bytes)) = hit else {
+            let Some((end, bytes)) = self.longest_text(rest) else {
                 let ch = rest.chars().next().unwrap_or_default();
                 let position = text[..text.len() - rest.len()].chars().count() + 1;
                 return Err(CoreError::Tbl(format!(
@@ -130,6 +120,64 @@ impl TblTable {
             )));
         }
         Ok(out)
+    }
+
+    /// A maior entrada da tabela no comeco de `rest`: onde ela termina e os
+    /// bytes dela.
+    fn longest_text(&self, rest: &str) -> Option<(usize, &Vec<u8>)> {
+        // Onde terminam os prefixos de 1 a `max_text_chars` caracteres.
+        let ends: Vec<usize> = rest
+            .char_indices()
+            .skip(1)
+            .map(|(i, _)| i)
+            .chain([rest.len()])
+            .take(self.max_text_chars)
+            .collect();
+        ends.iter()
+            .rev()
+            .find_map(|&end| self.reverse.get(&rest[..end]).map(|bytes| (end, bytes)))
+    }
+
+    /// Os caracteres que a tabela escreve sozinhos, em ordem — a lista que
+    /// vai pro prompt de traducao. Entrada de varios caracteres ("[FIM]",
+    /// "th") fica de fora: codigo de controle o tradutor copia do original,
+    /// e dupla de letras e so compressao.
+    pub fn charset(&self) -> String {
+        let mut chars: Vec<char> = self
+            .reverse
+            .keys()
+            .filter_map(|text| {
+                let mut chars = text.chars();
+                chars.next().filter(|_| chars.next().is_none())
+            })
+            .collect();
+        chars.sort_unstable();
+        chars.into_iter().collect()
+    }
+
+    /// `text` com cada letra acentuada que a tabela nao escreve trocada pela
+    /// letra sem acento ('ç' -> 'c', 'É' -> 'E') — so quando a tabela tem
+    /// essa letra. `None` = nada a trocar. Caractere sem troca fica como veio
+    /// e a validacao acusa: aqui nada some nem vira outro simbolo.
+    // ponytail: so caractere precomposto. Resposta com o acento solto ("e" +
+    // U+0301) nao e mexida e cai no erro de validacao; compor antes (NFC) se
+    // algum provider responder assim.
+    pub fn drop_missing_accents(&self, text: &str) -> Option<String> {
+        let mut out = String::with_capacity(text.len());
+        let mut rest = text;
+        while let Some(ch) = rest.chars().next() {
+            // O que a tabela escreve passa inteiro, entrada longa inclusive.
+            if let Some((end, _)) = self.longest_text(rest) {
+                out.push_str(&rest[..end]);
+                rest = &rest[end..];
+                continue;
+            }
+            let base =
+                base_letter(ch).filter(|b| self.reverse.contains_key(b.to_string().as_str()));
+            out.push(base.unwrap_or(ch));
+            rest = &rest[ch.len_utf8()..];
+        }
+        (out != text).then_some(out)
     }
 
     /// Le `bytes` inteiro pela tabela. `None` = sobrou byte sem entrada.
@@ -266,6 +314,21 @@ pub fn adopt_table(project_dir: &Path, source: &Path) -> Result<PathBuf> {
     Ok(dest)
 }
 
+/// A letra sem acento de uma letra latina acentuada, pela decomposicao
+/// canonica do Unicode: letra base + marcas U+0300..U+036F. So base ASCII —
+/// 'й' -> 'и' e 'が' -> 'か' tambem sao decomposicoes, mas dao outra letra.
+fn base_letter(ch: char) -> Option<char> {
+    const NFD: DecomposingNormalizerBorrowed<'static> = DecomposingNormalizerBorrowed::new_nfd();
+    let mut buf = [0; 4];
+    let decomposed = NFD.normalize(ch.encode_utf8(&mut buf));
+    let mut parts = decomposed.chars();
+    let base = parts.next()?;
+    (base != ch
+        && base.is_ascii_alphabetic()
+        && parts.all(|mark| ('\u{300}'..='\u{36F}').contains(&mark)))
+    .then_some(base)
+}
+
 fn decode_hex(hex: &str) -> Option<Vec<u8>> {
     let hex = hex.trim();
     if hex.is_empty() || !hex.len().is_multiple_of(2) || hex.len() > 8 {
@@ -333,6 +396,54 @@ mod tests {
         let err = table.encode("AB").unwrap_err().to_string();
         assert!(err.contains("ambigua") && err.contains("\"X\""), "{err}");
         assert_eq!(table.encode("BA").unwrap(), [0x81, 0x80]);
+    }
+
+    #[test]
+    fn charset_lists_only_what_one_entry_of_one_character_writes() {
+        // Fora da lista: entrada longa, dupla de letras e texto vazio. Letra
+        // repetida em duas chaves entra uma vez so.
+        let table =
+            TblTable::parse("82=b\n81=a\nC1=a\n40= \n90=th\nFE=[FIM]\n00=\n83=é\n").unwrap();
+        assert_eq!(table.charset(), " abé");
+    }
+
+    #[test]
+    fn missing_accent_becomes_the_base_letter_only_when_the_table_has_it() {
+        let table = TblTable::parse("80=A\n81=C\n82=O\nA0=a\nA1=c\nA2=o\n40= \n").unwrap();
+        assert_eq!(
+            table.drop_missing_accents("AÇÃO ação").as_deref(),
+            Some("ACAO acao")
+        );
+        // Nada a trocar: `None`, e o texto segue como veio.
+        assert_eq!(table.drop_missing_accents("ACAO"), None);
+        // Base fora da tabela ('e', 'n'), pontuacao e letra sem decomposicao
+        // ('ß', 'ø') ficam como vieram — quem acusa e a validacao.
+        assert_eq!(table.drop_missing_accents("é ñ ! ß ø"), None);
+        // O que tem troca e trocado mesmo com um '!' sem saida ao lado.
+        assert_eq!(
+            table.drop_missing_accents("ação!").as_deref(),
+            Some("acao!")
+        );
+        // Maiuscula nao vira minuscula nem o contrario.
+        let upper = TblTable::parse("80=A\n81=C\n").unwrap();
+        assert_eq!(upper.drop_missing_accents("ção"), None);
+        assert_eq!(upper.drop_missing_accents("ÇÃ").as_deref(), Some("CA"));
+        // Acento empilhado (vietnamita) tambem cai na base.
+        assert_eq!(table.drop_missing_accents("ấ").as_deref(), Some("a"));
+        // Decomposicao que da outra letra nao e troca de acento.
+        let other = TblTable::parse("80=и\n81=か\n").unwrap();
+        assert_eq!(other.drop_missing_accents("йが"), None);
+    }
+
+    #[test]
+    fn accent_the_table_has_is_kept_even_inside_a_long_entry() {
+        // A tabela escreve 'ã' sozinho e "çõ" numa entrada so: nenhum dos
+        // dois e trocado. So o 'é', que ela nao tem.
+        let table = TblTable::parse("80=a\n81=c\n82=o\n83=e\n84=s\n90=ã\n91=çõ\n").unwrap();
+        assert_eq!(
+            table.drop_missing_accents("ações é ã").as_deref(),
+            Some("ações e ã")
+        );
     }
 
     #[test]

@@ -152,7 +152,7 @@ const messages = {
     "relative.adopted":
       "Tabela copiada para {path}. É essa cópia que vale daqui em diante: para completar caracteres, edite esse arquivo.",
     "relative.writeBack":
-      "A tabela usada no scan fica em tables/ dentro do projeto, e é por ela que a tradução é regravada no jogo. Caractere que a tabela não tem (acento, pontuação) bloqueia a reinserção: acrescente a linha dele nesse .tbl ou troque o caractere.",
+      "A tabela usada no scan fica em tables/ dentro do projeto, e é por ela que a tradução é regravada no jogo. A IA recebe a lista de caracteres da tabela. Acento que a tabela não tem é gravado como a letra sem acento, com um aviso na frase. O resto que a tabela não tem (pontuação, por exemplo) bloqueia a reinserção: acrescente a linha dele nesse .tbl ou troque o caractere.",
     "reinsert.title": "Reinserção",
     "reinsert.hint":
       "Aplica as traduções numa cópia em working/ do projeto — o arquivo original nunca é modificado. Entries com erro de validação bloqueiam a reinserção.",
@@ -327,7 +327,7 @@ const messages = {
     "relative.adopted":
       "Table copied to {path}. That copy is the one that counts from now on: to add characters, edit that file.",
     "relative.writeBack":
-      "The table used for the scan is kept in tables/ inside the project, and the translation is written back into the game through it. A character the table lacks (accents, punctuation) blocks reinsertion: add its line to that .tbl or change the character.",
+      "The table used for the scan is kept in tables/ inside the project, and the translation is written back into the game through it. The AI is given the table's list of characters. An accent the table lacks is written as the plain letter, with a warning on the string. Anything else the table lacks (punctuation, for example) blocks reinsertion: add its line to that .tbl or change the character.",
     "reinsert.title": "Reinsertion",
     "reinsert.hint":
       "Applies translations to a copy under the project's working/ folder — the original file is never modified. Entries with validation errors block reinsertion.",

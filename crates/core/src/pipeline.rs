@@ -13,7 +13,8 @@ use tracing::{info, warn};
 use crate::db::{GlobalTm, ProjectDb};
 use crate::error::Result;
 use crate::provider::{BatchItem, GlossaryTerm, TranslationProvider, TranslationRequest};
-use crate::types::{TextEntry, TranslationStatus};
+use crate::tbl::{ProjectTables, TblTable};
+use crate::types::{TextEncoding, TextEntry, TranslationStatus};
 
 #[derive(Debug, Clone)]
 pub struct TranslateOptions {
@@ -84,17 +85,31 @@ pub async fn run_translation(
         return Ok(summary);
     }
 
+    let mut tables = ProjectTables::new(db.project_dir());
+
     // Fase 1 — translation memory em cascata: projeto primeiro, global depois.
     let mut remaining: Vec<TextEntry> = Vec::new();
     for entry in pending {
+        // Tabela ausente do projeto e erro ja aqui: sem ela nao ha o que
+        // dizer pro provider nem como conferir a resposta.
+        let table = tables.for_entry(&entry)?;
         let mut hit = db.tm_lookup(&entry.source_text, &src_lang, &opts.target_language)?;
         if hit.is_none() {
             if let Some(global) = global_tm.as_deref_mut() {
                 hit = global.tm_lookup(&entry.source_text, &src_lang, &opts.target_language)?;
             }
         }
+        // Memoria que a tabela nao escreve nem sem os acentos (veio de texto
+        // de outro encoding) nao serve: o provider recebe a lista de
+        // caracteres e responde algo que cabe.
+        let hit = hit.filter(|hit| {
+            table.is_none_or(|table| {
+                let fitted = table.drop_missing_accents(hit);
+                table.encode(fitted.as_deref().unwrap_or(hit)).is_ok()
+            })
+        });
         if let Some(hit) = hit {
-            db.update_translation(&entry.id, &hit, TranslationStatus::Machine)?;
+            save_translation(db, &entry, &hit, table)?;
             summary.tm_hits += 1;
         } else {
             remaining.push(entry);
@@ -106,14 +121,21 @@ pub async fn run_translation(
         phase: "tm",
     });
 
-    // Fase 2 — provider, em batches sequenciais com retry.
+    // Fase 2 — provider, em batches sequenciais com retry. Um batch, uma
+    // tabela: o prompt lista os caracteres de UMA tabela. A ordenacao e
+    // estavel — texto sem tabela vem primeiro, na ordem de sempre.
     let glossary = db.glossary_list()?;
     let mut done = summary.tm_hits;
-    for batch in remaining.chunks(opts.batch_size.max(1)) {
+    remaining.sort_by(|a, b| table_id(a).cmp(&table_id(b)));
+    let batches = remaining
+        .chunk_by(|a, b| table_id(a) == table_id(b))
+        .flat_map(|same_table| same_table.chunks(opts.batch_size.max(1)));
+    for batch in batches {
         if cancel.load(Ordering::Relaxed) {
             summary.cancelled = true;
             break;
         }
+        let table = tables.for_entry(&batch[0])?;
         let request = TranslationRequest {
             items: batch
                 .iter()
@@ -127,6 +149,7 @@ pub async fn run_translation(
             source_language: opts.source_language.clone(),
             target_language: opts.target_language.clone(),
             glossary: relevant_terms(&glossary, batch),
+            charset: table.map(TblTable::charset),
         };
 
         match call_with_retry(provider, &request, opts).await {
@@ -135,18 +158,17 @@ pub async fn run_translation(
                     let Some(entry) = batch.iter().find(|e| e.id == item.id) else {
                         continue; // id inventado pelo modelo: ignora
                     };
-                    db.update_translation(
-                        &entry.id,
-                        &item.translation,
-                        TranslationStatus::Machine,
-                    )?;
+                    save_translation(db, entry, &item.translation, table)?;
                     db.tm_store(
                         &entry.source_text,
                         &src_lang,
                         &opts.target_language,
                         &item.translation,
                     )?;
-                    if let Some(global) = global_tm.as_deref_mut() {
+                    // Resposta moldada pela tabela de UM jogo (sem acento,
+                    // sem a pontuacao que falta) nao vai pra memoria global:
+                    // outro projeto a receberia sem perguntar ao provider.
+                    if let Some(global) = global_tm.as_deref_mut().filter(|_| table.is_none()) {
                         global.tm_store(
                             &entry.source_text,
                             &src_lang,
@@ -187,6 +209,37 @@ pub async fn run_translation(
     )?;
     info!(?summary, "traducao concluida");
     Ok(summary)
+}
+
+/// O id da tabela de caracteres que le e grava a entry, se houver.
+fn table_id(entry: &TextEntry) -> Option<&str> {
+    match &entry.encoding {
+        TextEncoding::Table(id) => Some(id),
+        _ => None,
+    }
+}
+
+/// Grava a traducao automatica da entry. Texto de tabela passa antes pela
+/// rede de seguranca: acento que a tabela nao tem vira a letra base
+/// (`TblTable::drop_missing_accents`), e a troca fica registrada pra
+/// validacao mostrar como aviso. O que continuar fora da tabela e gravado
+/// como veio — e erro de validacao, nunca byte inventado.
+fn save_translation(
+    db: &mut ProjectDb,
+    entry: &TextEntry,
+    answer: &str,
+    table: Option<&TblTable>,
+) -> Result<()> {
+    let written = table.and_then(|table| table.drop_missing_accents(answer));
+    db.update_translation(
+        &entry.id,
+        written.as_deref().unwrap_or(answer),
+        TranslationStatus::Machine,
+    )?;
+    if let Some(written) = &written {
+        db.record_accent_swap(&entry.id, answer, written)?;
+    }
+    Ok(())
 }
 
 async fn call_with_retry(

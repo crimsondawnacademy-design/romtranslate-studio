@@ -1,0 +1,502 @@
+//! A traducao automatica respeita a tabela de caracteres do projeto: o
+//! prompt do batch lista o que a tabela escreve, a resposta com acento que a
+//! tabela nao tem e gravada com a letra base (com aviso), e o que sobra fora
+//! da tabela continua erro de validacao.
+
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::AtomicBool;
+use std::sync::Mutex;
+
+use async_trait::async_trait;
+use romtranslate_core::adapter::GameAdapter;
+use romtranslate_core::adapters::nes::NesAdapter;
+use romtranslate_core::db::{GlobalTm, ProjectDb};
+use romtranslate_core::error::Result;
+use romtranslate_core::pipeline::{run_translation, TranslateOptions, TranslateSummary};
+use romtranslate_core::project::{create_project, CreateProjectArgs};
+use romtranslate_core::provider::{
+    build_system_prompt, TranslatedItem, TranslationProvider, TranslationRequest,
+    TranslationResponse,
+};
+use romtranslate_core::reinsert::reinsert_project;
+use romtranslate_core::relative::{build_tbl, save_tbl, search_project};
+use romtranslate_core::scan::{scan_file, scan_project, ScanConfig, ScanEncoding};
+use romtranslate_core::synth::{self, CUSTOM_LINES, CUSTOM_LOWER, CUSTOM_UPPER};
+use romtranslate_core::types::{Platform, TextEncoding, TextEntry, TranslationStatus};
+use romtranslate_core::validate::{validate_project_db, IssueKind, Severity, ValidationReport};
+
+const ROM_NAME: &str = "game.nes";
+/// O que a tabela da busca relativa escreve: espaco e letras sem acento.
+const LETTERS: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(label: &str) -> Self {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("rts-tbltr-{label}-{nanos}"));
+        fs::create_dir_all(&dir).unwrap();
+        TempDir(dir)
+    }
+
+    /// Projeto de NES da fixture de tabela propria, ainda sem scan.
+    fn project(&self) -> PathBuf {
+        let source = self.0.join(ROM_NAME);
+        fs::write(&source, synth::make_custom_table_rom()).unwrap();
+        let dir = self.0.join("game.rtsproj");
+        create_project(CreateProjectArgs {
+            source_path: source,
+            platform: Platform::Nes,
+            adapter_id: NesAdapter.id().to_string(),
+            source_language: Some("en-US".to_string()),
+            target_language: "pt-BR".to_string(),
+            project_dir: dir.clone(),
+        })
+        .unwrap();
+        dir
+    }
+
+    /// Projeto com a tabela achada pela busca relativa e as frases do scan
+    /// por ela ja no banco. Devolve (projeto, `.tbl` do projeto).
+    fn scanned_project(&self) -> (PathBuf, PathBuf) {
+        let dir = self.project();
+        let found = &search_project(&dir, "Press").unwrap()[0];
+        let tbl = save_tbl(&dir, found.upper_base, found.lower_base).unwrap();
+        scan_into_db(&dir, &tbl);
+        (dir, tbl)
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn table_config(tbl: &Path) -> ScanConfig {
+    ScanConfig {
+        encoding: ScanEncoding::Table,
+        tbl_path: Some(tbl.to_path_buf()),
+        ..ScanConfig::default()
+    }
+}
+
+fn scan_into_db(dir: &Path, tbl: &Path) {
+    let outcome = scan_project(dir, &table_config(tbl)).unwrap();
+    ProjectDb::open(dir)
+        .unwrap()
+        .upsert_entries(&outcome.entries)
+        .unwrap();
+}
+
+/// Provider de mentira: responde o que esta em `answers` (por texto
+/// original) e devolve o proprio original pro resto. Guarda os pedidos.
+struct FakeProvider {
+    answers: HashMap<&'static str, &'static str>,
+    requests: Mutex<Vec<TranslationRequest>>,
+}
+
+impl FakeProvider {
+    fn new(answers: &[(&'static str, &'static str)]) -> Self {
+        FakeProvider {
+            answers: answers.iter().copied().collect(),
+            requests: Mutex::new(Vec::new()),
+        }
+    }
+
+    fn requests(&self) -> Vec<TranslationRequest> {
+        self.requests.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl TranslationProvider for FakeProvider {
+    fn id(&self) -> &'static str {
+        "fake"
+    }
+
+    async fn translate_batch(&self, request: &TranslationRequest) -> Result<TranslationResponse> {
+        self.requests.lock().unwrap().push(request.clone());
+        Ok(TranslationResponse {
+            translations: request
+                .items
+                .iter()
+                .map(|item| TranslatedItem {
+                    id: item.id.clone(),
+                    translation: self
+                        .answers
+                        .get(item.text.as_str())
+                        .copied()
+                        .unwrap_or(&item.text)
+                        .to_string(),
+                })
+                .collect(),
+        })
+    }
+
+    async fn health_check(&self) -> Result<()> {
+        Ok(())
+    }
+}
+
+async fn translate(
+    dir: &Path,
+    global: Option<&mut GlobalTm>,
+    provider: &dyn TranslationProvider,
+) -> TranslateSummary {
+    let opts = TranslateOptions {
+        source_language: Some("en-US".to_string()),
+        batch_size: 4,
+        ..TranslateOptions::new("pt-BR")
+    };
+    let mut db = ProjectDb::open(dir).unwrap();
+    run_translation(
+        &mut db,
+        global,
+        provider,
+        "fake-model",
+        &opts,
+        &AtomicBool::new(false),
+        &|_| {},
+    )
+    .await
+    .unwrap()
+}
+
+fn validate(dir: &Path) -> ValidationReport {
+    validate_project_db(&mut ProjectDb::open(dir).unwrap()).unwrap()
+}
+
+/// A traducao gravada da entry cujo original e `source`.
+fn translation(dir: &Path, source: &str) -> String {
+    ProjectDb::open(dir)
+        .unwrap()
+        .load_entries()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.source_text == source)
+        .unwrap_or_else(|| panic!("sem entry \"{source}\""))
+        .translated_text
+        .unwrap_or_else(|| panic!("\"{source}\" sem traducao"))
+}
+
+fn ascii_entry(id: &str, text: &str) -> TextEntry {
+    TextEntry {
+        id: id.to_string(),
+        resource_path: None,
+        offset: None,
+        original_bytes: text.as_bytes().to_vec(),
+        source_text: text.to_string(),
+        translated_text: None,
+        context: None,
+        max_bytes: None,
+        encoding: TextEncoding::Ascii,
+        status: TranslationStatus::Untranslated,
+        metadata: serde_json::Value::Null,
+    }
+}
+
+#[tokio::test]
+async fn table_batch_lists_the_characters_and_plain_batch_is_untouched() {
+    let tmp = TempDir::new("prompt");
+    let (dir, _) = tmp.scanned_project();
+    // Duas entries de outro encoding no mesmo projeto.
+    ProjectDb::open(&dir)
+        .unwrap()
+        .upsert_entries(&[
+            ascii_entry("ascii-1", "HELLO"),
+            ascii_entry("ascii-2", "WORLD"),
+        ])
+        .unwrap();
+
+    let provider = FakeProvider::new(&[]);
+    let summary = translate(&dir, None, &provider).await;
+    assert_eq!(summary.translated, CUSTOM_LINES.len() + 2);
+    assert_eq!(summary.failed, 0);
+
+    // Um batch, uma tabela: o texto sem tabela vai num pedido so dele, sem
+    // lista de caracteres; as 7 frases da tabela, em batches de 4.
+    let requests = provider.requests();
+    let texts = |r: &TranslationRequest| -> Vec<String> {
+        r.items.iter().map(|i| i.text.clone()).collect()
+    };
+    assert_eq!(requests.len(), 3);
+    assert_eq!(texts(&requests[0]), ["HELLO", "WORLD"]);
+    assert_eq!(requests[0].charset, None);
+    assert!(!build_system_prompt(&requests[0]).contains("Character set"));
+
+    assert_eq!(texts(&requests[1]), CUSTOM_LINES[..4]);
+    assert_eq!(texts(&requests[2]), CUSTOM_LINES[4..]);
+    for request in &requests[1..] {
+        assert_eq!(request.charset, Some(format!(" {LETTERS}")));
+        let prompt = build_system_prompt(request);
+        assert!(prompt.contains(&format!("\n{LETTERS}\n")), "{prompt}");
+        assert!(prompt.contains("plus the space"), "{prompt}");
+        assert!(prompt.contains("ONLY those characters"), "{prompt}");
+        assert!(prompt.contains("no accented letters"), "{prompt}");
+    }
+}
+
+#[tokio::test]
+async fn accented_answer_goes_into_the_game_without_the_accents() {
+    let tmp = TempDir::new("roundtrip");
+    let (dir, tbl) = tmp.scanned_project();
+
+    // (resposta do provider, o que tem que ser gravado), na ordem do cartucho.
+    let answers = [
+        ("INÍCIO", "INICIO"),
+        ("APERTE JÁ", "APERTE JA"),
+        ("SEGUIR", "SEGUIR"),
+        (
+            "Aperte Start e começa a missão",
+            "Aperte Start e comeca a missao",
+        ),
+        ("O herói foi à torre antiga", "O heroi foi a torre antiga"),
+        ("a vila está quieta hoje", "a vila esta quieta hoje"),
+        (
+            "Recomeçar do último ponto salvo",
+            "Recomecar do ultimo ponto salvo",
+        ),
+    ];
+    let by_source: Vec<(&str, &str)> = CUSTOM_LINES
+        .iter()
+        .zip(answers)
+        .map(|(source, (answer, _))| (*source, answer))
+        .collect();
+    let provider = FakeProvider::new(&by_source);
+    let mut global = GlobalTm::open(&tmp.0.join("global_tm.sqlite")).unwrap();
+    let summary = translate(&dir, Some(&mut global), &provider).await;
+    assert_eq!(summary.translated, CUSTOM_LINES.len());
+
+    for (source, (_, written)) in CUSTOM_LINES.iter().zip(answers) {
+        assert_eq!(translation(&dir, source), written);
+    }
+
+    // Nenhum erro; a troca aparece como aviso em cada entry que mudou, com o
+    // que o provider respondeu e o que foi gravado. "SEGUIR" nao mudou.
+    let report = validate(&dir);
+    assert_eq!(report.errors, 0, "{:?}", report.issues);
+    let swaps: Vec<&str> = report
+        .issues
+        .iter()
+        .filter(|i| i.kind == IssueKind::AccentDropped)
+        .map(|i| {
+            assert_eq!(i.severity, Severity::Warning);
+            assert!(i.message.contains("tables/letras-80-A0.tbl"), "{i:?}");
+            i.message.as_str()
+        })
+        .collect();
+    assert_eq!(swaps.len(), 6, "{swaps:?}");
+    assert!(
+        swaps
+            .iter()
+            .any(|m| m.contains("\"INÍCIO\"") && m.contains("\"INICIO\"")),
+        "{swaps:?}"
+    );
+
+    // A memoria do projeto guarda a resposta como veio; a global nao recebe
+    // traducao moldada pela tabela deste jogo.
+    let db = ProjectDb::open(&dir).unwrap();
+    assert_eq!(
+        db.tm_lookup("START GAME", "en-US", "pt-BR")
+            .unwrap()
+            .as_deref(),
+        Some("INÍCIO")
+    );
+    assert_eq!(
+        global.tm_lookup("START GAME", "en-US", "pt-BR").unwrap(),
+        None
+    );
+
+    // E o texto sem acento volta pro jogo.
+    let outcome = reinsert_project(&dir, false).unwrap();
+    assert_eq!(outcome.apply.applied, CUSTOM_LINES.len());
+    assert!(outcome.verification.ok, "{:?}", outcome.verification);
+    let read: Vec<(u64, String)> = scan_file(&outcome.working_path, &table_config(&tbl))
+        .unwrap()
+        .entries
+        .into_iter()
+        .map(|e| (e.offset.unwrap(), e.source_text))
+        .collect();
+    let expected: Vec<(u64, String)> = answers
+        .iter()
+        .enumerate()
+        .map(|(i, (_, written))| (0x100 + i as u64 * 0x40, written.to_string()))
+        .collect();
+    assert_eq!(read, expected);
+}
+
+#[tokio::test]
+async fn what_the_table_cannot_write_stays_a_validation_error() {
+    let tmp = TempDir::new("error");
+    let dir = tmp.project();
+    // Tabela sem o 'c' minusculo (nenhuma frase do cartucho usa).
+    let rom = synth::make_custom_table_rom();
+    let text: String = build_tbl(&rom, Some(CUSTOM_UPPER), Some(CUSTOM_LOWER))
+        .unwrap()
+        .lines()
+        .filter(|line| !line.ends_with("=c"))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    let outside = tmp.0.join("semc.tbl");
+    fs::write(&outside, text).unwrap();
+    scan_into_db(&dir, &outside);
+
+    let provider = FakeProvider::new(&[
+        // 'Í' vira 'I'; o '!' nao tem troca.
+        ("START GAME", "INÍCIO!"),
+        // 'ã' vira 'a'; a base do 'ç' (o 'c') nao esta na tabela.
+        ("the village is quiet tonight", "ação"),
+        // Maiusculo, o 'C' existe: tudo trocado.
+        ("CONTINUE", "AÇÃO"),
+    ]);
+    translate(&dir, None, &provider).await;
+    assert_eq!(translation(&dir, "START GAME"), "INICIO!");
+    assert_eq!(translation(&dir, "the village is quiet tonight"), "açao");
+    assert_eq!(translation(&dir, "CONTINUE"), "ACAO");
+
+    let report = validate(&dir);
+    let errors: Vec<&str> = report
+        .issues
+        .iter()
+        .filter(|i| i.severity == Severity::Error)
+        .map(|i| {
+            assert_eq!(i.kind, IssueKind::Unencodable);
+            i.message.as_str()
+        })
+        .collect();
+    assert_eq!(errors.len(), 2, "{errors:?}");
+    assert!(errors.iter().any(|m| m.contains("'!'")), "{errors:?}");
+    assert!(errors.iter().any(|m| m.contains("'ç'")), "{errors:?}");
+    // A troca que houve continua visivel, erro ou nao.
+    let swapped = report
+        .issues
+        .iter()
+        .filter(|i| i.kind == IssueKind::AccentDropped)
+        .count();
+    assert_eq!(swapped, 3);
+
+    let blocked = reinsert_project(&dir, false).unwrap_err().to_string();
+    assert!(blocked.contains("2 entries com erro"), "{blocked}");
+    assert!(!dir.join("working").join(ROM_NAME).exists());
+}
+
+#[tokio::test]
+async fn memory_hit_is_fitted_to_the_table_or_left_to_the_provider() {
+    let tmp = TempDir::new("memory");
+    let (dir, _) = tmp.scanned_project();
+    // Memoria global vinda de um jogo de outro encoding.
+    let mut global = GlobalTm::open(&tmp.0.join("global_tm.sqlite")).unwrap();
+    for (source, translation) in [("START GAME", "INÍCIO"), ("CONTINUE", "CONTINUAR?")] {
+        global
+            .tm_store(source, "en-US", "pt-BR", translation)
+            .unwrap();
+    }
+
+    let provider = FakeProvider::new(&[("CONTINUE", "SEGUIR")]);
+    let summary = translate(&dir, Some(&mut global), &provider).await;
+
+    // Com acento so: aproveitada, sem acento e com o aviso.
+    assert_eq!(summary.tm_hits, 1);
+    assert_eq!(translation(&dir, "START GAME"), "INICIO");
+    assert!(validate(&dir)
+        .issues
+        .iter()
+        .any(|i| i.kind == IssueKind::AccentDropped && i.message.contains("\"INÍCIO\"")));
+
+    // Com '?', que a tabela nao escreve: quem responde e o provider.
+    let asked: Vec<String> = provider
+        .requests()
+        .iter()
+        .flat_map(|r| r.items.iter().map(|i| i.text.clone()))
+        .collect();
+    assert!(asked.contains(&"CONTINUE".to_string()), "{asked:?}");
+    assert!(!asked.contains(&"START GAME".to_string()), "{asked:?}");
+    assert_eq!(translation(&dir, "CONTINUE"), "SEGUIR");
+    // E a memoria global segue como estava.
+    assert_eq!(
+        global
+            .tm_lookup("CONTINUE", "en-US", "pt-BR")
+            .unwrap()
+            .as_deref(),
+        Some("CONTINUAR?")
+    );
+}
+
+#[tokio::test]
+async fn warning_goes_away_when_the_translation_is_edited() {
+    let tmp = TempDir::new("edit");
+    let (dir, _) = tmp.scanned_project();
+    let provider = FakeProvider::new(&[("START GAME", "INÍCIO")]);
+    translate(&dir, None, &provider).await;
+    let dropped = |dir: &Path| {
+        validate(dir)
+            .issues
+            .iter()
+            .filter(|i| i.kind == IssueKind::AccentDropped)
+            .count()
+    };
+    assert_eq!(dropped(&dir), 1);
+
+    // Um novo scan troca a metadata das entries; o aviso continua.
+    scan_into_db(&dir, &dir.join("tables").join("letras-80-A0.tbl"));
+    assert_eq!(dropped(&dir), 1);
+
+    let mut db = ProjectDb::open(&dir).unwrap();
+    let id = db
+        .load_entries()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.source_text == "START GAME")
+        .unwrap()
+        .id;
+    let issues = romtranslate_core::validate::apply_manual_translation(
+        &mut db, None, &id, "COMECAR", "en-US", "pt-BR",
+    )
+    .unwrap();
+    assert!(issues.is_empty(), "{issues:?}");
+    assert_eq!(dropped(&dir), 0);
+}
+
+/// Prova de fogo com Ollama REAL: o que um modelo de verdade responde quando
+/// recebe a lista de caracteres. Roda manual:
+/// `cargo test -p romtranslate-core --test table_translate -- --ignored --nocapture`
+/// Requer `ollama serve` ativo e o modelo em OLLAMA_TEST_MODEL (default llama3.2:3b).
+#[tokio::test]
+#[ignore]
+async fn real_ollama_is_told_the_table_characters() {
+    use romtranslate_core::providers::ollama::OllamaProvider;
+
+    let model = std::env::var("OLLAMA_TEST_MODEL").unwrap_or_else(|_| "llama3.2:3b".to_string());
+    let provider = OllamaProvider::new("http://localhost:11434", &model, 300).unwrap();
+    provider.health_check().await.expect("ollama fora do ar?");
+
+    let tmp = TempDir::new("real");
+    let (dir, _) = tmp.scanned_project();
+    let summary = translate(&dir, None, &provider).await;
+    eprintln!("summary: {summary:?}");
+    assert_eq!(summary.failed, 0, "{summary:?}");
+
+    // A memoria do projeto guarda a resposta crua; a entry, o que foi gravado.
+    let db = ProjectDb::open(&dir).unwrap();
+    for e in db.load_entries().unwrap() {
+        let answer = db.tm_lookup(&e.source_text, "en-US", "pt-BR").unwrap();
+        eprintln!(
+            "{:?} => resposta {:?}, gravado {:?}",
+            e.source_text, answer, e.translated_text
+        );
+    }
+    let report = validate(&dir);
+    for issue in &report.issues {
+        eprintln!("{:?} {:?}: {}", issue.severity, issue.kind, issue.message);
+    }
+    eprintln!(
+        "{model}: {} erros e {} avisos em {} frases",
+        report.errors, report.warnings, report.checked
+    );
+}

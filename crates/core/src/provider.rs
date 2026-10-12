@@ -32,6 +32,10 @@ pub struct TranslationRequest {
     pub target_language: String,
     /// Ja filtrado: so termos que aparecem nos textos deste batch.
     pub glossary: Vec<GlossaryTerm>,
+    /// `Some` quando o texto do batch e gravado por uma tabela de caracteres:
+    /// os caracteres que ela escreve (`TblTable::charset`). O batch inteiro e
+    /// de uma tabela so.
+    pub charset: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -75,6 +79,31 @@ pub fn build_system_prompt(req: &TranslationRequest) -> String {
                 p.push_str(&format!("- \"{}\" -> \"{}\"\n", g.term, t));
             }
         }
+    }
+    if let Some(charset) = &req.charset {
+        // Depois do glossario de proposito: a tabela vence o termo acentuado.
+        p.push_str(
+            "Character set (STRICT): the game font only has the characters on the next line",
+        );
+        p.push_str(if charset.contains(' ') {
+            ", plus the space:\n"
+        } else {
+            " and has NO space character:\n"
+        });
+        p.extend(charset.chars().filter(|c| *c != ' '));
+        p.push_str(
+            "\n- Write every translation using ONLY those characters: anything else cannot be stored in the game.\n\
+             - The only exception are placeholders and control codes copied from the source text.\n",
+        );
+        if !charset.chars().any(|c| !c.is_ascii() && c.is_alphabetic()) {
+            p.push_str(
+                "- There are no accented letters: write the plain letter (a for á, c for ç, E for É).\n",
+            );
+        }
+        p.push_str(
+            "- If a punctuation mark or a digit is not listed, rephrase without it.\n\
+             - This also applies to glossary terms: adapt them to the character set.\n",
+        );
     }
     p.push_str(
         "Respond with ONLY valid JSON in this exact shape, one entry per input item, same ids:\n\
@@ -163,6 +192,7 @@ mod tests {
                     note: None,
                 },
             ],
+            charset: None,
         }
     }
 
@@ -174,6 +204,57 @@ mod tests {
         assert!(p.contains("\"POTION\" -> \"POÇÃO\""));
         assert!(p.contains("\"HP\" -> DO NOT TRANSLATE"));
         assert!(p.contains("{\"translations\""));
+    }
+
+    /// O prompt de batch sem tabela, letra por letra: e o que os providers
+    /// recebiam antes de existir a lista de caracteres.
+    const PLAIN_PROMPT: &str = "You are translating text extracted from a video game.\n\
+        Target language: pt-BR.\n\
+        Source language: en-US.\n\
+        Rules:\n\
+        - Preserve ALL placeholders, control codes, tags and escape sequences exactly as-is (e.g. {0}, %s, <BR>, \\n).\n\
+        - Do not add explanations, notes or romanization.\n\
+        - Keep tone consistent with game UI/dialogue.\n\
+        - When an item has \"maxBytes\", prefer concise wording.\n\
+        Glossary (MUST be respected):\n\
+        - \"POTION\" -> \"POÇÃO\"\n\
+        - \"HP\" -> DO NOT TRANSLATE\n\
+        Respond with ONLY valid JSON in this exact shape, one entry per input item, same ids:\n\
+        {\"translations\":[{\"id\":\"...\",\"translation\":\"...\"}]}\n";
+
+    #[test]
+    fn prompt_without_a_table_is_unchanged() {
+        assert_eq!(build_system_prompt(&req_with_glossary()), PLAIN_PROMPT);
+    }
+
+    #[test]
+    fn table_batch_lists_the_characters_and_forbids_the_rest() {
+        let plain = req_with_glossary();
+        let letters = TranslationRequest {
+            charset: Some(" ABCabc".into()),
+            ..plain.clone()
+        };
+        let p = build_system_prompt(&letters);
+        assert!(p.contains("\nABCabc\n"), "{p}");
+        assert!(p.contains("plus the space"), "{p}");
+        assert!(p.contains("ONLY those characters"), "{p}");
+        assert!(p.contains("no accented letters"), "{p}");
+        // O bloco e a unica diferenca pro prompt de sempre, e vem depois do
+        // glossario.
+        let block = &p[p.find("Character set").unwrap()..p.find("Respond with").unwrap()];
+        assert_eq!(p.replace(block, ""), PLAIN_PROMPT);
+        assert!(p.find("Glossary").unwrap() < p.find("Character set").unwrap());
+
+        // Tabela com acento e sem espaco: o prompt nao manda tirar acento e
+        // avisa que nao ha espaco.
+        let accented = TranslationRequest {
+            charset: Some("ABCÇçé!".into()),
+            ..plain
+        };
+        let p = build_system_prompt(&accented);
+        assert!(p.contains("\nABCÇçé!\n"), "{p}");
+        assert!(p.contains("NO space character"), "{p}");
+        assert!(!p.contains("no accented letters"), "{p}");
     }
 
     #[test]

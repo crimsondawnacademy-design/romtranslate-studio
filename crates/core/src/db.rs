@@ -2,6 +2,7 @@
 //! extraidas, translation memory e glossario (spec §13, §20). Um DB por
 //! projeto; TM global cross-projeto fica para depois.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
@@ -62,6 +63,11 @@ impl ProjectDb {
                 translated INTEGER NOT NULL DEFAULT 0,
                 tm_hits INTEGER NOT NULL DEFAULT 0,
                 failed INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS accent_swaps (
+                entry_id TEXT PRIMARY KEY,
+                answer TEXT NOT NULL,
+                written TEXT NOT NULL
             );",
         )?;
         Ok(ProjectDb {
@@ -167,6 +173,31 @@ impl ProjectDb {
             params![id, json_str(&status)?],
         )?;
         Ok(())
+    }
+
+    /// A traducao automatica de `id` veio como `answer` e foi gravada como
+    /// `written`: acentos que a tabela do jogo nao tem viraram a letra base.
+    /// Fica fora de `entries.metadata` porque um novo scan troca a metadata.
+    pub fn record_accent_swap(&mut self, id: &str, answer: &str, written: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT OR REPLACE INTO accent_swaps (entry_id, answer, written) VALUES (?1,?2,?3)",
+            params![id, answer, written],
+        )?;
+        Ok(())
+    }
+
+    /// Trocas de acento registradas: id da entry -> (resposta, gravado).
+    pub fn accent_swaps(&self) -> Result<HashMap<String, (String, String)>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT entry_id, answer, written FROM accent_swaps")?;
+        let rows = stmt.query_map([], |row| Ok((row.get(0)?, (row.get(1)?, row.get(2)?))))?;
+        let mut out = HashMap::new();
+        for row in rows {
+            let (id, swap) = row?;
+            out.insert(id, swap);
+        }
+        Ok(out)
     }
 
     pub fn get_entry(&self, id: &str) -> Result<Option<TextEntry>> {

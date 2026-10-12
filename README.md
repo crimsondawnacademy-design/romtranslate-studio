@@ -99,11 +99,27 @@ monta o `.tbl`, e o texto lido por tabela é **regravado no jogo** por ela. O
 scan guarda uma cópia da tabela em `tables/` dentro do projeto; é essa cópia
 que a validação e a reinserção usam, e é nela que você completa números e
 pontuação. Vale a regra do in-place, medida em bytes da tabela: a tradução
-ocupa o espaço da original ou menos. Caractere que a tabela não tem (um
-acento, uma pontuação que falta completar) é erro que diz qual é e em que
+ocupa o espaço da original ou menos. A tradução por IA recebe a lista dos
+caracteres que a tabela escreve e a instrução de não usar nenhum outro. Se
+mesmo assim vier uma letra com acento que a tabela não tem, ela é gravada
+como a letra sem acento (`ação` vira `acao`) quando essa letra está na
+tabela, e a frase ganha um aviso de validação com o que a IA respondeu e o
+que foi gravado — tirar o acento pode mudar o sentido (`avô` e `avó` viram
+`avo`), então confira. Para ter o acento no jogo, a linha dele precisa estar
+no `.tbl` (e o jogo precisa ter o desenho da letra; o app não edita fonte).
+O que continuar fora da tabela (uma pontuação que falta completar, um acento
+cuja letra base a tabela não tem) é erro que diz qual caractere e em que
 posição — nunca um byte inventado. Limites: isso está provado de ponta a
-ponta numa fixture sintética de NES, não em jogo real; as outras plataformas
-in-place usam o mesmo caminho, mas não têm teste com tabela. E a sobra de
+ponta numa fixture sintética de NES com um provider de mentira, não em jogo
+real; as outras plataformas in-place usam o mesmo caminho, mas não têm teste
+com tabela. Com um modelo de verdade só há uma rodada, num modelo local
+pequeno (`llama3.2:3b`, as 7 frases da fixture): nenhuma pontuação fora da
+tabela, e 4 respostas ainda vieram com acento e foram gravadas sem ele. A
+mesma rodada mostrou o que falta: a IA ainda **não recebe o tamanho** da
+string de tabela, as 7 traduções ficaram maiores que o espaço da original e
+a reinserção recusa até você encurtar. A troca só cobre letra latina
+acentuada num caractere só (`á`, `ç`, `É`); tradução escrita à mão não é
+mexida. E a sobra de
 uma tradução mais curta vira `0x00` quando o byte depois da string original
 é `0x00` (senão é preenchida com o espaço da tabela) — jogo com outro
 terminador pede conferência no emulador.
@@ -191,6 +207,9 @@ cargo fmt --check && cargo clippy --all-targets -- -D warnings
 pnpm test && pnpm lint && pnpm web:build
 # prova de fogo com Ollama rodando:
 cargo test -p romtranslate-core --test translate -- --ignored --nocapture
+# a mesma, com o texto numa tabela de caracteres (mostra o que o modelo
+# respondeu, o que foi gravado e os avisos):
+cargo test -p romtranslate-core --test table_translate -- --ignored --nocapture
 ```
 
 ## Arquitetura
