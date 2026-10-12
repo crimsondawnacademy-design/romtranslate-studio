@@ -4,7 +4,7 @@ handoff_gerado: 2026-10-12
 gerado_por: claude / opus-5.5
 motivo: pausa-longa
 branch: main
-ultimo_commit_de_codigo: 401457f (2026-10-12)
+ultimo_commit_de_codigo: bb98e7f (2026-10-12)
 versao_publicada: v0.1.1
 ---
 
@@ -37,7 +37,7 @@ de trabalho do mantenedor (decisão registrada em `.ctx/DECISIONS.md`).
 | Versão publicada | https://github.com/crimsondawnacademy-design/romtranslate-studio/releases/tag/v0.1.1 |
 | Stack | Tauri 2, React 19, Vite 8, TypeScript (pnpm); Rust em workspace |
 | Tamanho | 9.380 linhas no core, 3.739 de testes, 643 na ponte Tauri, 2.116 de frontend |
-| Testes | 144 em Rust (142 rodam; 2 são manuais) e 9 no frontend |
+| Testes | 150 em Rust (147 rodam; 3 são manuais) e 9 no frontend |
 | CI | jobs `rust`, `desktop` e `frontend`; verde no `929503b`. Confira a execução do `401457f` |
 
 A versão publicada é marcada como pré-lançamento (alpha). Por isso o endereço
@@ -96,6 +96,22 @@ que gera binários para macOS (Apple Silicon e Intel), Windows e Linux.
 
 Os dois têm limite declarado na interface: texto lido por tabela **não é
 regravado** no jogo, e texto comprimido é só **contado**.
+
+**Também de 12/10** (commits `7ed3686` e `bb98e7f`):
+
+- **Arrastar e soltar.** Um arquivo arrastado para a janela é inspecionado
+  como se tivesse sido escolhido pelo botão; uma pasta `.rtsproj` reabre o
+  projeto. Vale na tela inicial e na de detecção.
+- **Arquivo final para o emulador.** Depois da reinserção a tela mostra o
+  caminho do jogo traduzido e um botão que abre a pasta dele.
+- **ChatGPT pelo Codex CLI.** Terceiro provedor: traduz pela assinatura do
+  ChatGPT, sem chave de API. O app chama o `codex exec` que o usuário já
+  autenticou com `codex login`, com as ferramentas do agente desligadas. Exige
+  "permitir tradução remota". O porquê de não haver OAuth dentro do app está
+  em `.ctx/DECISIONS.md`.
+
+Esses três foram conferidos com o backend simulado e, no caso do Codex, com
+uma chamada real pelo core. Falta vê-los no app compilado.
 
 **No código mas ainda não publicado em binário** (depois da v0.1.1): tabelas
 com ponteiros de 16 bits e a correção descrita em 3.1 (`929503b`); busca
@@ -271,7 +287,7 @@ crates/core/src/
   project.rs        projeto .rtsproj
   db.rs             SQLite do projeto e memória global
   provider.rs       trait do provedor, prompt, leitura da resposta
-  providers/        ollama.rs, openai_compat.rs
+  providers/        ollama.rs, openai_compat.rs, codex_cli.rs (ChatGPT pelo Codex CLI)
   pipeline.rs       execução da tradução
   validate.rs       validação e status das entradas
   reinsert.rs       orquestração da reinserção
@@ -279,7 +295,7 @@ crates/core/src/
   fileio.rs         leitura por mapeamento em memória
   export.rs hash.rs types.rs error.rs
   synth.rs          arquivos sintéticos de teste (nenhum byte de jogo real)
-crates/core/tests/  17 arquivos de teste de integração
+crates/core/tests/  18 arquivos de teste de integração
 crates/core/examples/gen_fixtures.rs   grava os arquivos sintéticos em disco
 apps/desktop/src-tauri/src/
   lib.rs            os 24 comandos expostos à interface
@@ -320,11 +336,12 @@ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test --w
 pnpm lint && pnpm test && pnpm web:build
 ```
 
-Dois testes são manuais e ficam fora do CI:
+Três testes são manuais e ficam fora do CI:
 
 ```bash
 cargo test -p romtranslate-core --test translate -- --ignored --nocapture  # exige Ollama rodando
 cargo test -p romtranslate-desktop -- --ignored                            # grava no cofre do sistema
+cargo test -p romtranslate-core --test codex_cli -- --ignored --nocapture  # exige Codex CLI logado; gasta cota
 ```
 
 ### 6.3 Publicar uma versão
@@ -451,6 +468,9 @@ por cima.
 ## Commits mais recentes (o mais novo primeiro)
 
 ```
+bb98e7f  feat(traducao): provider ChatGPT pelo Codex CLI — assinatura, sem chave de API
+7ed3686  feat(ui): arrastar o jogo pra janela abre; reinsercao entrega o arquivo pro emulador
+79ba723  ctx: busca relativa e raio-X no estado, no log e no handoff
 401457f  feat(descoberta): busca relativa e raio-X — texto fora do alcance do scanner ASCII
 788fe5e  ctx: handoff regenerado do zero em 12/10
 929503b  feat(ponteiros): offsets u16 nas tabelas + corrige padding virando tabela
