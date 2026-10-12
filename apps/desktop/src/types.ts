@@ -202,3 +202,39 @@ export interface PatchExportOutcome {
   patchedSha256: string;
   patchSize: number;
 }
+
+export interface RelativeCandidate {
+  /** Byte de 'A'; null = a palavra buscada não tinha maiúscula. */
+  upperBase: number | null;
+  lowerBase: number | null;
+  hits: number;
+  offsets: number[];
+  preview: string;
+  ascii: boolean;
+}
+
+export interface Lz77Block {
+  offset: number;
+  packedLen: number;
+  unpackedLen: number;
+  strings: number;
+}
+
+export interface Lz77Summary {
+  blocks: number;
+  packedBytes: number;
+  unpackedBytes: number;
+  blocksWithText: number;
+  strings: number;
+  truncated: boolean;
+  first: Lz77Block[];
+}
+
+export interface XrayReport {
+  size: number;
+  denseBytes: number;
+  blankBytes: number;
+  lz77: Lz77Summary;
+  entries: number;
+  relocatable: number;
+}

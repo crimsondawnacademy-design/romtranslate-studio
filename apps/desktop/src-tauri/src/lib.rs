@@ -15,9 +15,11 @@ use romtranslate_core::project::{self, CreateProjectArgs, OpenProjectReport};
 use romtranslate_core::provider::{GlossaryTerm, TranslationProvider};
 use romtranslate_core::providers::ollama::OllamaProvider;
 use romtranslate_core::providers::openai_compat::OpenAiCompatProvider;
+use romtranslate_core::relative::{self, RelativeCandidate};
 use romtranslate_core::scan::{self, ScanConfig, ScanOutcome};
 use romtranslate_core::types::{GameProject, TextEntry};
 use romtranslate_core::validate;
+use romtranslate_core::xray::{self, XrayReport};
 
 use settings::AppSettings;
 
@@ -120,6 +122,34 @@ async fn export_entries(
         Ok(out.display().to_string())
     })
     .await
+}
+
+// ---- Descoberta: texto fora do alcance do scanner ASCII ----
+
+#[tauri::command]
+async fn relative_search(
+    project_dir: String,
+    word: String,
+) -> Result<Vec<RelativeCandidate>, String> {
+    blocking(move || relative::search_project(&PathBuf::from(project_dir), &word)).await
+}
+
+#[tauri::command]
+async fn save_relative_tbl(
+    project_dir: String,
+    upper_base: Option<u8>,
+    lower_base: Option<u8>,
+) -> Result<String, String> {
+    blocking(move || {
+        let path = relative::save_tbl(&PathBuf::from(project_dir), upper_base, lower_base)?;
+        Ok(path.display().to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+async fn xray_project(project_dir: String) -> Result<XrayReport, String> {
+    blocking(move || xray::xray_project(&PathBuf::from(project_dir))).await
 }
 
 // ---- Sprint 3: persistencia de entries ----
@@ -381,6 +411,9 @@ pub fn run() {
             create_project,
             open_project,
             scan_file,
+            relative_search,
+            save_relative_tbl,
+            xray_project,
             export_entries,
             save_entries,
             load_entries,

@@ -115,6 +115,36 @@ const messages = {
     "editor.markReviewed": "Marcar revisada",
     "editor.unmarkReviewed": "Desmarcar revisão",
     "extract.structured": "Extração estruturada",
+    "extract.xray": "Raio-X",
+    "xray.title": "Raio-X do arquivo",
+    "xray.hint":
+      "O que o app não consegue ler neste arquivo. Extração curta não prova que o jogo tem pouco texto: ele pode estar comprimido ou numa tabela de caracteres própria.",
+    "xray.relocatable":
+      "Strings com ponteiro em tabela: {n} de {total}. Nessas a tradução pode passar do tamanho original; as outras precisam caber no espaço que já ocupam.",
+    "xray.noEntries":
+      "Nenhuma string extraída ainda. Rode a extração estruturada para ver quantas traduções podem passar do tamanho original.",
+    "xray.lz77":
+      "Blocos comprimidos (LZ77): {blocks}, com {packed} guardando {unpacked}. Blocos com texto: {withText}, cerca de {strings} frases que nenhum scanner do app enxerga ainda.",
+    "xray.lz77None":
+      "Nenhum bloco LZ77 (tipo 0x10, o do GBA e do DS) encontrado. Outros compressores não são detectados.",
+    "xray.lz77Truncated": "A busca parou no teto de trabalho: pode haver mais blocos.",
+    "xray.dense":
+      "{dense}% do arquivo é denso (comprimido, cifrado, áudio ou vídeo) e {blank}% é vazio. É uma estimativa por entropia, não uma leitura do formato.",
+    "relative.title": "Descobrir a tabela de caracteres",
+    "relative.hint":
+      "Jogo de cartucho raramente usa ASCII. Digite uma palavra que você sabe que aparece no jogo (só letras, 4 ou mais): o app a procura pela distância entre as letras e monta o .tbl. Busque uma palavra em maiúsculas e outra em minúsculas para cobrir os dois casos.",
+    "relative.word": "Palavra do jogo",
+    "relative.search": "Buscar",
+    "relative.none":
+      "Nenhuma ocorrência. Tente outra palavra ou o outro caso. O texto também pode estar comprimido: veja o Raio-X.",
+    "relative.preview": "Trecho lido com esta tabela",
+    "relative.hits": "Ocorrências",
+    "relative.use": "Usar esta tabela",
+    "relative.ascii": "É ASCII: use a codificação ascii",
+    "relative.saved":
+      "Tabela gravada em {path}. Agora clique em Escanear. Ela traz só letras e espaço: complete números e pontuação no arquivo.",
+    "relative.readOnly":
+      "Texto lido por tabela pode ser traduzido e exportado, mas ainda não é regravado no jogo.",
     "reinsert.title": "Reinserção",
     "reinsert.hint":
       "Aplica as traduções numa cópia em working/ do projeto — o arquivo original nunca é modificado. Entries com erro de validação bloqueiam a reinserção.",
@@ -249,6 +279,36 @@ const messages = {
     "editor.markReviewed": "Mark reviewed",
     "editor.unmarkReviewed": "Unmark review",
     "extract.structured": "Structured extraction",
+    "extract.xray": "X-ray",
+    "xray.title": "File X-ray",
+    "xray.hint":
+      "What the app cannot read in this file. A short extraction does not prove the game has little text: it may be compressed or use its own character table.",
+    "xray.relocatable":
+      "Strings with a pointer in a table: {n} of {total}. For those the translation may be longer than the original; the others must fit the space they already use.",
+    "xray.noEntries":
+      "No strings extracted yet. Run the structured extraction to see how many translations may outgrow the original.",
+    "xray.lz77":
+      "Compressed blocks (LZ77): {blocks}, with {packed} holding {unpacked}. Blocks with text: {withText}, about {strings} lines no scanner in the app can see yet.",
+    "xray.lz77None":
+      "No LZ77 block (type 0x10, the GBA and DS one) found. Other compressors are not detected.",
+    "xray.lz77Truncated": "The search stopped at its work limit: there may be more blocks.",
+    "xray.dense":
+      "{dense}% of the file is dense (compressed, encrypted, audio or video) and {blank}% is empty. This is an entropy estimate, not a reading of the format.",
+    "relative.title": "Find the character table",
+    "relative.hint":
+      "Cartridge games rarely use ASCII. Type a word you know appears in the game (letters only, 4 or more): the app finds it by the distance between its letters and builds the .tbl. Search one uppercase word and one lowercase word to cover both cases.",
+    "relative.word": "Word from the game",
+    "relative.search": "Search",
+    "relative.none":
+      "No match. Try another word or the other case. The text may also be compressed: see the X-ray.",
+    "relative.preview": "Excerpt read with this table",
+    "relative.hits": "Matches",
+    "relative.use": "Use this table",
+    "relative.ascii": "It is ASCII: use the ascii encoding",
+    "relative.saved":
+      "Table saved to {path}. Now click Scan. It only has letters and the space: add digits and punctuation to the file.",
+    "relative.readOnly":
+      "Text read through a table can be translated and exported, but is not written back into the game yet.",
     "reinsert.title": "Reinsertion",
     "reinsert.hint":
       "Applies translations to a copy under the project's working/ folder — the original file is never modified. Entries with validation errors block reinsertion.",

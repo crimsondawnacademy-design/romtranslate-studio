@@ -615,6 +615,74 @@ pub fn make_psp_iso() -> Vec<u8> {
     )
 }
 
+/// Tabela de caracteres inventada pro cartucho de `make_custom_table_rom`:
+/// nenhuma letra cai onde o ASCII a poria.
+pub const CUSTOM_UPPER: u8 = 0x80;
+pub const CUSTOM_LOWER: u8 = 0xA0;
+pub const CUSTOM_SPACE: u8 = 0x40;
+
+/// Texto (so letras e espaco) na tabela inventada acima.
+pub fn encode_custom(text: &str) -> Vec<u8> {
+    text.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' => CUSTOM_UPPER + (b - b'A'),
+            b'a'..=b'z' => CUSTOM_LOWER + (b - b'a'),
+            b' ' => CUSTOM_SPACE,
+            other => panic!("encode_custom: {other:#04X} fora da tabela sintetica"),
+        })
+        .collect()
+}
+
+/// As frases de `make_custom_table_rom`, na ordem em que estao no cartucho.
+pub const CUSTOM_LINES: [&str; 7] = [
+    "START GAME",
+    "PRESS START",
+    "CONTINUE",
+    "Press Start to begin your quest",
+    "The hero went north to the old tower",
+    "the village is quiet tonight",
+    "Start over from the last save point",
+];
+
+/// NES (iNES) cujo texto esta numa tabela propria, como em cartucho de
+/// verdade: o scanner ASCII nao acha nada aqui. Frases a partir de 0x100,
+/// uma a cada 0x40 bytes, terminadas em 0x00.
+pub fn make_custom_table_rom() -> Vec<u8> {
+    let mut rom = vec![0u8; 16 + 16 * 1024 + 8 * 1024];
+    rom[0..4].copy_from_slice(b"NES\x1a");
+    rom[4] = 1;
+    rom[5] = 1;
+    for (i, line) in CUSTOM_LINES.iter().enumerate() {
+        plant(&mut rom, 0x100 + i * 0x40, &encode_custom(line));
+    }
+    rom
+}
+
+/// As falas comprimidas dentro de `make_gba_rom_with_lz77`.
+pub const LZ77_SCRIPT: [&str; 4] = [
+    "Welcome to the village, traveler.",
+    "The old bridge to the north is broken.",
+    "Come back when you have the silver key.",
+    "Welcome to the village, traveler. The inn is open.",
+];
+
+/// GBA de 64 KiB com texto que so existe comprimido: um bloco LZ77 (tipo
+/// 0x10) em 0x1000 com as falas de `LZ77_SCRIPT` separadas por 0x00, 16 KiB
+/// de ruido em 0x4000 (o que um dado cifrado pareceria) e zeros no resto.
+/// Devolve o ROM e a posicao do bloco.
+pub fn make_gba_rom_with_lz77() -> (Vec<u8>, usize) {
+    let mut rom = make_gba_rom("LZTEST");
+    rom.resize(64 * 1024, 0);
+    let script: Vec<u8> = LZ77_SCRIPT
+        .iter()
+        .flat_map(|line| line.bytes().chain([0]))
+        .collect();
+    let block = crate::lz77::pack(&script).expect("script cabe em 24 bits");
+    plant(&mut rom, 0x1000, &block);
+    plant(&mut rom, 0x4000, &make_random(0x4000, 99));
+    (rom, 0x1000)
+}
+
 /// Bytes pseudo-aleatorios deterministicos (xorshift), p/ testes negativos.
 pub fn make_random(len: usize, seed: u64) -> Vec<u8> {
     let mut state = seed.max(1);

@@ -3,13 +3,20 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { makeT, MessageId } from "./i18n";
-import { defaultProjectDir, encodedByteLength, formatOffset, pointerCount } from "./util";
+import {
+  defaultProjectDir,
+  encodedByteLength,
+  formatBytes,
+  formatOffset,
+  pointerCount,
+} from "./util";
 import {
   AppSettings,
   GameProject,
   GlossaryTerm,
   PLATFORM_NAMES,
   ProgressEvent,
+  RelativeCandidate,
   ScanEncoding,
   ScanOutcome,
   SettingsReport,
@@ -19,6 +26,7 @@ import {
   TranslateSummary,
   ValidationIssue,
   ValidationReport,
+  XrayReport,
 } from "./types";
 
 type StatusFilter =
@@ -65,6 +73,15 @@ export default function ProjectView({
   const [encoding, setEncoding] = useState<ScanEncoding>("ascii");
   const [minChars, setMinChars] = useState(4);
   const [tblPath, setTblPath] = useState<string | null>(null);
+  const [xray, setXray] = useState<XrayReport | null>(null);
+  const [relWord, setRelWord] = useState("");
+  const [relCandidates, setRelCandidates] = useState<RelativeCandidate[] | null>(null);
+  // Bases ja adotadas: uma busca em maiusculas e outra em minusculas se somam.
+  const [tblBases, setTblBases] = useState<{ upper: number | null; lower: number | null }>({
+    upper: null,
+    lower: null,
+  });
+  const [tblSaved, setTblSaved] = useState(false);
   const [filter, setFilter] = useState("");
   const [busy, setBusy] = useState(false);
   const [savedPath, setSavedPath] = useState<string | null>(null);
@@ -140,7 +157,10 @@ export default function ProjectView({
       directory: false,
       filters: [{ name: "Table", extensions: ["tbl", "txt"] }],
     });
-    if (typeof path === "string") setTblPath(path);
+    if (typeof path === "string") {
+      setTblPath(path);
+      setTblSaved(false);
+    }
   }
 
   async function runScan() {
@@ -170,6 +190,55 @@ export default function ProjectView({
       setError(String(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function runXray() {
+    setError(null);
+    setBusy(true);
+    try {
+      setXray(await invoke<XrayReport>("xray_project", { projectDir }));
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runRelativeSearch() {
+    setError(null);
+    setBusy(true);
+    try {
+      setRelCandidates(
+        await invoke<RelativeCandidate[]>("relative_search", {
+          projectDir,
+          word: relWord.trim(),
+        }),
+      );
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function adoptCandidate(candidate: RelativeCandidate) {
+    const bases = {
+      upper: candidate.upperBase ?? tblBases.upper,
+      lower: candidate.lowerBase ?? tblBases.lower,
+    };
+    setError(null);
+    try {
+      const path = await invoke<string>("save_relative_tbl", {
+        projectDir,
+        upperBase: bases.upper,
+        lowerBase: bases.lower,
+      });
+      setTblBases(bases);
+      setTblPath(path);
+      setTblSaved(true);
+    } catch (e) {
+      setError(String(e));
     }
   }
 
@@ -473,6 +542,9 @@ export default function ProjectView({
         )}
         <div className="scan-run">
           <button onClick={onBack}>{t("common.back")}</button>
+          <button onClick={runXray} disabled={busy || sourceBroken}>
+            {t("extract.xray")}
+          </button>
           <button onClick={runStructuredExtract} disabled={busy || sourceBroken}>
             {t("extract.structured")}
           </button>
@@ -482,6 +554,94 @@ export default function ProjectView({
         </div>
       </div>
       <p className="hint left">{t("extract.hint")}</p>
+
+      {encoding === "table" && (
+        <div className="panel">
+          <h3>{t("relative.title")}</h3>
+          <p className="hint left">{t("relative.hint")}</p>
+          <div className="scan-controls">
+            <label>
+              {t("relative.word")}
+              <input
+                type="text"
+                size={18}
+                value={relWord}
+                placeholder="START"
+                onChange={(e) => setRelWord(e.target.value)}
+              />
+            </label>
+            <button
+              onClick={runRelativeSearch}
+              disabled={busy || sourceBroken || relWord.trim().length < 4}
+            >
+              {t("relative.search")}
+            </button>
+          </div>
+          {relCandidates?.length === 0 && <p className="hint left">{t("relative.none")}</p>}
+          {relCandidates && relCandidates.length > 0 && (
+            <table className="strings">
+              <thead>
+                <tr>
+                  <th>{t("relative.preview")}</th>
+                  <th>{t("relative.hits")}</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {relCandidates.map((c) => (
+                  <tr key={`${c.upperBase}-${c.lowerBase}`}>
+                    <td className="mono">{c.preview}</td>
+                    <td>{c.hits}</td>
+                    <td>
+                      {c.ascii ? (
+                        t("relative.ascii")
+                      ) : (
+                        <button onClick={() => adoptCandidate(c)}>{t("relative.use")}</button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {tblSaved && tblPath && (
+            <div className="ok">{t("relative.saved", { path: tblPath })}</div>
+          )}
+          <p className="hint left">{t("relative.readOnly")}</p>
+        </div>
+      )}
+
+      {xray && (
+        <div className="panel">
+          <h3>{t("xray.title")}</h3>
+          <p className="hint left">{t("xray.hint")}</p>
+          <ul className="issues">
+            <li>
+              {xray.entries > 0
+                ? t("xray.relocatable", { n: xray.relocatable, total: xray.entries })
+                : t("xray.noEntries")}
+            </li>
+            <li className={xray.lz77.strings > 0 ? "warning" : undefined}>
+              {xray.lz77.blocks > 0
+                ? t("xray.lz77", {
+                    blocks: xray.lz77.blocks,
+                    packed: formatBytes(xray.lz77.packedBytes),
+                    unpacked: formatBytes(xray.lz77.unpackedBytes),
+                    withText: xray.lz77.blocksWithText,
+                    strings: xray.lz77.strings,
+                  })
+                : t("xray.lz77None")}
+              {xray.lz77.truncated && ` ${t("xray.lz77Truncated")}`}
+            </li>
+            <li>
+              {t("xray.dense", {
+                dense: Math.round((100 * xray.denseBytes) / Math.max(xray.size, 1)),
+                blank: Math.round((100 * xray.blankBytes) / Math.max(xray.size, 1)),
+              })}
+            </li>
+          </ul>
+        </div>
+      )}
 
       {scanInfo && (
         <div className="ok">

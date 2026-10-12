@@ -191,6 +191,11 @@ fn is_text_char(c: char) -> bool {
         && (cp & 0xFFFE) != 0xFFFE
 }
 
+/// So o texto dos runs ASCII — pra quem quer contar, nao reinserir.
+pub(crate) fn ascii_texts(data: &[u8]) -> Vec<String> {
+    ascii_runs(data).into_iter().map(|run| run.text).collect()
+}
+
 fn ascii_runs(data: &[u8]) -> Vec<Run> {
     let mut runs = Vec::new();
     let mut i = 0;

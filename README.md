@@ -8,7 +8,7 @@ em vez de cópias modificadas.
 
 **Status: alpha.** O pipeline completo funciona de ponta a ponta:
 detecção → extração → tradução com IA → validação/revisão → reinserção em
-cópia de trabalho → **patch IPS** com manifest.
+cópia de trabalho → **patch IPS ou BPS** com manifest.
 
 ![Tela de projeto do RomTranslate Studio: extração de strings de um ISO de PS2 com traduções, statuses e validação](docs/assets/screenshot.png)
 
@@ -40,6 +40,14 @@ Prefere compilar do código? Veja [Rodando](#rodando).
 - **Extração**: scanner genérico (ASCII, UTF-8, UTF-16 LE/BE, tabelas `.tbl`)
   para descoberta + extração estruturada com limites reais nos adapters que a
   suportam;
+- **Busca relativa**: jogo de cartucho quase nunca usa ASCII. Digite uma
+  palavra que você sabe que aparece no jogo e o app descobre onde o alfabeto
+  dele começa e monta o `.tbl` (letras e espaço; números e pontuação você
+  completa no arquivo);
+- **Raio-X**: mostra o que o app *não* lê no arquivo — blocos comprimidos em
+  LZ77 (o do GBA e do DS) e quantas frases estão presas neles, quanto do
+  arquivo é denso (comprimido ou cifrado), e quantas das strings extraídas
+  têm ponteiro em tabela e podem crescer;
 - **Tradução por IA**: Ollama (local, padrão) ou qualquer endpoint
   OpenAI-compatible; batching, retry, cancelamento, progresso; **translation
   memory** e **glossário** por projeto (SQLite); tradução remota exige opt-in
@@ -83,6 +91,13 @@ O export escolhe o formato sozinho: **IPS** quando cabe (máxima
 compatibilidade) e **BPS** para arquivos maiores ou que encolhem — o BPS ainda
 valida por CRC-32 que o patch está sendo aplicado no arquivo certo. Partições
 de disco Wii são cifradas: extração exigiria keys, que este projeto não inclui.
+
+**Texto fora do alcance do scanner**: extração vazia não prova que o jogo tem
+pouco texto. Se ele usa tabela de caracteres própria, a **busca relativa**
+monta o `.tbl`; texto lido por tabela pode ser traduzido e exportado, mas
+ainda **não é regravado** no jogo. Se o texto está comprimido, o **Raio-X**
+mostra quanto — hoje o app só reconhece o LZ77 tipo 0x10 e só para leitura:
+texto comprimido ainda não é extraído nem reinserido.
 
 **"In-place"**: cada string traduzida ocupa o espaço da original (mesmo
 tamanho ou menor) — cobre menus e textos curtos de muitos jogos. O validador
@@ -136,14 +151,15 @@ pnpm dev          # abre o app (tauri dev)
 
 Fluxo no app: selecionar arquivo → criar projeto → **Extração estruturada** (ou
 scan genérico) → configurar provider e **Traduzir** → revisar no editor →
-**Reinserir na cópia de trabalho** → **Exportar patch (IPS)**. Os artefatos saem
+**Reinserir na cópia de trabalho** → **Exportar patch** (IPS ou BPS). Os artefatos saem
 em `SeuJogo.rtsproj/exports/`.
 
 Fixtures sintéticas para testar sem ROM real:
 
 ```bash
 cargo run -p romtranslate-core --example gen_fixtures
-# gera fixtures/generated/*.{gba,nes,sfc,smc,rtsf}
+# gera 19 arquivos em fixtures/generated/ — um por plataforma, mais os de
+# tabela de ponteiros, tabela de caracteres própria e texto comprimido
 ```
 
 Testes e checks:
@@ -162,8 +178,12 @@ cargo test -p romtranslate-core --test translate -- --ignored --nocapture
 apps/desktop/        # Tauri 2 + React + TS (shell fino; zero lógica de domínio)
 crates/core/         # tudo testável sem UI
   src/adapter.rs     # trait GameAdapter (probe/extract/apply/verify)
-  src/adapters/      # rtsf (referência completa), gba, nes, snes
+  src/adapters/      # rtsf (referência completa), gba, nds, nes, snes, gamecube,
+                     # ps1, ps2, psp; wii e wiiu só detectam
   src/scan.rs        # scanner genérico (Camada A)
+  src/relative.rs    # busca relativa: descobre a tabela de caracteres
+  src/xray.rs        # raio-X: o que o app não lê (comprimido, denso, sem ponteiro)
+  src/lz77.rs        # LZ77 do BIOS do GBA/DS (leitura; base da Camada D)
   src/pipeline.rs    # tradução: TM → batches → retry → cancel
   src/db.rs          # entries + TM + glossário (SQLite por projeto)
   src/validate.rs    # placeholders/bytes/statuses

@@ -10,7 +10,7 @@ fn main() -> std::io::Result<()> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/generated");
     fs::create_dir_all(&dir)?;
 
-    let files: [(&str, Vec<u8>); 14] = [
+    let files: [(&str, Vec<u8>); 19] = [
         ("synthetic_ps1.bin", synth::make_ps1_bin()),
         ("synthetic_ps2.iso", synth::make_ps2_iso()),
         ("synthetic_psp.iso", synth::make_psp_iso()),
@@ -31,6 +31,22 @@ fn main() -> std::io::Result<()> {
         ),
         ("not_a_rom.bin", synth::make_random(4096, 2026)),
         ("synthetic.rtsf", synth::make_rtsf_fixture()),
+        // Tabelas de ponteiros: traducao maior que o original (relocacao).
+        (
+            "synthetic_pointers.gba",
+            synth::make_gba_rom_with_pointers(),
+        ),
+        (
+            "synthetic_pointers.nds",
+            synth::make_nds_rom_with_message_table(),
+        ),
+        (
+            "synthetic_pointers_ps1.bin",
+            synth::make_ps1_bin_with_message_table(),
+        ),
+        // Texto fora do alcance do scanner ASCII: tabela propria e LZ77.
+        ("synthetic_tabela.nes", synth::make_custom_table_rom()),
+        ("synthetic_lz77.gba", synth::make_gba_rom_with_lz77().0),
     ];
 
     for (name, bytes) in files {

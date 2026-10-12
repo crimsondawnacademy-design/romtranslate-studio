@@ -467,3 +467,59 @@ Projeto antigo continua lendo igual. O formato de ponteiro do GBA foi pro
 
 **Prova:** teste de mutação — com as regras desligadas, o teste do padding
 falha. O bug era real e o teste o pega.
+
+## 2026-10-12 — REA é bancada do desenvolvedor; os processos dele entram no app em Rust
+
+**Contexto:** o Rhuan instalou a skill `reverse-engineer-anything` (REA 6.4.0)
+e pediu pra aplicar ao app o que ela tivesse de útil. Mapeei o que ela faz
+contra o que trava o app em jogo real.
+
+**O que o REA é:** um conjunto de ferramentas pro AGENTE (servidor MCP), não
+uma biblioteca. A análise de binário nativo (strings, xrefs, pseudocódigo)
+depende de Ghidra 12.1 + Java, Hopper ou IDA; a de firmware (Binwalk/Unblob)
+só roda em Linux. No Mac de casa em 12/10 nenhum desses está instalado, e os
+únicos dumps reais na máquina são de Wii U, cifrados (o projeto não inclui
+chaves). Ou seja: o REA não leu nenhuma ROM nesta sessão.
+
+**Decisão 1 — o REA não vira dependência do app.** Ele serve de bancada: com
+Ghidra instalado e um dump do Rhuan, dá pra achar num jogo específico os
+ponteiros que moram em código (literal pool no GBA, par `lui/addiu` no PS1) e
+a rotina de descompressão. Isso é trabalho de desenvolvimento, fora do
+repositório, e não muda o binário que o usuário baixa. Instalar o Ghidra é
+decisão do Rhuan (uns 2 GB com o JDK).
+
+**Decisão 2 — três processos do REA foram portados pro core, em Rust puro:**
+
+| Processo do REA | O que virou no app |
+|---|---|
+| "resultado vazio da busca de strings não prova que o texto não existe" | `relative.rs`: busca relativa. Uma palavra conhecida revela onde o alfabeto do jogo começa e o app monta o `.tbl` |
+| inventário de regiões por assinatura (Binwalk) | `xray.rs` + `lz77.rs`: acha blocos LZ77 tipo 0x10 validando pela descompressão inteira, e conta as frases presas neles |
+| observado × inferido × desconhecido, sempre explícito | o Raio-X separa o que foi lido (bloco que descomprime, ponteiro em tabela) do que é estimativa (entropia, "parece texto") e diz quando parou no teto de trabalho |
+
+**Regras que ficaram no código:**
+
+- **LZ77 só leitura.** O formato foi conferido no GBATEK ("BIOS Decompression
+  Functions") e tem um vetor montado à mão a partir dele no teste. O app
+  detecta e conta; não extrai nem reinsere texto comprimido — reinserir pede
+  recomprimir e reapontar o bloco, que é outra decisão.
+- **Só offsets múltiplos de 4.** O BIOS exige a origem alinhada, e é o que
+  derruba falso positivo. Bloco exige ≥ 32 bytes descomprimidos e ≥ 2 cópias:
+  dado cru depois de um byte 0x10 "descomprime" só com literais.
+- **Teto de 256 MiB descomprimidos por varredura**, tentativas falhas
+  inclusas; ao estourar, o relatório marca `truncated` em vez de fingir que
+  olhou tudo (spec §22, decompression bombs).
+- **Busca relativa: palavra de ≥ 4 letras com ≥ 3 diferentes no mesmo caso.**
+  Com 4 letras a chance de casar com ruído é ~6e-8 por posição: num cartucho
+  de 4 MiB, 0,25 ocorrência falsa esperada; os candidatos saem ordenados por
+  número de ocorrências.
+- **Espaço inferido nunca é 0x00 nem 0xFF** (terminador e padding): o scanner
+  leria o cartucho vazio como um mar de espaços.
+- **Entropia ≥ 7,2 bits/byte em bloco de 4 KiB = "denso".** É estimativa e a
+  interface diz isso.
+
+**O que o mapeamento revelou e NÃO foi feito:** texto em tabela própria é lido
+(`TextEncoding::Table`) mas nunca regravado — `inplace::encode` devolve `None`
+e `validate::encoded_len` devolve `Unsupported`. Enquanto isso não existir, a
+busca relativa entrega leitura, tradução e export, não o jogo traduzido. É o
+próximo passo natural: guardar o `.tbl` no projeto e codificar a tradução por
+ele na validação e na reinserção.
