@@ -100,6 +100,10 @@ export default function ProjectView({
   const [apiKeySet, setApiKeySet] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [testing, setTesting] = useState(false);
+  // Erro de configurar, testar ou traduzir aparece junto dos botoes: o aviso
+  // geral fica no topo da pagina, fora de vista de quem esta neste painel.
+  const [translateError, setTranslateError] = useState<string | null>(null);
 
   const [translating, setTranslating] = useState(false);
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
@@ -336,9 +340,10 @@ export default function ProjectView({
     }
   }
 
-  async function saveSettings() {
-    if (!settings) return;
-    setError(null);
+  /** Grava o que esta na tela. `false` = falhou, com o erro ja exibido. */
+  async function saveSettings(): Promise<boolean> {
+    if (!settings) return false;
+    setTranslateError(null);
     setTestResult(null);
     try {
       const report = await invoke<SettingsReport>("save_settings", {
@@ -348,19 +353,25 @@ export default function ProjectView({
       setSettings(report.settings);
       setApiKeySet(report.apiKeySet);
       setApiKeyInput("");
+      return true;
     } catch (e) {
-      setError(String(e));
+      setTranslateError(String(e));
+      return false;
     }
   }
 
   async function testProvider() {
-    setError(null);
-    setTestResult(null);
+    setTesting(true);
     try {
+      // O backend testa a configuracao GRAVADA. Sem gravar antes, escolher um
+      // provider e clicar em Testar ainda testava o anterior.
+      if (!(await saveSettings())) return;
       const model = await invoke<string>("test_provider");
       setTestResult(t("translate.testOk", { model }));
     } catch (e) {
-      setError(String(e));
+      setTranslateError(String(e));
+    } finally {
+      setTesting(false);
     }
   }
 
@@ -380,16 +391,17 @@ export default function ProjectView({
   }, [projectDir, reloadEntries]);
 
   async function runTranslation() {
-    setError(null);
     setSummary(null);
     setProgress(null);
     setTranslating(true);
     try {
+      // Traduz com o provider que esta na tela, nao com o ultimo gravado.
+      if (!(await saveSettings())) return;
       const result = await invoke<TranslateSummary>("translate_project", { projectDir });
       setSummary(result);
       await runValidation(); // erros aparecem antes de qualquer reinsercao
     } catch (e) {
-      setError(String(e));
+      setTranslateError(String(e));
     } finally {
       setTranslating(false);
       setProgress(null);
@@ -902,7 +914,9 @@ export default function ProjectView({
           )}
           <div className="actions">
             <button onClick={saveSettings}>{t("translate.saveSettings")}</button>
-            <button onClick={testProvider}>{t("translate.test")}</button>
+            <button onClick={testProvider} disabled={testing || translating}>
+              {testing ? t("translate.testing") : t("translate.test")}
+            </button>
             {translating ? (
               <button onClick={cancelTranslation}>{t("translate.cancel")}</button>
             ) : (
@@ -915,6 +929,11 @@ export default function ProjectView({
               </button>
             )}
           </div>
+          {translateError && (
+            <div className="error" role="alert">
+              <strong>{t("common.error")}:</strong> {translateError}
+            </div>
+          )}
           {testResult && <div className="ok">{testResult}</div>}
           {translating && (
             <div className="progress-row">
