@@ -1156,3 +1156,58 @@ só acrescentando e atualizando.
 tirada sozinha derruba exatamente um teste, e `extract_project` sem a chamada
 derruba sete. Na fixture, 432 entries do scan cru viram 21 (`removed` 411) e a
 segunda extração não tira nada.
+
+## 2026-10-12 — Teto em caracteres: o que a tradução copia do original entra pelo custo; memória que não cabe não é usada
+
+**Contexto:** revisão do `6ae4bcc` (o commit que pôs `maxChars` no pedido e fez
+do estouro um erro). Dos 7 achados, o Rhuan mandou corrigir os dois primeiros.
+
+**Achado 1 — o teto ignorava o que o original já tem de código de controle.**
+`chars_that_fit` converte o espaço em bytes pelo pior caso da tabela, mas o
+modelo conta `[FIM]` como 5 caracteres e ele custa 1 byte. `HELLO[FIM]` (6
+bytes) ia com teto 6 pra um original de 10; como o prompt manda preservar o
+código, sobrava 1 caractere pro texto. E uma string que é só o código, numa
+tabela com algum caractere de 2 bytes, ia com teto 0.
+
+**Decisão:** `TblTable::chars_that_fit_keeping(espaço, copiados)`. O pipeline
+passa `validate::extract_tokens(original)` — a mesma lista que a validação
+exige de volta — e cada item entra pelos bytes que custa (`encode` dele
+sozinho) e pelos caracteres que tem; o resto do espaço segue a conta de
+sempre. A garantia continua: se a tradução copia os códigos e respeita o
+número, cabe. O que a tabela não escreve sozinho (`{0}` numa tabela só de
+letras) fica fora da conta e continua gastando o teto — erra pra menos. O
+prompt passou a dizer que os códigos copiados contam no `maxChars`.
+
+**O que NÃO mudou no achado 1:** dupla de letras num byte só (`th`) segue sem
+aumentar o teto. Uma tradução em outro idioma não comprime como o original, e
+qualquer número acima do pior caso deixaria de ser garantia.
+
+**Achado 2 — a memória de tradução furava o limite.** O acerto de memória em
+entry de tabela só era conferido contra os caracteres da tabela. Tradução
+maior que o espaço (memória global de um projeto sem tabela, ou resposta
+antiga que estourou e foi pra memória do projeto) era gravada sem o provider
+ser consultado com o teto, e virava erro de validação.
+
+**Decisão:** `pipeline::table_accepts(entry, tabela, texto)` — a conta da
+validação (`encode_slot`: caracteres, espaço e sobra de largura fixa). Acerto
+que não passa não é usado e a frase vai pro provider. String com ponteiro em
+tabela segue sem teto, igual ao `maxChars`.
+
+**Alternativa recusada no achado 2:** deixar de gravar na memória do projeto a
+resposta que estoura. Não precisa: com o filtro ela nunca mais é servida onde
+não cabe, e a mesma resposta ainda serve a uma entry de outro encoding no
+mesmo projeto. E mexeria no laço da resposta do provider, onde a repergunta —
+se um dia for construída — vai morar.
+
+**Prova:** `tests/table_limit.rs` (4 testes, sem ROM: banco, tabela escrita à
+mão e entries codificadas por ela) e 1 unitário em `tbl.rs`. Mutação, num
+clone isolado: com o teto de volta pra `chars_that_fit`, os 2 testes de código
+de controle falham; com a memória conferida só contra os caracteres, os 2 de
+memória falham.
+
+**Achados da revisão que ficaram abertos** (não foram pedidos): o prompt diz
+"Shorter is always fine", falso em string de largura fixa numa tabela sem
+espaço; edição manual de entry de tabela alimenta a memória global; a exceção
+de "realocável" pra texto de tabela não tem caminho real nem teste de ida e
+volta; e não há repergunta do que estoura (decisão registrada acima, medida
+com modelo capaz).
