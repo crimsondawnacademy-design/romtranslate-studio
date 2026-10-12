@@ -50,20 +50,27 @@ export default function App() {
     }
   }, []);
 
-  const openProjectDir = useCallback(async (dir: string) => {
-    setError(null);
-    try {
-      const report = await invoke<OpenProjectReport>("open_project", { dir });
-      const warning: MessageId | null = !report.sourceFound
-        ? "project.sourceMissing"
-        : report.sourceChanged
-          ? "project.sourceChanged"
-          : null;
-      setScreen({ kind: "project", project: report.project, projectDir: dir, warning });
-    } catch (e) {
-      setError(String(e));
-    }
+  /** Entra no projeto ja aberto, com o aviso de origem sumida ou alterada. */
+  const showProject = useCallback((report: OpenProjectReport, dir: string) => {
+    const warning: MessageId | null = !report.sourceFound
+      ? "project.sourceMissing"
+      : report.sourceChanged
+        ? "project.sourceChanged"
+        : null;
+    setScreen({ kind: "project", project: report.project, projectDir: dir, warning });
   }, []);
+
+  const openProjectDir = useCallback(
+    async (dir: string) => {
+      setError(null);
+      try {
+        showProject(await invoke<OpenProjectReport>("open_project", { dir }), dir);
+      } catch (e) {
+        setError(String(e));
+      }
+    },
+    [showProject],
+  );
 
   async function pickFile() {
     const path = await open({ multiple: false, directory: false });
@@ -101,7 +108,22 @@ export default function App() {
     if (!report.best) return;
     setError(null);
     setBusy(true);
+    const projectDir = defaultProjectDir(report.path);
     try {
+      // A pasta ja tem projeto DESTE arquivo (mesmo SHA-256): segue nele em vez
+      // de errar. Se for de outro arquivo, nao entra — as traducoes de la nao
+      // servem pra este jogo.
+      const existing = await invoke<OpenProjectReport>("open_project", {
+        dir: projectDir,
+      }).catch(() => null);
+      if (existing) {
+        if (existing.project.sourceSha256 === report.sha256) {
+          showProject(existing, projectDir);
+        } else {
+          setError(t("project.otherGame", { dir: projectDir }));
+        }
+        return;
+      }
       const project = await invoke<GameProject>("create_project", {
         args: {
           sourcePath: report.path,
@@ -109,7 +131,7 @@ export default function App() {
           adapterId: report.best.adapterId,
           sourceLanguage: sourceLanguage || null,
           targetLanguage,
-          projectDir: defaultProjectDir(report.path),
+          projectDir,
         },
       });
       setScreen({ kind: "created", project });

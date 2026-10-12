@@ -31,6 +31,8 @@ const messages = {
     "support.experimental": "Experimental",
     "support.unsupported": "Não suportado",
     "project.create": "Criar projeto",
+    "project.otherGame":
+      "Já existe um projeto em {dir}, mas de outro arquivo de jogo (o conteúdo é diferente). Abra-o por \"Abrir projeto\", ou mova ou renomeie essa pasta para criar um novo.",
     "project.creating": "Criando projeto...",
     "project.sourceLanguage": "Idioma de origem",
     "project.targetLanguage": "Idioma de destino",
@@ -215,6 +217,8 @@ const messages = {
     "support.experimental": "Experimental",
     "support.unsupported": "Unsupported",
     "project.create": "Create project",
+    "project.otherGame":
+      "A project already exists at {dir}, but for a different game file (the content differs). Open it with \"Open project\", or move or rename that folder to create a new one.",
     "project.creating": "Creating project...",
     "project.sourceLanguage": "Source language",
     "project.targetLanguage": "Target language",
