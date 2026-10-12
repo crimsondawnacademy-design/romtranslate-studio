@@ -93,6 +93,13 @@ que gera binários para macOS (Apple Silicon e Intel), Windows e Linux.
 - **Raio-X.** Botão na extração. Mostra blocos LZ77 tipo 0x10 e quantas frases
   estão presas neles, quanto do arquivo é denso (comprimido ou cifrado) e
   quantas strings extraídas têm ponteiro em tabela.
+- **Filtro de "parece texto" (12/10).** A maior parte das sequências
+  imprimíveis de um jogo é gráfico, código e tabela. A regra
+  `scan::looks_like_text` descarta isso antes do teto de 100 mil strings, e a
+  tela diz quantas saíram. No Escanear é a caixa "Só o que parece texto"
+  (ligada); na extração estruturada é sempre. String com ponteiro em tabela
+  nunca é descartada. Projeto antigo fica com o lixo que já tinha: decisão em
+  aberto no `.ctx/STATE.md`, passo 1a.
 
 Texto lido por tabela **é regravado** no jogo desde 12/10: o scan guarda a
 tabela em `<projeto>/tables/<id>.tbl` e a validação e a reinserção codificam
@@ -140,11 +147,14 @@ Em 12/10 o mantenedor foi perguntado e não confirmou. A v0.1.2, quando sair,
 leva também a busca relativa e o Raio-X (`401457f`). Não crie a tag sem ele
 dizer.
 
-### 3.2 Prioridade 1: nada foi testado em jogo real
+### 3.2 Prioridade 1: quase nada foi testado em jogo real
 
 Todo teste usa arquivos sintéticos gerados por código (`crates/core/src/synth.rs`).
-Eles provam a mecânica, não o comportamento em jogo de verdade. Perguntas em
-aberto, na ordem em que eu mediria:
+Eles provam a mecânica, não o comportamento em jogo de verdade. A única
+medição em jogo real é de 12/10: a EXTRAÇÃO de um GBA de 16 MiB, só em
+contagens (187.162 sequências, 17.936 depois do filtro, 1.590 com ponteiro em
+tabela — números completos no `.ctx/STATE.md`). Tradução e reinserção nunca
+rodaram num jogo real. Perguntas em aberto, na ordem em que eu mediria:
 
 1. Quantas frases de um jogo real ficam em tabela que o app reconhece? Ponteiro
    solto no meio do código e, no PS1, endereço montado em duas instruções não
@@ -217,7 +227,8 @@ A interface é uma casca fina sobre comandos. Tudo no core é testável com
 
 **Adapter de plataforma.** Cada plataforma implementa o trait `GameAdapter`
 (`adapter.rs`): `probe` (devolve confiança de 0 a 1 e evidências legíveis),
-`list_resources`, `extract_structured`, `apply_text` e `verify`. O que o
+`list_resources`, `extract` (com `extract_structured` pronto por cima),
+`apply_text` e `verify`. O que o
 adapter sabe fazer é declarado em `capabilities()`. O registro fica em
 `adapters/mod.rs`, do formato mais específico para o mais genérico. O guia para
 escrever um adapter é `docs/ADAPTERS.md`.
@@ -229,9 +240,10 @@ escrever um adapter é `docs/ADAPTERS.md`.
    track de dados (`cue.rs`).
 2. `project::create_project` cria a pasta `.rtsproj` (manifesto, banco SQLite e
    subpastas). A ROM **nunca** é copiada: guardam-se o caminho e o hash.
-3. Extração: o scanner genérico (`scan.rs`) serve para descoberta;
-   `extract_structured` do adapter produz entradas (`TextEntry`) com o limite
-   real de bytes e, quando acha tabela, os ponteiros.
+3. Extração: o scanner genérico (`scan.rs`) serve para descoberta; `extract`
+   do adapter produz entradas (`TextEntry`) com o limite real de bytes e,
+   quando acha tabela, os ponteiros. Ele descarta o que não parece texto e
+   devolve quantas descartou (`Extraction`).
 4. `pipeline::run_translation` consulta a memória de tradução do projeto,
    depois a global, e manda o resto ao provedor em lotes, com nova tentativa e
    cancelamento. Os provedores ficam em `providers/`.

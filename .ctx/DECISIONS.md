@@ -771,3 +771,107 @@ próxima parede do fluxo de tabela.
 **Não conferido:** a interface no app compilado (só typecheck, lint, build e
 paridade do i18n — o aviso chega pelo mesmo canal dos outros, como texto do
 core); modelo maior; jogo real.
+
+## 2026-10-12 — "Parece texto": uma regra só, antes do teto, calibrada num jogo real
+
+**Contexto:** primeira medição em jogo real (GBA, 16 MiB, dump do Rhuan, só
+contagens). O scanner ASCII acha 187.162 sequências de 4+ caracteres; o app
+cortava em 20.000 e 82% delas eram tile, código e tabela. O texto de verdade
+ficava depois do corte. Com o provider do Codex, cada lote de lixo gasta o
+limite da assinatura.
+
+**Decisão 1 — uma regra, em `scan::looks_like_text`.** A do Raio-X
+(`likely_text`: 5+ caracteres, 70% de letras e espaços, 4 caracteres
+diferentes) saiu de lá e virou esta; o Raio-X chama a mesma. Medida no dump,
+ela deixava passar 31.632 sequências, muitas de tile: os bytes 0x44 a 0x77 de
+gráfico 4bpp são letras. (Os exemplos abaixo são inventados, com a cara do
+que apareceu — nenhum byte do jogo entra no repositório.) A regra nova:
+
+| condição | o que derruba |
+|---|---|
+| 70% de letras e espaços (era assim) | tile e tabela com dígito e símbolo |
+| variedade: 4 caracteres diferentes (2 ou 3 nas curtas) e nenhum passando de metade | "UUUUDDDD", "ffffwfff" |
+| caixa coerente por palavra: MAIÚSCULA, minúscula ou Capitalizada | "wgUfVw" |
+| 1 vogal a cada 8 letras (y conta) | "wwgfvwgf" |
+| até 4 caracteres: só letras | "x8Fp", "3333" |
+
+Resultado no dump: 16.711 passam (era 31.632). De 2.398 frases longas com
+palavras comuns do inglês, 2.397 passam — a mesma que a regra antiga perdia.
+
+**Armadilha evitada:** exigir 5+ caracteres apaga o menu ("SAVE", "ITEM").
+Curta agora passa se for uma palavra limpa. No dump são 926 de 82.413
+sequências de 4 caracteres, quase todas ainda lixo (quatro letras de tile em
+maiúsculas passam) — o preço de não perder palavra de menu de 4 letras.
+
+**O que foi medido e recusado** (todas com o mesmo dump):
+
+- tolerar 1 palavra de caixa quebrada a cada 16 caracteres: +1.256
+  sequências, todas lixo na amostra. Custo de recusar: "McCoy" não passa;
+- vogal a partir de 20%: tira mais lixo, mas leva palavra real de uma vogal
+  só em seis letras;
+- ignorar pontuação nas pontas ("HP:", "...Yes?"): +9,5 mil de lixo;
+- ignorar pontuação e dígito nas pontas: +23 mil;
+- tirar placeholder (`{0}`, `%d`) antes de medir: +181, sem salvar frase.
+
+**Decisão 2 — string com ponteiro em tabela nunca é descartada**
+(`scan::keep_text`). No dump, 1.590 strings têm ponteiro e 1.225 delas não
+passam na regra: são rótulos internos, com dígito e sublinhado (do tipo
+"MAPA_07_A1"). Ponteiro é evidência mais forte que aparência.
+
+**Decisão 3 — a extração estruturada filtra sempre, sem opção.** Ela existe
+pra reinserção: entry de lixo ali é tradução gravada por cima de gráfico ou de
+código. O scanner genérico ganhou `ScanConfig::only_text`, desligado no core
+(ninguém que não pediu recebe resultado diferente) e ligado por padrão na
+interface. Custo assumido: uma string real que a regra descarta não tem como
+ser reinserida; ela aparece no Escanear sem filtro, que não regrava.
+
+**Decisão 4 — o trait ganhou `extract`, que devolve `Extraction`**
+(entries + `discarded` + `truncated`). `extract_structured` continua
+existindo, pronto, devolvendo só as entries — as ~60 chamadas em teste não
+mudaram.
+
+| opção | por que não |
+|---|---|
+| mudar o retorno de `extract_structured` | ~60 chamadas em teste pra carregar dois números que só a interface lê |
+| contar por fora, com um segundo scan | só vale no GBA; nos adapters de disco o scan é por arquivo |
+| não contar | regra do projeto: nada é descartado em silêncio |
+
+**Decisão 5 — onde o filtro roda em cada adapter.**
+
+- sem ponteiros (NES, SNES, GameCube, PS2, PSP): no scanner (`only_text`),
+  antes do teto;
+- com ponteiros (GBA, NDS, PS1): varre, marca os ponteiros, `keep_text`, teto.
+  No GBA a varredura é sem teto (pico de ~100 MB num cartucho de 16 MiB, uma
+  `TextEntry` por sequência crua). No NDS e no PS1 isso não cabe (arquivo de
+  vídeo ou de som dá milhões de sequências), então o teto corta as sequências
+  cruas de cada arquivo e a extração sai marcada `truncated`. Os dois limites
+  estão em comentário `ponytail:` no código;
+- NDS: o filtro vem depois do desempate ASCII×UTF-16. Antes, a leitura UTF-16
+  falsa do lixo ganharia o trecho, sem a leitura ASCII pra cobri-lo.
+
+**Decisão 6 — o teto subiu de 20 mil pra 100 mil** (`scan::MAX_ENTRIES`, um
+só; eram quatro cópias de `20_000`). Medido com 100 mil entries: JSON de
+28 MB, 0,07 s pra serializar, 0,2 s pra gravar no banco, 0,2 s pra reler. A
+tabela da interface desenha 500 linhas por vez. O jogo medido fica em 17.936
+depois do filtro: a 10% do teto antigo, e um cartucho de 32 MiB passaria.
+Não virou campo na interface: valor que ninguém mexe é ruído. `ScanOutcome`
+continua com `truncated`, e a tela avisa.
+
+**Consequência no Raio-X:** a estimativa de texto preso em blocos LZ77 do
+mesmo jogo caiu de ~10.150 frases em 279 blocos pra 1.674 em 231. A regra
+antiga contava tile como frase. O Raio-X agora conta o que a extração leria
+(mínimo de 4 caracteres, mesma regra). Isso muda o peso da Camada D.
+
+**Fora desta decisão, de propósito:** extrair de novo um projeto antigo não
+apaga as entries de lixo que já estão no banco (o upsert só acrescenta e
+atualiza). Apagar linha do projeto do usuário é decisão do Rhuan. Hoje a tela
+diz que o que já estava continua na lista, e o caminho é um projeto novo.
+
+**Limites:** um jogo, em inglês; a regra de caixa e a de vogal só pesam no
+alfabeto latino (kana e kanji passam como letra, então UTF-16 falso do DS
+também passa); "Lv.99", "HP: 12/30" e "Nooooo!" caem.
+
+**Prova:** `tests/text_filter.rs` (5), mais 1 unitário em `scan.rs` e 1 em
+`gba.rs`. Mutação: teto antes do filtro no scanner, teto antes do filtro no
+GBA, `keep_text` sem a exceção do ponteiro e a regra antiga de 5+ caracteres
+— cada uma derruba pelo menos um teste.
