@@ -141,9 +141,12 @@ cuja letra base a tabela não tem) é erro que diz qual caractere e em que
 posição — nunca um byte inventado. Limites: isso está provado de ponta a
 ponta numa fixture sintética de NES com um provider de mentira, não em jogo
 real; as outras plataformas in-place usam o mesmo caminho, mas não têm teste
-com tabela. Com um modelo de verdade só há medição num modelo local pequeno
-(`llama3.2:3b`, as 7 frases da fixture): nenhuma pontuação fora da tabela, e
-4 respostas ainda vieram com acento e foram gravadas sem ele. A troca só
+com tabela. Com modelo de verdade há duas medições, nas 7 frases da fixture.
+Num modelo local pequeno (`llama3.2:3b`): nenhuma pontuação fora da tabela, e
+3 ou 4 das 7 respostas ainda vieram com acento e foram gravadas sem ele (nas
+6 rodadas em que isso foi contado). No ChatGPT pelo Codex CLI (modelo padrão
+do Codex em 12/10/2026, `gpt-6-astra`): nenhum acento e nenhum caractere fora
+da tabela, em 7 rodadas. A troca só
 cobre letra latina acentuada num caractere só (`á`, `ç`, `É`); tradução
 escrita à mão não é mexida.
 
@@ -156,13 +159,26 @@ nunca mais do que cabe, às vezes menos. Quem decide se cabe é a validação,
 que mede em bytes da tabela: tradução maior que o espaço é **erro** na frase
 (antes era aviso, e a recusa só aparecia na reinserção), com os dois
 tamanhos. O app **não corta** texto: a tradução fica inteira no projeto até
-você encurtar. O que foi medido: o limite no pedido não fez o `llama3.2:3b`
-caber. Sem ele, as 7 traduções passavam do espaço; com ele, 6 de 7
-continuaram passando nas 4 rodadas (somando as 7 frases, 17 a 26
-caracteres a mais, contra 30), e a única que coube perdeu parte do sentido. Modelo maior não foi medido — conte com o
-erro de validação e com encurtar à mão. Limite conhecido: string de largura
-fixa numa tabela sem espaço precisa do tamanho exato, e o pedido só diz o
-máximo. E a sobra de
+você encurtar, e não pergunta de novo ao modelo as frases que passaram.
+
+O que foi medido, nas 7 frases da fixture (inglês para pt-BR, tabela de 1
+byte por caractere, só letras e espaço):
+
+| Modelo | Pedido | Rodadas | Maiores que o espaço | Caracteres a mais, somando as 7 |
+|---|---|---|---|---|
+| ChatGPT pelo Codex CLI (`gpt-6-astra`) | com o limite | 4 | 0 de 7 nas 4 | 0 |
+| ChatGPT pelo Codex CLI (`gpt-6-astra`) | sem o limite | 3 | 7 de 7 nas 3 | 26 a 30 |
+| `llama3.2:3b` (Ollama local) | com o limite | 7 | 5 a 7 de 7 | 17 a 43 |
+| `llama3.2:3b` (Ollama local) | sem o limite | 3 | 7 de 7 nas 3 | 30 a 42 |
+
+No modelo capaz é o limite que faz caber. No modelo de 3B ele não basta: a
+diferença entre ter e não ter o limite fica dentro da variação de uma rodada
+pra outra — ali conte com o erro de validação e com encurtar à mão. Caber
+não é traduzir bem: `CONTINUE` (8 de espaço) voltou do Codex sem traduzir nas
+4 rodadas, porque `CONTINUAR` tem 9. Não medido: jogo real, diálogo longo, tabela com
+caractere de 2 bytes, outro par de idiomas, outro modelo. Limite conhecido:
+string de largura fixa numa tabela sem espaço precisa do tamanho exato, e o
+pedido só diz o máximo. E a sobra de
 uma tradução mais curta vira `0x00` quando o byte depois da string original
 é `0x00` (senão é preenchida com o espaço da tabela) — jogo com outro
 terminador pede conferência no emulador.
@@ -254,6 +270,10 @@ cargo test -p romtranslate-core --test translate -- --ignored --nocapture
 # a mesma, com o texto numa tabela de caracteres (mostra o que o modelo
 # respondeu, o que foi gravado, quantas passaram do espaço e os avisos):
 cargo test -p romtranslate-core --test table_translate -- --ignored --nocapture
+# a mesma medição com o ChatGPT pelo Codex CLI logado (gasta a cota da conta;
+# só as 7 frases sintéticas saem da máquina). TABLE_TEST_NO_LIMIT=1 manda o
+# pedido sem o espaço de cada frase, pra comparar:
+TABLE_TEST_PROVIDER=codex cargo test -p romtranslate-core --test table_translate -- --ignored --nocapture
 ```
 
 ## Arquitetura

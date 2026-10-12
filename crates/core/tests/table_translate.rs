@@ -609,22 +609,65 @@ async fn warning_goes_away_when_the_translation_is_edited() {
     assert_eq!(dropped(&dir), 0);
 }
 
-/// Prova de fogo com Ollama REAL: o que um modelo de verdade responde quando
+/// Repassa o pedido sem o `maxChars`: o controle "sem limite" da medicao.
+struct NoLimit<'a>(&'a dyn TranslationProvider);
+
+#[async_trait]
+impl TranslationProvider for NoLimit<'_> {
+    fn id(&self) -> &'static str {
+        self.0.id()
+    }
+
+    async fn translate_batch(&self, request: &TranslationRequest) -> Result<TranslationResponse> {
+        let mut request = request.clone();
+        for item in &mut request.items {
+            item.max_chars = None;
+        }
+        self.0.translate_batch(&request).await
+    }
+
+    async fn health_check(&self) -> Result<()> {
+        self.0.health_check().await
+    }
+}
+
+/// Prova de fogo com modelo REAL: o que um modelo de verdade responde quando
 /// recebe a lista de caracteres e o espaco de cada frase. Roda manual:
 /// `cargo test -p romtranslate-core --test table_translate -- --ignored --nocapture`
 /// Requer `ollama serve` ativo e o modelo em OLLAMA_TEST_MODEL (default llama3.2:3b).
+/// Com `TABLE_TEST_PROVIDER=codex` quem responde e o Codex CLI logado (gasta
+/// a cota da conta; modelo em CODEX_TEST_MODEL, vazio = o padrao do Codex).
+/// Com `TABLE_TEST_NO_LIMIT=1` o pedido vai sem o espaco de cada frase, pra
+/// comparar.
 #[tokio::test]
 #[ignore]
-async fn real_ollama_is_told_the_table_characters() {
+async fn real_model_is_told_the_table_characters() {
+    use romtranslate_core::providers::codex_cli::CodexCliProvider;
     use romtranslate_core::providers::ollama::OllamaProvider;
 
-    let model = std::env::var("OLLAMA_TEST_MODEL").unwrap_or_else(|_| "llama3.2:3b".to_string());
-    let provider = OllamaProvider::new("http://localhost:11434", &model, 300).unwrap();
-    provider.health_check().await.expect("ollama fora do ar?");
+    let codex = std::env::var("TABLE_TEST_PROVIDER").as_deref() == Ok("codex");
+    let (provider, model): (Box<dyn TranslationProvider>, String) = if codex {
+        let model = std::env::var("CODEX_TEST_MODEL").unwrap_or_default();
+        let provider = CodexCliProvider::new("codex", &model, 180).unwrap();
+        (Box::new(provider), format!("codex {model}"))
+    } else {
+        let model =
+            std::env::var("OLLAMA_TEST_MODEL").unwrap_or_else(|_| "llama3.2:3b".to_string());
+        let provider = OllamaProvider::new("http://localhost:11434", &model, 300).unwrap();
+        (Box::new(provider), model)
+    };
+    let unlimited = NoLimit(provider.as_ref());
+    let no_limit = std::env::var_os("TABLE_TEST_NO_LIMIT").is_some();
+    let provider: &dyn TranslationProvider = if no_limit {
+        &unlimited
+    } else {
+        provider.as_ref()
+    };
+    provider.health_check().await.expect("provider fora do ar?");
 
     let tmp = TempDir::new("real");
     let (dir, _) = tmp.scanned_project();
-    let summary = translate(&dir, None, &provider).await;
+    let summary = translate(&dir, None, provider).await;
     eprintln!("summary: {summary:?}");
     assert_eq!(summary.failed, 0, "{summary:?}");
 
@@ -651,7 +694,10 @@ async fn real_ollama_is_told_the_table_characters() {
         .filter(|i| i.kind == IssueKind::ByteOverflow)
         .count();
     eprintln!(
-        "{model}: {} erros e {} avisos em {} frases; {too_long} maiores que o espaco",
-        report.errors, report.warnings, report.checked
+        "{model}{}: {} erros e {} avisos em {} frases; {too_long} maiores que o espaco",
+        if no_limit { " SEM limite" } else { "" },
+        report.errors,
+        report.warnings,
+        report.checked
     );
 }
