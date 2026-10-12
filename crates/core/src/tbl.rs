@@ -174,6 +174,22 @@ impl TblTable {
             .unwrap_or(0)
     }
 
+    /// `chars_that_fit` pra uma traducao obrigada a copiar `kept` do original
+    /// (codigos de controle, placeholders). O modelo conta "[FIM]" como 5
+    /// caracteres e ele custa 1 byte: sem esta conta, "HELLO[FIM]" (6 bytes)
+    /// viraria um teto de 6 caracteres pra um original de 10, e so o codigo
+    /// gastaria 5. Cada item de `kept` entra pelos bytes que custa e pelos
+    /// caracteres que tem; o resto do espaco segue a conta pela entrada mais
+    /// cara. O que a tabela nao escreve fica fora e continua gastando o teto:
+    /// pra menos, nunca pra mais.
+    pub fn chars_that_fit_keeping(&self, slot: usize, kept: &[String]) -> usize {
+        let (bytes, chars) = kept
+            .iter()
+            .filter_map(|token| Some((self.encode(token).ok()?.len(), token.chars().count())))
+            .fold((0, 0), |(bytes, chars), (b, c)| (bytes + b, chars + c));
+        self.chars_that_fit(slot.saturating_sub(bytes)) + chars
+    }
+
     /// `text` com cada letra acentuada que a tabela nao escreve trocada pela
     /// letra sem acento ('ç' -> 'c', 'É' -> 'E') — so quando a tabela tem
     /// essa letra. `None` = nada a trocar. Caractere sem troca fica como veio
@@ -455,6 +471,44 @@ mod tests {
         }
         // So entrada de texto vazio: nada cabe.
         assert_eq!(TblTable::parse("00=\n").unwrap().chars_that_fit(10), 0);
+    }
+
+    #[test]
+    fn copied_control_codes_count_by_what_they_cost() {
+        let table = TblTable::parse("80=A\n81=B\n40= \nFE=[FIM]\nFD=[NOME]\n").unwrap();
+        let kept =
+            |tokens: &[&str]| -> Vec<String> { tokens.iter().map(|t| t.to_string()).collect() };
+        // Sem nada pra copiar e a conta de sempre.
+        assert_eq!(
+            table.chars_that_fit_keeping(6, &[]),
+            table.chars_that_fit(6)
+        );
+        // "ABABA[FIM]": 6 bytes, 10 caracteres — o teto e o proprio original.
+        assert_eq!(table.chars_that_fit_keeping(6, &kept(&["[FIM]"])), 10);
+        assert_eq!(
+            table.chars_that_fit_keeping(7, &kept(&["[NOME]", "[FIM]"])),
+            16
+        );
+        // Placeholder que a tabela escreve letra a letra custa o que tem; o
+        // que ela nao escreve ("{0}") fica fora da conta.
+        assert_eq!(table.chars_that_fit_keeping(6, &kept(&["AB"])), 6);
+        assert_eq!(table.chars_that_fit_keeping(6, &kept(&["{0}"])), 6);
+
+        // Caractere de 2 bytes na tabela: o codigo nao paga por ele, e uma
+        // string que e so o codigo nao vira teto zero.
+        let wide = TblTable::parse("80=A\n81=B\nFF21=!\nFE=[FIM]\n").unwrap();
+        assert_eq!(wide.chars_that_fit(1), 0);
+        assert_eq!(wide.chars_that_fit_keeping(1, &kept(&["[FIM]"])), 5);
+        assert_eq!(wide.chars_that_fit_keeping(6, &kept(&["[FIM]"])), 7);
+        // O que o numero promete, o codificador cumpre no pior texto.
+        for slot in 1..12 {
+            let fit = wide.chars_that_fit_keeping(slot, &kept(&["[FIM]"]));
+            let text = "!".repeat(fit - 5) + "[FIM]";
+            assert!(
+                wide.encode(&text).unwrap().len() <= slot,
+                "{text:?} em {slot}"
+            );
+        }
     }
 
     #[test]

@@ -158,7 +158,15 @@ espaço da original é o teto. A tradução por IA recebe esse teto em cada
 frase, em caracteres (`maxChars`), com a instrução de que é limite duro. O
 número é contado pela entrada mais cara da tabela: numa tabela de 1 byte por
 caractere é o próprio espaço; se algum caractere custa 2 bytes, é a metade —
-nunca mais do que cabe, às vezes menos. Quem decide se cabe é a validação,
+nunca mais do que cabe, às vezes menos. Código de controle ou placeholder
+que a tradução tem de copiar do original (`[FIM]`, `{0}`) entra pelo que
+custa em bytes, não pelos caracteres que o modelo conta: se `[FIM]` é 1
+byte, `HELLO[FIM]` (6 bytes) vai com teto de 10 caracteres, não 6. Dupla de
+letras num byte só (`th`) continua sem aumentar o teto. A memória de
+tradução passa pela mesma conta: tradução guardada que não cabe no espaço
+da frase (veio de outro projeto, ou de uma resposta antiga que estourou)
+não é usada, e a frase vai para o provider com o teto. Quem decide se cabe
+é a validação,
 que mede em bytes da tabela: tradução maior que o espaço é **erro** na frase
 (antes era aviso, e a recusa só aparecia na reinserção), com os dois
 tamanhos. O app **não corta** texto: a tradução fica inteira no projeto até

@@ -10,11 +10,13 @@ use chrono::Utc;
 use serde::Serialize;
 use tracing::{info, warn};
 
+use crate::adapters::inplace::terminated;
 use crate::db::{GlobalTm, ProjectDb};
 use crate::error::Result;
 use crate::provider::{BatchItem, GlossaryTerm, TranslationProvider, TranslationRequest};
 use crate::tbl::{ProjectTables, TblTable};
 use crate::types::{TextEncoding, TextEntry, TranslationStatus};
+use crate::validate::extract_tokens;
 
 #[derive(Debug, Clone)]
 pub struct TranslateOptions {
@@ -99,15 +101,11 @@ pub async fn run_translation(
                 hit = global.tm_lookup(&entry.source_text, &src_lang, &opts.target_language)?;
             }
         }
-        // Memoria que a tabela nao escreve nem sem os acentos (veio de texto
-        // de outro encoding) nao serve: o provider recebe a lista de
-        // caracteres e responde algo que cabe.
-        let hit = hit.filter(|hit| {
-            table.is_none_or(|table| {
-                let fitted = table.drop_missing_accents(hit);
-                table.encode(fitted.as_deref().unwrap_or(hit)).is_ok()
-            })
-        });
+        // Memoria que a tabela nao escreve nem sem os acentos, ou que nao
+        // cabe no espaco desta string (veio de texto de outro encoding, de
+        // outro projeto ou de uma resposta que estourou), nao serve: o
+        // provider recebe a lista de caracteres e o teto, e responde de novo.
+        let hit = hit.filter(|hit| table.is_none_or(|table| table_accepts(&entry, table, hit)));
         if let Some(hit) = hit {
             save_translation(db, &entry, &hit, table)?;
             summary.tm_hits += 1;
@@ -146,10 +144,17 @@ pub async fn run_translation(
                     max_bytes: e.max_bytes,
                     // Texto de tabela sem ponteiro em tabela so e gravado no
                     // lugar: o espaco da original e o teto, e o modelo
-                    // precisa saber dele.
+                    // precisa saber dele. O que a traducao e obrigada a
+                    // copiar do original (codigo de controle, placeholder)
+                    // entra pelo que custa, nao pelo que o modelo conta.
                     max_chars: table
                         .filter(|_| e.pointer_offsets().is_empty())
-                        .map(|table| table.chars_that_fit(e.original_bytes.len())),
+                        .map(|table| {
+                            table.chars_that_fit_keeping(
+                                e.original_bytes.len(),
+                                &extract_tokens(&e.source_text),
+                            )
+                        }),
                 })
                 .collect(),
             source_language: opts.source_language.clone(),
@@ -223,6 +228,18 @@ fn table_id(entry: &TextEntry) -> Option<&str> {
         TextEncoding::Table(id) => Some(id),
         _ => None,
     }
+}
+
+/// A reinsercao aceita `text` no lugar desta entry de tabela? A tabela tem que
+/// escreve-lo (sem os acentos que faltam) e, se a string so e gravada no
+/// lugar, ele tem que caber no espaco dela — a conta da validacao, sobra de
+/// largura fixa inclusive.
+fn table_accepts(entry: &TextEntry, table: &TblTable, text: &str) -> bool {
+    let fitted = table.drop_missing_accents(text);
+    let slot = entry.original_bytes.len();
+    table
+        .encode_slot(fitted.as_deref().unwrap_or(text), slot, terminated(entry))
+        .is_ok_and(|bytes| bytes.len() <= slot || !entry.pointer_offsets().is_empty())
 }
 
 /// Grava a traducao automatica da entry. Texto de tabela passa antes pela

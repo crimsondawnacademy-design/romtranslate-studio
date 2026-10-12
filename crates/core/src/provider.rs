@@ -115,7 +115,7 @@ pub fn build_system_prompt(req: &TranslationRequest) -> String {
     if req.items.iter().any(|item| item.max_chars.is_some()) {
         p.push_str(
             "Length limit (STRICT): each text has a fixed space in the game.\n\
-             - \"maxChars\" is the maximum number of characters of that item's translation, spaces included: a longer translation cannot be stored in the game.\n\
+             - \"maxChars\" is the maximum number of characters of that item's translation, counting spaces and the placeholders and control codes copied from the source: a longer translation cannot be stored in the game.\n\
              - If the natural translation is longer, use shorter words or drop words until it fits. Shorter is always fine.\n",
         );
     }
