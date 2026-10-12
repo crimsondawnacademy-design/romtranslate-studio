@@ -17,6 +17,13 @@ use crate::types::{TextEncoding, TextEntry, TranslationStatus};
 // cartucho (GBA max 32 MiB). Scan streaming entra com plataformas de disco.
 pub const MAX_SCAN_FILE_SIZE: u64 = 64 * 1024 * 1024;
 
+/// Teto de entries de uma extracao (scanner e adapters). Era 20 mil. Medido em
+/// 12/10/2026 com 100 mil entries: JSON de 28 MB, 0,2 s pra gravar no banco e
+/// 0,2 s pra reler — a interface desenha 500 linhas por vez, entao o gargalo
+/// nao e este numero. O jogo real medido tem ~18 mil strings depois do filtro
+/// `only_text` e 187 mil sem ele.
+pub const MAX_ENTRIES: usize = 100_000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ScanEncoding {
@@ -40,6 +47,10 @@ pub struct ScanConfig {
     pub region_end: Option<u64>,
     /// Corte de seguranca para a UI nao afogar.
     pub max_entries: usize,
+    /// Descarta o que nao parece texto (`looks_like_text`) ANTES de contar
+    /// `max_entries`; o total descartado sai em `ScanOutcome::discarded`.
+    /// Desligado por padrao: o scanner cru e a ferramenta de descoberta.
+    pub only_text: bool,
 }
 
 impl Default for ScanConfig {
@@ -50,7 +61,8 @@ impl Default for ScanConfig {
             min_chars: 4,
             region_start: None,
             region_end: None,
-            max_entries: 20_000,
+            max_entries: MAX_ENTRIES,
+            only_text: false,
         }
     }
 }
@@ -62,6 +74,9 @@ pub struct ScanOutcome {
     /// true = parou em max_entries; ha mais strings alem das retornadas.
     pub truncated: bool,
     pub scanned_bytes: u64,
+    /// Sequencias que o filtro `only_text` descartou, ate onde a varredura foi.
+    #[serde(default)]
+    pub discarded: usize,
     /// A tabela que este scan leu (encoding `Table`). Em `scan_project` e a
     /// copia do projeto — a que vale dali em diante.
     #[serde(default)]
@@ -84,6 +99,7 @@ pub fn scan_file(path: &Path, config: &ScanConfig) -> Result<ScanOutcome> {
         path = %path.display(),
         encoding = ?config.encoding,
         entries = outcome.entries.len(),
+        discarded = outcome.discarded,
         truncated = outcome.truncated,
         "scan concluido"
     );
@@ -148,8 +164,14 @@ pub fn scan_bytes(data: &[u8], config: &ScanConfig) -> Result<ScanOutcome> {
 
     let mut entries = Vec::new();
     let mut truncated = false;
+    let mut discarded = 0;
     for run in runs {
         if run.chars < config.min_chars {
+            continue;
+        }
+        // Antes do teto: ele conta so o que sobra do filtro.
+        if config.only_text && !looks_like_text(&run.text) {
+            discarded += 1;
             continue;
         }
         if entries.len() >= config.max_entries {
@@ -181,11 +203,78 @@ pub fn scan_bytes(data: &[u8], config: &ScanConfig) -> Result<ScanOutcome> {
         entries,
         truncated,
         scanned_bytes: (end - start) as u64,
+        discarded,
         tbl_path: match config.encoding {
             ScanEncoding::Table => config.tbl_path.clone(),
             _ => None,
         },
     })
+}
+
+/// Parece texto de jogo, e nao tile, codigo ou tabela que por acaso caiu em
+/// byte imprimivel? Regra unica do core: o filtro do scanner, a extracao
+/// estruturada e o Raio-X usam esta.
+///
+/// Calibrada em 12/10/2026 num jogo real de GBA (16 MiB, so contagens): das
+/// 187.162 sequencias ASCII de 4+ caracteres passam 16.711, e de 2.398 frases
+/// longas com palavras comuns do ingles passam 2.397. Cada condicao derruba um
+/// tipo de lixo medido la:
+/// - 70% de letras e espacos: tile e tabela misturam digito e simbolo;
+/// - letras variadas e nenhuma passando de metade: "UUUUDDDD", "ffffwfff";
+/// - caixa coerente por palavra (MAIUSCULA, minuscula ou Capitalizada): byte
+///   solto alterna caixa ("wgUfVw"), palavra nao;
+/// - 1 vogal a cada 8 letras: "wwgfvwgf" nao tem nenhuma.
+///
+/// String curta (ate 4) so passa se for uma palavra limpa — "SAVE", "Yes",
+/// "No", "HP". Menu de jogo e feito disso, e exigir 5+ caracteres (a regra
+/// que o Raio-X usava) apagaria todas.
+///
+/// E heuristica e erra: "McCoy" quebra a caixa, "Lv.99" e "HP: 12/30" tem
+/// simbolo demais, "Nooooo!" repete demais. Por isso quem descarta com ela
+/// diz quantas descartou, e string com ponteiro em tabela nem passa por ela
+/// (`keep_text`): ponteiro e evidencia mais forte que aparencia. Letra aqui e
+/// a do Unicode (kana e kanji contam); caixa e vogal so pesam no alfabeto
+/// latino.
+pub fn looks_like_text(text: &str) -> bool {
+    let chars: Vec<char> = text.chars().collect();
+    let n = chars.len();
+    let letters = chars.iter().filter(|c| c.is_alphabetic()).count();
+    let spaces = chars.iter().filter(|c| **c == ' ').count();
+    if n < 2 || (letters + spaces) * 10 < n * 7 || (n <= 4 && letters != n) {
+        return false;
+    }
+
+    let mut sorted = chars.clone();
+    sorted.sort_unstable();
+    let (mut distinct, mut top) = (0, 0);
+    for same in sorted.chunk_by(|a, b| a == b) {
+        distinct += 1;
+        top = top.max(same.len());
+    }
+    if distinct < (n - 1).clamp(2, 4) || (n >= 5 && top * 2 > n) {
+        return false;
+    }
+
+    let odd_case = chars.split(|c| !c.is_alphabetic()).any(|word| {
+        let lower_tail = word.iter().skip(1).all(|c| !c.is_uppercase());
+        let no_lower = word.iter().all(|c| !c.is_lowercase());
+        !lower_tail && !no_lower
+    });
+    let ascii = chars.iter().filter(|c| c.is_ascii_alphabetic()).count();
+    let vowels = chars
+        .iter()
+        .filter(|c| "aeiouyAEIOUY".contains(**c))
+        .count();
+    !odd_case && (ascii < 4 || vowels * 8 >= ascii)
+}
+
+/// Tira de `entries` o que nao parece texto e devolve quantas sairam. Entry
+/// com ponteiro em tabela fica sempre. E o filtro dos adapters que so acham
+/// os ponteiros depois de varrer; quem nao tem ponteiro usa `only_text`.
+pub fn keep_text(entries: &mut Vec<TextEntry>) -> usize {
+    let before = entries.len();
+    entries.retain(|e| !e.pointers().is_empty() || looks_like_text(&e.source_text));
+    before - entries.len()
 }
 
 /// Run bruto achado por um scanner, relativo ao inicio da janela.
@@ -383,4 +472,41 @@ fn table_runs(data: &[u8], table: &TblTable) -> Vec<Run> {
         });
     }
     runs
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rule_keeps_phrases_and_menu_words_and_drops_tile_like_runs() {
+        for text in [
+            "Welcome to the village",
+            "GAME OVER",
+            "You got the Flame Lantern!",
+            "SAVE",
+            "ITEM",
+            "Yes",
+            "No",
+            "HP",
+            "あいうえお",
+        ] {
+            assert!(looks_like_text(text), "{text}");
+        }
+        for text in [
+            "3333DDDD3333",     // tile 4bpp imprimivel
+            "\"\"\"\"\"\"\"\"", // um caractere so
+            "UUUUUUUUfVUE",     // um caractere passa de metade
+            "wgUfVwEd",         // caixa alternando dentro da palavra
+            "wwgfvwgf",         // nenhuma vogal
+            "x8Fp",             // curta com digito
+            "DDDD",             // curta sem variedade
+            "Hi!",              // curta com pontuacao
+            "MAPA_07_A1",       // identificador: so fica se tiver ponteiro
+            "A",
+            "",
+        ] {
+            assert!(!looks_like_text(text), "{text}");
+        }
+    }
 }

@@ -39,7 +39,9 @@ Prefere compilar do código? Veja [Rodando](#rodando).
   RTSF);
 - **Extração**: scanner genérico (ASCII, UTF-8, UTF-16 LE/BE, tabelas `.tbl`)
   para descoberta + extração estruturada com limites reais nos adapters que a
-  suportam;
+  suportam. Sequência de bytes imprimíveis que não parece texto (gráfico,
+  código, tabela) é descartada antes do teto de 100 mil strings, e a tela diz
+  quantas foram;
 - **Busca relativa**: jogo de cartucho quase nunca usa ASCII. Digite uma
   palavra que você sabe que aparece no jogo e o app descobre onde o alfabeto
   dele começa e monta o `.tbl` (letras e espaço; números e pontuação você
@@ -92,6 +94,33 @@ O export escolhe o formato sozinho: **IPS** quando cabe (máxima
 compatibilidade) e **BPS** para arquivos maiores ou que encolhem — o BPS ainda
 valida por CRC-32 que o patch está sendo aplicado no arquivo certo. Partições
 de disco Wii são cifradas: extração exigiria keys, que este projeto não inclui.
+
+**Lixo que parece texto**: num cartucho, a maior parte dos bytes imprimíveis
+não é texto — é gráfico, código e tabela. Num jogo real de GBA de 16 MiB
+medido em 12/10/2026 (só contagens; nenhum byte de jogo entra neste
+repositório), o scanner ASCII achou 187.162 sequências de 4 ou mais
+caracteres. Com o filtro ficam 17.936 e 169.226 são descartadas. Antes o app
+parava nas 20 mil primeiras, das quais só 3.124 passam no filtro; as outras
+14.812 que ficam estavam depois do corte, fora da lista.
+
+A regra (`looks_like_text`, em `crates/core/src/scan.rs`) olha a proporção de
+letras, a variedade, a caixa de cada palavra e se há vogais; palavra curta de
+menu ("SAVE", "Yes", "HP") passa. String com ponteiro em tabela nunca é
+descartada. No **Escanear** o filtro é a caixa "Só o que parece texto", ligada
+por padrão: desmarque para ver tudo. A **Extração estruturada** filtra sempre,
+porque o que ela devolve é regravado no jogo — lixo ali é tradução gravada por
+cima de gráfico ou de código. Limites:
+
+- é heurística, e erra: perde "McCoy" (caixa no meio da palavra), "Lv.99" e
+  "HP: 12/30" (símbolo demais) e "Nooooo!" (repetição demais). Uma string real
+  que a regra descarta aparece no Escanear sem filtro, mas esse caminho não
+  regrava no jogo;
+- foi calibrada num jogo só, em inglês;
+- extrair de novo um projeto antigo não tira dele o lixo que já estava lá.
+  Para uma lista limpa, crie um projeto novo: a memória de tradução devolve o
+  que já foi traduzido;
+- no Nintendo DS, a leitura UTF-16 falsa de um trecho binário passa pela regra
+  (para ela, kanji é letra).
 
 **Texto fora do alcance do scanner**: extração vazia não prova que o jogo tem
 pouco texto. Se ele usa tabela de caracteres própria, a **busca relativa**
@@ -195,8 +224,9 @@ Fixtures sintéticas para testar sem ROM real:
 
 ```bash
 cargo run -p romtranslate-core --example gen_fixtures
-# gera 19 arquivos em fixtures/generated/ — um por plataforma, mais os de
-# tabela de ponteiros, tabela de caracteres própria e texto comprimido
+# gera 20 arquivos em fixtures/generated/ — um por plataforma, mais os de
+# tabela de ponteiros, tabela de caracteres própria, texto comprimido e lixo
+# imprimível antes do texto
 ```
 
 Testes e checks:
@@ -220,7 +250,7 @@ crates/core/         # tudo testável sem UI
   src/adapter.rs     # trait GameAdapter (probe/extract/apply/verify)
   src/adapters/      # rtsf (referência completa), gba, nds, nes, snes, gamecube,
                      # ps1, ps2, psp; wii e wiiu só detectam
-  src/scan.rs        # scanner genérico (Camada A)
+  src/scan.rs        # scanner genérico (Camada A) + a regra de "parece texto"
   src/tbl.rs         # tabelas .tbl: leem o jogo e regravam a tradução
   src/relative.rs    # busca relativa: descobre a tabela de caracteres
   src/xray.rs        # raio-X: o que o app não lê (comprimido, denso, sem ponteiro)

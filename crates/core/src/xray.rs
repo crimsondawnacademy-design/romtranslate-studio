@@ -14,7 +14,7 @@ use crate::error::Result;
 use crate::fileio::read_view;
 use crate::lz77;
 use crate::project::load_project;
-use crate::scan::ascii_texts;
+use crate::scan::{ascii_texts, looks_like_text, ScanConfig};
 use crate::types::TextEntry;
 
 const BLOCK: usize = 4096;
@@ -37,7 +37,8 @@ pub struct Lz77Block {
     pub offset: u64,
     pub packed_len: u64,
     pub unpacked_len: u64,
-    /// Strings com cara de texto dentro do bloco descomprimido.
+    /// Strings com cara de texto (`scan::looks_like_text`) dentro do bloco
+    /// descomprimido.
     pub strings: usize,
 }
 
@@ -120,20 +121,6 @@ fn density(data: &[u8]) -> (u64, u64) {
     (dense, blank)
 }
 
-/// Texto de verdade, nao tile 4bpp que por acaso e imprimivel ("3333DDDD").
-fn likely_text(text: &str) -> bool {
-    let bytes = text.as_bytes();
-    let wordy = bytes
-        .iter()
-        .filter(|b| b.is_ascii_alphabetic() || **b == b' ')
-        .count();
-    let mut seen = [false; 128];
-    for &b in bytes {
-        seen[(b & 0x7F) as usize] = true;
-    }
-    bytes.len() >= 5 && wordy * 10 >= bytes.len() * 7 && seen.iter().filter(|&&s| s).count() >= 4
-}
-
 // ponytail: so offsets multiplos de 4 — o BIOS exige a origem alinhada
 // (GBATEK), e e o que derruba falso positivo. Bloco guardado desalinhado
 // dentro de um arquivo proprio do jogo passa batido. So o tipo 0x10; o 0x11
@@ -154,9 +141,12 @@ fn scan_lz77(data: &[u8], mut budget: usize) -> Lz77Summary {
             at += 4;
             continue;
         };
+        // O mesmo que a extracao leria se o bloco nao estivesse comprimido:
+        // o minimo de caracteres padrao do scanner e a regra de texto dele.
+        let min_chars = ScanConfig::default().min_chars;
         let strings = ascii_texts(&block.data)
             .iter()
-            .filter(|t| likely_text(t))
+            .filter(|t| t.len() >= min_chars && looks_like_text(t))
             .count();
         summary.blocks += 1;
         summary.packed_bytes += block.packed_len as u64;
@@ -179,15 +169,6 @@ fn scan_lz77(data: &[u8], mut budget: usize) -> Lz77Summary {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn tile_like_runs_do_not_count_as_text() {
-        assert!(likely_text("Welcome to the village"));
-        assert!(likely_text("GAME OVER"));
-        assert!(!likely_text("3333DDDD3333"));
-        assert!(!likely_text("\"\"\"\"\"\"\"\""));
-        assert!(!likely_text("Hi!"));
-    }
 
     #[test]
     fn budget_exhaustion_is_reported_not_hidden() {

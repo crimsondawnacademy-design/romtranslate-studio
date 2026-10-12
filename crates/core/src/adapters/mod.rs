@@ -14,7 +14,13 @@ pub mod snes;
 pub mod wii;
 pub mod wiiu;
 
+use std::path::Path;
+
+use serde::Serialize;
+
 use crate::adapter::GameAdapter;
+use crate::db::ProjectDb;
+use crate::error::{CoreError, Result};
 
 /// Registry dos adapters compilados no workspace (spec: sem plugin loading
 /// dinamico no MVP). Ordem: magics fortes primeiro, heuristicos por ultimo.
@@ -36,4 +42,34 @@ pub fn all() -> Vec<Box<dyn GameAdapter>> {
 
 pub fn find(id: &str) -> Option<Box<dyn GameAdapter>> {
     all().into_iter().find(|a| a.id() == id)
+}
+
+/// O que a extracao estruturada de um projeto deixou no banco e o que ela
+/// deixou de fora.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractOutcome {
+    pub saved: usize,
+    /// Sequencias descartadas por nao parecerem texto.
+    pub discarded: usize,
+    /// A varredura parou no teto: pode haver mais texto.
+    pub truncated: bool,
+}
+
+/// Extracao estruturada do arquivo de origem de um projeto, gravada no banco.
+/// O upsert e por id (`scan-<offset>` nos adapters que varrem), entao extrair
+/// de novo atualiza limites e ponteiros e mantem as traducoes ja feitas.
+/// Entry antiga que a extracao nao devolve mais continua no banco.
+pub fn extract_project(project_dir: &Path) -> Result<ExtractOutcome> {
+    let game = crate::project::load_project(project_dir)?;
+    let adapter = find(&game.adapter_id)
+        .ok_or_else(|| CoreError::Project(format!("adapter {} nao existe", game.adapter_id)))?;
+    // mmap: DVD de PS2 (>2 GiB) extrai sem carregar o arquivo em RAM.
+    let data = crate::fileio::read_view(&game.source_path)?;
+    let extraction = adapter.extract(&data)?;
+    Ok(ExtractOutcome {
+        saved: ProjectDb::open(project_dir)?.upsert_entries(&extraction.entries)?,
+        discarded: extraction.discarded,
+        truncated: extraction.truncated,
+    })
 }

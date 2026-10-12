@@ -7,9 +7,9 @@
 //! resource_path) e reinsercao in-place conservadora funcionam. Sem checksum
 //! de disco a recalcular.
 
-use crate::adapter::{AppliedImage, GameAdapter, GameInput, VerificationReport};
+use crate::adapter::{AppliedImage, Extraction, GameAdapter, GameInput, VerificationReport};
 use crate::error::{CoreError, Result};
-use crate::scan::{scan_bytes, ScanConfig, ScanEncoding};
+use crate::scan::{scan_bytes, ScanConfig, ScanEncoding, MAX_ENTRIES as MAX_TEXT_ENTRIES};
 use crate::types::{
     AdapterCapabilities, Platform, ProbeResult, ResourceDescriptor, SupportLevel, TextEntry,
 };
@@ -25,7 +25,6 @@ const HEADER_MIN: usize = 0x440;
 const ENTRY_SIZE: usize = 12;
 const MAX_ENTRIES: usize = 65_536;
 const MAX_NAME: usize = 256;
-const MAX_TEXT_ENTRIES: usize = 20_000;
 
 fn err(msg: impl Into<String>) -> CoreError {
     CoreError::Project(format!("gamecube: {}", msg.into()))
@@ -198,7 +197,7 @@ impl GameAdapter for GameCubeAdapter {
 
     /// Scan ASCII por arquivo do filesystem (e no header, onde vive o titulo),
     /// com `resource_path` e limite real por string (in-place).
-    fn extract_structured(&self, data: &[u8]) -> Result<Vec<TextEntry>> {
+    fn extract(&self, data: &[u8]) -> Result<Extraction> {
         let files = self.list_resources(data)?;
         let mut regions: Vec<(String, u64, u64)> =
             vec![("boot.bin".to_string(), 0, HEADER_MIN as u64)];
@@ -209,7 +208,7 @@ impl GameAdapter for GameCubeAdapter {
                 .map(|f| (f.path.clone(), f.offset, f.offset + f.size)),
         );
 
-        let mut entries: Vec<TextEntry> = Vec::new();
+        let mut out = Extraction::default();
         for (path, start, end) in regions {
             let outcome = scan_bytes(
                 data,
@@ -217,21 +216,24 @@ impl GameAdapter for GameCubeAdapter {
                     encoding: ScanEncoding::Ascii,
                     region_start: Some(start),
                     region_end: Some(end),
-                    max_entries: MAX_TEXT_ENTRIES - entries.len(),
+                    max_entries: MAX_TEXT_ENTRIES - out.entries.len(),
+                    only_text: true,
                     ..ScanConfig::default()
                 },
             )?;
+            out.discarded += outcome.discarded;
             for mut e in outcome.entries {
                 e.resource_path = Some(path.clone());
                 e.max_bytes = Some(e.original_bytes.len());
                 e.context = Some("in-place: traducao limitada ao espaco original".to_string());
-                entries.push(e);
+                out.entries.push(e);
             }
-            if entries.len() >= MAX_TEXT_ENTRIES {
+            if out.entries.len() >= MAX_TEXT_ENTRIES {
+                out.truncated = true;
                 break;
             }
         }
-        Ok(entries)
+        Ok(out)
     }
 
     fn apply_text(&self, data: &[u8], entries: &[TextEntry]) -> Result<AppliedImage> {

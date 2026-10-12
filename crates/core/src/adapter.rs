@@ -85,6 +85,19 @@ pub struct AppliedImage {
     pub report: ApplyReport,
 }
 
+/// Resultado da extracao estruturada: as entries e, em numero, o que ficou
+/// de fora — nada e descartado em silencio.
+#[derive(Debug, Clone, Default)]
+pub struct Extraction {
+    pub entries: Vec<TextEntry>,
+    /// Sequencias descartadas por nao parecerem texto
+    /// (`scan::looks_like_text`). String com ponteiro em tabela nunca entra
+    /// aqui.
+    pub discarded: usize,
+    /// A varredura parou num teto (`scan::MAX_ENTRIES`): pode haver mais texto.
+    pub truncated: bool,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationReport {
@@ -119,8 +132,16 @@ pub trait GameAdapter: Send + Sync {
     }
 
     /// Extracao estruturada (offsets/ponteiros/limites reais) — Camada B.
-    fn extract_structured(&self, _data: &[u8]) -> Result<Vec<TextEntry>> {
+    /// Quem varre bytes atras de texto descarta o que nao parece texto e conta
+    /// (`Extraction::discarded`): entry de lixo aqui e traducao gravada por
+    /// cima de tile ou de codigo.
+    fn extract(&self, _data: &[u8]) -> Result<Extraction> {
         unsupported(self.id(), "extracao estruturada")
+    }
+
+    /// So as entries de `extract`.
+    fn extract_structured(&self, data: &[u8]) -> Result<Vec<TextEntry>> {
+        Ok(self.extract(data)?.entries)
     }
 
     /// Serializa traducoes numa NOVA imagem (checksums/ponteiros atualizados).

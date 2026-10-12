@@ -14,7 +14,9 @@
 //! Slots fixos: ASCII null-terminated, zero-padded. Ponteiros: offsets
 //! absolutos para strings null-terminated dentro do blob.
 
-use crate::adapter::{AppliedImage, ApplyReport, GameAdapter, GameInput, VerificationReport};
+use crate::adapter::{
+    AppliedImage, ApplyReport, Extraction, GameAdapter, GameInput, VerificationReport,
+};
 use crate::error::{CoreError, Result};
 use crate::types::{
     AdapterCapabilities, Platform, ProbeResult, SupportLevel, TextEncoding, TextEntry,
@@ -208,7 +210,9 @@ impl GameAdapter for RtsfAdapter {
         }
     }
 
-    fn extract_structured(&self, data: &[u8]) -> Result<Vec<TextEntry>> {
+    /// Formato declarado: cada string vem de um campo ou de um ponteiro, nao
+    /// de varredura — nao ha o que filtrar.
+    fn extract(&self, data: &[u8]) -> Result<Extraction> {
         let layout = parse_layout(data)?;
         let mut entries = Vec::new();
 
@@ -252,7 +256,10 @@ impl GameAdapter for RtsfAdapter {
                 metadata: serde_json::json!({"kind": "relocatable", "index": i}),
             });
         }
-        Ok(entries)
+        Ok(Extraction {
+            entries,
+            ..Extraction::default()
+        })
     }
 
     fn apply_text(&self, data: &[u8], entries: &[TextEntry]) -> Result<AppliedImage> {

@@ -16,9 +16,9 @@ use super::pointers::{
     ensure_pointers_untouched, file_relative_tables, mark_relocatable, relocate, to_file_relative,
     Relocation,
 };
-use crate::adapter::{AppliedImage, GameAdapter, GameInput, VerificationReport};
+use crate::adapter::{AppliedImage, Extraction, GameAdapter, GameInput, VerificationReport};
 use crate::error::{CoreError, Result};
-use crate::scan::{scan_bytes, ScanConfig, ScanEncoding};
+use crate::scan::{keep_text, scan_bytes, ScanConfig, ScanEncoding, MAX_ENTRIES};
 use crate::types::{
     AdapterCapabilities, Platform, ProbeResult, ResourceDescriptor, SupportLevel, TextEntry,
 };
@@ -42,7 +42,6 @@ const FILE_ALIGN: usize = 0x200;
 pub const LOGO_CRC_EXPECTED: u16 = 0xCF56;
 const MAX_FILES: usize = 8192;
 const MAX_DIRS: u16 = 2048;
-const MAX_ENTRIES_TOTAL: usize = 20_000;
 
 /// CRC-16 (poly refletido 0xA001, init 0xFFFF) — o CRC usado pelo header NDS.
 pub fn crc16(data: &[u8]) -> u16 {
@@ -402,7 +401,17 @@ impl GameAdapter for NdsAdapter {
 
     /// Scanner ASCII + UTF-16LE por arquivo do filesystem (e no header, onde
     /// vive o titulo), com `resource_path` dizendo de onde cada string veio.
-    fn extract_structured(&self, data: &[u8]) -> Result<Vec<TextEntry>> {
+    ///
+    /// Por arquivo: desempate das duas leituras, ponteiros, e so entao o
+    /// filtro de "parece texto". Filtrar antes do desempate traria o lixo de
+    /// volta — sem a leitura ASCII pra cobrir o trecho, a leitura UTF-16
+    /// falsa do mesmo lixo ("CJK") ganharia. E string com ponteiro em tabela
+    /// nao e descartada.
+    // ponytail: o teto corta as sequencias CRUAS de cada arquivo (as
+    // TextEntry dele existem antes do filtro); arquivo que passa disso sai
+    // marcado `truncated`. E a regra nao separa UTF-16 falso de kanji: os
+    // dois sao "letra". Falta um ROM real de DS pra calibrar isso.
+    fn extract(&self, data: &[u8]) -> Result<Extraction> {
         let files = self.list_resources(data)?;
         let mut regions: Vec<(String, u64, u64)> =
             vec![("header".to_string(), 0, HEADER_LEN as u64)];
@@ -413,15 +422,12 @@ impl GameAdapter for NdsAdapter {
                 .map(|f| (f.path.clone(), f.offset, f.offset + f.size)),
         );
 
-        let mut entries: Vec<TextEntry> = Vec::new();
-        // (inicio, fim, faixa de entries) de cada ARQUIVO — o header nao e
-        // arquivo da FAT e nao reloca.
-        let mut spans: Vec<(usize, usize, std::ops::Range<usize>)> = Vec::new();
+        let mut out = Extraction::default();
         for (path, start, end) in regions {
-            let first = entries.len();
-            let remaining = MAX_ENTRIES_TOTAL - entries.len();
-            let scan = |encoding| {
-                scan_bytes(
+            let remaining = MAX_ENTRIES - out.entries.len();
+            let mut cut = false;
+            let mut scan = |encoding| {
+                let outcome = scan_bytes(
                     data,
                     &ScanConfig {
                         encoding,
@@ -430,47 +436,47 @@ impl GameAdapter for NdsAdapter {
                         max_entries: remaining,
                         ..ScanConfig::default()
                     },
-                )
-                .map(|o| o.entries)
+                )?;
+                cut |= outcome.truncated;
+                Ok::<_, CoreError>(outcome.entries)
             };
             let mut found =
                 resolve_encoding_overlaps(scan(ScanEncoding::Ascii)?, scan(ScanEncoding::Utf16Le)?);
-            found.truncate(remaining);
-            for mut e in found {
+            for e in found.iter_mut() {
                 e.resource_path = Some(path.clone());
                 e.max_bytes = Some(e.original_bytes.len());
                 e.context = Some("in-place: traducao limitada ao espaco original".to_string());
-                entries.push(e);
             }
+            // O header nao e arquivo da FAT e nao reloca.
             if path != "header" {
-                spans.push((start as usize, end as usize, first..entries.len()));
+                let (start, len) = (start as usize, (end - start) as usize);
+                let tables = file_relative_tables(
+                    &data[start..start + len],
+                    &found,
+                    |abs| abs.checked_sub(start).filter(|&r| r < len),
+                    |rel| (rel < len).then_some(start + rel),
+                );
+                for (i, pointers) in tables {
+                    let e = &mut found[i];
+                    if mark_relocatable(e, &pointers) {
+                        e.max_bytes = None;
+                        e.context = Some(format!(
+                            "realocavel: {} ponteiro(s) em tabela no arquivo — se nao couber, o \
+                             arquivo cresce",
+                            pointers.len()
+                        ));
+                    }
+                }
             }
-            if entries.len() >= MAX_ENTRIES_TOTAL {
+            out.discarded += keep_text(&mut found);
+            out.truncated |= cut || found.len() >= remaining;
+            found.truncate(remaining);
+            out.entries.append(&mut found);
+            if out.entries.len() >= MAX_ENTRIES {
                 break;
             }
         }
-
-        for (start, end, range) in spans {
-            let len = end - start;
-            let found = file_relative_tables(
-                &data[start..end],
-                &entries[range.clone()],
-                |abs| abs.checked_sub(start).filter(|&r| r < len),
-                |rel| (rel < len).then_some(start + rel),
-            );
-            for (i, pointers) in found {
-                let e = &mut entries[range.start + i];
-                if mark_relocatable(e, &pointers) {
-                    e.max_bytes = None;
-                    e.context = Some(format!(
-                        "realocavel: {} ponteiro(s) em tabela no arquivo — se nao couber, o \
-                         arquivo cresce",
-                        pointers.len()
-                    ));
-                }
-            }
-        }
-        Ok(entries)
+        Ok(out)
     }
 
     fn apply_text(&self, data: &[u8], entries: &[TextEntry]) -> Result<AppliedImage> {

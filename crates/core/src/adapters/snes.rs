@@ -7,7 +7,7 @@
 //! SOMA CANONICA do corpo (copier header fora; resto espelhado quando o
 //! tamanho nao e potencia de 2).
 
-use crate::adapter::{AppliedImage, GameAdapter, GameInput, VerificationReport};
+use crate::adapter::{AppliedImage, Extraction, GameAdapter, GameInput, VerificationReport};
 use crate::error::{CoreError, Result};
 use crate::scan::{scan_bytes, ScanConfig, ScanEncoding};
 use crate::types::{AdapterCapabilities, Platform, ProbeResult, SupportLevel, TextEntry};
@@ -218,7 +218,7 @@ impl GameAdapter for SnesAdapter {
     }
 
     /// Extracao conservadora: scan ASCII com `max_bytes` = espaco original.
-    fn extract_structured(&self, data: &[u8]) -> Result<Vec<TextEntry>> {
+    fn extract(&self, data: &[u8]) -> Result<Extraction> {
         if find_header(data).is_none() {
             return Err(CoreError::Project(
                 "snes: header interno nao encontrado (LoROM/HiROM)".to_string(),
@@ -228,6 +228,7 @@ impl GameAdapter for SnesAdapter {
             data,
             &ScanConfig {
                 encoding: ScanEncoding::Ascii,
+                only_text: true,
                 ..ScanConfig::default()
             },
         )?;
@@ -236,7 +237,11 @@ impl GameAdapter for SnesAdapter {
             e.max_bytes = Some(e.original_bytes.len());
             e.context = Some("in-place: traducao limitada ao espaco original".to_string());
         }
-        Ok(entries)
+        Ok(Extraction {
+            entries,
+            discarded: outcome.discarded,
+            truncated: outcome.truncated,
+        })
     }
 
     /// In-place + recalculo do par checksum/complement do header interno.

@@ -5,7 +5,7 @@
 //! use o scanner com tabela `.tbl`; o in-place cobre os que guardam texto ASCII.
 //! iNES nao tem checksum de header: nada a recalcular.
 
-use crate::adapter::{AppliedImage, GameAdapter, GameInput, VerificationReport};
+use crate::adapter::{AppliedImage, Extraction, GameAdapter, GameInput, VerificationReport};
 use crate::error::{CoreError, Result};
 use crate::scan::{scan_bytes, ScanConfig, ScanEncoding};
 use crate::types::{AdapterCapabilities, Platform, ProbeResult, SupportLevel, TextEntry};
@@ -81,7 +81,7 @@ impl GameAdapter for NesAdapter {
 
     /// Extracao conservadora: scan ASCII com `max_bytes` = espaco original.
     /// Ids identicos aos do scanner generico — sem duplicatas no projeto.
-    fn extract_structured(&self, data: &[u8]) -> Result<Vec<TextEntry>> {
+    fn extract(&self, data: &[u8]) -> Result<Extraction> {
         if data.len() < HEADER_LEN || &data[0..4] != MAGIC {
             return Err(CoreError::Project(
                 "nes: arquivo sem header iNES valido".to_string(),
@@ -91,6 +91,7 @@ impl GameAdapter for NesAdapter {
             data,
             &ScanConfig {
                 encoding: ScanEncoding::Ascii,
+                only_text: true,
                 ..ScanConfig::default()
             },
         )?;
@@ -99,7 +100,11 @@ impl GameAdapter for NesAdapter {
             e.max_bytes = Some(e.original_bytes.len());
             e.context = Some("in-place: traducao limitada ao espaco original".to_string());
         }
-        Ok(entries)
+        Ok(Extraction {
+            entries,
+            discarded: outcome.discarded,
+            truncated: outcome.truncated,
+        })
     }
 
     fn apply_text(&self, data: &[u8], entries: &[TextEntry]) -> Result<AppliedImage> {

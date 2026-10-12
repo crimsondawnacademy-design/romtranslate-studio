@@ -293,6 +293,11 @@ code {
   color: var(--muted);
 }
 
+.scan-controls .checkline {
+  flex-direction: row;
+  margin: 0 0 8px;
+}
+
 .scan-controls input[type="number"] {
   width: 90px;
 }

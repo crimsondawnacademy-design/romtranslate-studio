@@ -13,6 +13,7 @@ import {
 } from "./util";
 import {
   AppSettings,
+  ExtractOutcome,
   GameProject,
   GlossaryTerm,
   PLATFORM_NAMES,
@@ -68,11 +69,15 @@ export default function ProjectView({
   onBack,
 }: ProjectViewProps) {
   const [entries, setEntries] = useState<TextEntry[]>([]);
-  const [scanInfo, setScanInfo] = useState<{ found: number; truncated: boolean } | null>(
-    null,
-  );
+  const [scanInfo, setScanInfo] = useState<{
+    found: number;
+    truncated: boolean;
+    discarded: number;
+    structured: boolean;
+  } | null>(null);
   const [encoding, setEncoding] = useState<ScanEncoding>("ascii");
   const [minChars, setMinChars] = useState(4);
+  const [onlyText, setOnlyText] = useState(true);
   const [tblPath, setTblPath] = useState<string | null>(null);
   const [xray, setXray] = useState<XrayReport | null>(null);
   const [relWord, setRelWord] = useState("");
@@ -183,7 +188,7 @@ export default function ProjectView({
           minChars,
           regionStart: null,
           regionEnd: null,
-          maxEntries: 20000,
+          onlyText,
         },
       });
       await invoke<number>("save_entries", { projectDir, entries: outcome.entries });
@@ -192,7 +197,12 @@ export default function ProjectView({
         setTblPath(outcome.tblPath);
         setTblAdopted(true);
       }
-      setScanInfo({ found: outcome.entries.length, truncated: outcome.truncated });
+      setScanInfo({
+        found: outcome.entries.length,
+        truncated: outcome.truncated,
+        discarded: outcome.discarded,
+        structured: false,
+      });
       await reloadEntries();
     } catch (e) {
       setError(String(e));
@@ -255,8 +265,13 @@ export default function ProjectView({
     setError(null);
     setBusy(true);
     try {
-      const n = await invoke<number>("extract_structured", { projectDir });
-      setScanInfo({ found: n, truncated: false });
+      const outcome = await invoke<ExtractOutcome>("extract_structured", { projectDir });
+      setScanInfo({
+        found: outcome.saved,
+        truncated: outcome.truncated,
+        discarded: outcome.discarded,
+        structured: true,
+      });
       await reloadEntries();
     } catch (e) {
       setError(String(e));
@@ -541,6 +556,14 @@ export default function ProjectView({
             onChange={(e) => setMinChars(Number(e.target.value) || 1)}
           />
         </label>
+        <label className="checkline" title={t("extract.onlyTextHint")}>
+          <input
+            type="checkbox"
+            checked={onlyText}
+            onChange={(e) => setOnlyText(e.target.checked)}
+          />
+          {t("extract.onlyText")}
+        </label>
         {encoding === "table" && (
           <label>
             {t("extract.chooseTbl")}
@@ -658,8 +681,15 @@ export default function ProjectView({
       {scanInfo && (
         <div className="ok">
           {t("entries.saved", { n: scanInfo.found })}
-          {scanInfo.truncated && ` — ${t("extract.truncated", { n: 20000 })}`}
+          {scanInfo.truncated && ` — ${t("extract.truncated")}`}
         </div>
+      )}
+      {scanInfo && scanInfo.discarded > 0 && (
+        <p className="hint left">
+          {t(scanInfo.structured ? "extract.discardedStructured" : "extract.discarded", {
+            n: scanInfo.discarded,
+          })}
+        </p>
       )}
       {savedPath && <div className="ok">{t("export.saved", { path: savedPath })}</div>}
 

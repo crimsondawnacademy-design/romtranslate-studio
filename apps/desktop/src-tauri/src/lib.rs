@@ -186,19 +186,11 @@ async fn load_entries(project_dir: String) -> Result<Vec<TextEntry>, String> {
 // ---- Sprint 5: extracao estruturada + reinsercao ----
 
 #[tauri::command]
-async fn extract_structured(project_dir: String) -> Result<usize, String> {
-    blocking(move || {
-        let dir = PathBuf::from(&project_dir);
-        let game = project::load_project(&dir)?;
-        let adapter = romtranslate_core::adapters::find(&game.adapter_id).ok_or_else(|| {
-            romtranslate_core::CoreError::Project(format!("adapter {} nao existe", game.adapter_id))
-        })?;
-        // mmap: DVD de PS2 (>2 GiB) extrai sem carregar o arquivo em RAM.
-        let data = romtranslate_core::fileio::read_view(&game.source_path)?;
-        let entries = adapter.extract_structured(&data)?;
-        ProjectDb::open(&dir)?.upsert_entries(&entries)
-    })
-    .await
+async fn extract_structured(
+    project_dir: String,
+) -> Result<romtranslate_core::adapters::ExtractOutcome, String> {
+    blocking(move || romtranslate_core::adapters::extract_project(&PathBuf::from(project_dir)))
+        .await
 }
 
 #[tauri::command]

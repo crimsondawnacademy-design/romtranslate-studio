@@ -52,8 +52,14 @@ const messages = {
     "extract.scan": "Escanear",
     "extract.scanning": "Escaneando...",
     "extract.found": "{n} strings encontradas",
-    "extract.truncated":
-      "Resultado cortado em {n} entries — restrinja a região ou aumente o limite.",
+    "extract.truncated": "a varredura parou no teto: há mais sequências no arquivo além destas.",
+    "extract.onlyText": "Só o que parece texto",
+    "extract.onlyTextHint":
+      "Descarta tile, código e tabela que por acaso são bytes imprimíveis. Vale para o botão Escanear; desmarque para ver tudo.",
+    "extract.discarded":
+      "{n} sequências descartadas por não parecerem texto. Para ver tudo, desmarque “Só o que parece texto” e escaneie de novo. O que já estava no projeto continua na lista.",
+    "extract.discardedStructured":
+      "{n} sequências descartadas por não parecerem texto. A extração estruturada sempre filtra, porque o que ela devolve é regravado no jogo; string com ponteiro em tabela nunca é descartada. Para ver tudo, use Escanear com “Só o que parece texto” desmarcado. O que já estava no projeto continua na lista.",
     "extract.none": "Nenhuma string com essa configuração.",
     "extract.filter": "Filtrar texto...",
     "extract.showing": "Mostrando {shown} de {total}",
@@ -228,8 +234,14 @@ const messages = {
     "extract.scan": "Scan",
     "extract.scanning": "Scanning...",
     "extract.found": "{n} strings found",
-    "extract.truncated":
-      "Result cut at {n} entries — narrow the region or raise the limit.",
+    "extract.truncated": "the scan stopped at its limit: the file has more sequences than these.",
+    "extract.onlyText": "Only what looks like text",
+    "extract.onlyTextHint":
+      "Drops tiles, code and tables that happen to be printable bytes. Applies to the Scan button; untick it to see everything.",
+    "extract.discarded":
+      "{n} sequences dropped because they do not look like text. To see everything, untick “Only what looks like text” and scan again. Whatever was already in the project stays in the list.",
+    "extract.discardedStructured":
+      "{n} sequences dropped because they do not look like text. Structured extraction always filters, because what it returns is written back into the game; a string with a pointer in a table is never dropped. To see everything, use Scan with “Only what looks like text” unticked. Whatever was already in the project stays in the list.",
     "extract.none": "No strings with this configuration.",
     "extract.filter": "Filter text...",
     "extract.showing": "Showing {shown} of {total}",

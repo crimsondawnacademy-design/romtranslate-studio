@@ -24,7 +24,8 @@ pub trait GameAdapter: Send + Sync {
     fn probe(&self, input: &GameInput) -> ProbeResult;
 
     // Camada B — implemente SOMENTE o que a capability declara:
-    fn extract_structured(&self, data: &[u8]) -> Result<Vec<TextEntry>> { /* default: não suportado */ }
+    fn extract(&self, data: &[u8]) -> Result<Extraction> { /* default: não suportado */ }
+    // extract_structured(data) já vem pronto: são só as entries de extract.
     fn apply_text(&self, data: &[u8], entries: &[TextEntry]) -> Result<AppliedImage> { /* idem */ }
     fn verify(&self, data: &[u8]) -> Result<VerificationReport> { /* idem */ }
 }
@@ -56,9 +57,11 @@ pub trait GameAdapter: Send + Sync {
 - Retorne `ProbeResult::no_match(...)` quando não reconhecer — nunca erro.
 - Não use extensão de arquivo como prova; no máximo como desempate.
 
-## extract_structured — Camada B
+## extract — Camada B
 
-Cada `TextEntry` precisa carregar o suficiente para reinserção segura:
+`extract` devolve um `Extraction`: as entries e, em número, o que ficou de
+fora (`discarded`, `truncated`). Cada `TextEntry` precisa carregar o
+suficiente para reinserção segura:
 
 | campo | regra |
 |---|---|
@@ -71,6 +74,21 @@ Cada `TextEntry` precisa carregar o suficiente para reinserção segura:
 
 Se a plataforma tem tabela de ponteiros, modele-a explicitamente (veja o blob +
 ponteiros do RTSF). **Nunca** faça busca/substituição global de bytes.
+
+**Varreu bytes atrás de texto? Descarte o que não parece texto, e conte.**
+A maior parte das sequências imprimíveis de um jogo é gráfico, código e
+tabela; entry de lixo na extração estruturada é tradução gravada por cima
+disso. A regra é uma só (`scan::looks_like_text`) e o teto é um só
+(`scan::MAX_ENTRIES`):
+
+- sem ponteiros: passe `only_text: true` no `ScanConfig` — o scanner filtra
+  antes do teto e devolve `discarded`;
+- com ponteiros: varra, marque os ponteiros (`mark_relocatable`) e só então
+  chame `scan::keep_text`. String com ponteiro em tabela nunca é descartada, e
+  quem sabe disso é a entry já marcada;
+- some os descartes em `Extraction::discarded` e ligue `truncated` se parou
+  no teto. Nada sai em silêncio: a interface mostra os dois;
+- não mude o `id`: projeto existente guarda a tradução por ele.
 
 **Uma leitura por trecho de bytes.** Se você varre o mesmo trecho em dois
 encodings (o NDS faz ASCII + UTF-16LE), as leituras se sobrepõem — texto

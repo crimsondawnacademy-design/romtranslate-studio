@@ -81,15 +81,27 @@ export interface ScanConfig {
   minChars: number;
   regionStart: number | null;
   regionEnd: number | null;
-  maxEntries: number;
+  /** Sem valor, vale o teto do core. */
+  maxEntries?: number;
+  /** Descarta o que nao parece texto, antes do teto. */
+  onlyText: boolean;
 }
 
 export interface ScanOutcome {
   entries: TextEntry[];
   truncated: boolean;
   scannedBytes: number;
+  /** Sequencias que o filtro descartou por nao parecerem texto. */
+  discarded: number;
   /** Tabela que o scan leu: a copia em tables/ do projeto. */
   tblPath: string | null;
+}
+
+/** Extracao estruturada: sempre filtra o que nao parece texto. */
+export interface ExtractOutcome {
+  saved: number;
+  discarded: number;
+  truncated: boolean;
 }
 
 export interface OpenProjectReport {

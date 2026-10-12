@@ -6,7 +6,7 @@ use super::iso9660::{
     self, apply_iso, detect_map, extract_ascii_by_file, parse_pvd, read_file, walk, SectorMap,
 };
 use super::ps1::verify_iso;
-use crate::adapter::{AppliedImage, GameAdapter, GameInput, VerificationReport};
+use crate::adapter::{AppliedImage, Extraction, GameAdapter, GameInput, VerificationReport};
 use crate::error::{CoreError, Result};
 use crate::types::{
     AdapterCapabilities, Platform, ProbeResult, ResourceDescriptor, SupportLevel, TextEntry,
@@ -128,8 +128,8 @@ impl GameAdapter for PspAdapter {
         Ok(iso9660::to_resources(data, map, &files))
     }
 
-    fn extract_structured(&self, data: &[u8]) -> Result<Vec<TextEntry>> {
-        extract_ascii_by_file(data, detect_map(data))
+    fn extract(&self, data: &[u8]) -> Result<Extraction> {
+        extract_ascii_by_file(data, detect_map(data), false)
     }
 
     fn apply_text(&self, data: &[u8], entries: &[TextEntry]) -> Result<AppliedImage> {

@@ -17,9 +17,9 @@ use super::pointers::{
     ensure_pointers_untouched, find_pointer_tables, is_terminated, mark_relocatable, relocate,
     PointerFormat,
 };
-use crate::adapter::{AppliedImage, GameAdapter, GameInput, VerificationReport};
+use crate::adapter::{AppliedImage, Extraction, GameAdapter, GameInput, VerificationReport};
 use crate::error::{CoreError, Result};
-use crate::scan::{scan_bytes, ScanConfig, ScanEncoding};
+use crate::scan::{keep_text, scan_bytes, ScanConfig, ScanEncoding, MAX_ENTRIES};
 use crate::types::{AdapterCapabilities, Platform, ProbeResult, SupportLevel, TextEntry};
 
 pub struct GbaAdapter;
@@ -48,6 +48,56 @@ pub fn header_checksum(header: &[u8]) -> u8 {
         chk = chk.wrapping_sub(b);
     }
     chk.wrapping_sub(0x19)
+}
+
+/// A extracao, com o teto injetavel (o teste usa um pequeno).
+fn extract_capped(data: &[u8], cap: usize) -> Result<Extraction> {
+    if data.len() < HEADER_LEN {
+        return Err(CoreError::Project(
+            "gba: arquivo menor que o header do cartucho".to_string(),
+        ));
+    }
+    // ponytail: uma TextEntry por sequencia crua, ~0,5 KB cada — uns
+    // 100 MB de pico num cartucho de 16 MiB (187 mil sequencias), o dobro
+    // no de 32. Se pesar, filtrar no scanner com os offsets das tabelas
+    // achados numa passada anterior.
+    let outcome = scan_bytes(
+        data,
+        &ScanConfig {
+            encoding: ScanEncoding::Ascii,
+            max_entries: usize::MAX,
+            ..ScanConfig::default()
+        },
+    )?;
+    let mut entries = outcome.entries;
+    let starts: HashSet<usize> = entries
+        .iter()
+        .filter(|e| is_terminated(e))
+        .filter_map(|e| e.offset.map(|o| o as usize))
+        .collect();
+    let tables = find_pointer_tables(data, &ROM_POINTERS, &starts);
+
+    for e in entries.iter_mut() {
+        let pointers = e.offset.and_then(|o| tables.get(&(o as usize)));
+        if let Some(pointers) = pointers.filter(|p| mark_relocatable(e, p)) {
+            e.max_bytes = None;
+            e.context = Some(format!(
+                "realocavel: {} ponteiro(s) em tabela — nao precisa caber no espaco original",
+                pointers.len()
+            ));
+        } else {
+            e.max_bytes = Some(e.original_bytes.len());
+            e.context = Some("in-place: traducao limitada ao espaco original".to_string());
+        }
+    }
+    let discarded = keep_text(&mut entries);
+    let truncated = entries.len() > cap;
+    entries.truncate(cap);
+    Ok(Extraction {
+        entries,
+        discarded,
+        truncated,
+    })
 }
 
 impl GameAdapter for GbaAdapter {
@@ -127,41 +177,13 @@ impl GameAdapter for GbaAdapter {
     /// tabela fica sem `max_bytes` (pode crescer: sera realocada); as demais
     /// ficam limitadas ao espaco que ja ocupam. Ids identicos aos do scanner
     /// generico ("scan-<offset>"), entao rodar os dois nao duplica entries.
-    fn extract_structured(&self, data: &[u8]) -> Result<Vec<TextEntry>> {
-        if data.len() < HEADER_LEN {
-            return Err(CoreError::Project(
-                "gba: arquivo menor que o header do cartucho".to_string(),
-            ));
-        }
-        let outcome = scan_bytes(
-            data,
-            &ScanConfig {
-                encoding: ScanEncoding::Ascii,
-                ..ScanConfig::default()
-            },
-        )?;
-        let mut entries = outcome.entries;
-        let starts: HashSet<usize> = entries
-            .iter()
-            .filter(|e| is_terminated(e))
-            .filter_map(|e| e.offset.map(|o| o as usize))
-            .collect();
-        let tables = find_pointer_tables(data, &ROM_POINTERS, &starts);
-
-        for e in entries.iter_mut() {
-            let pointers = e.offset.and_then(|o| tables.get(&(o as usize)));
-            if let Some(pointers) = pointers.filter(|p| mark_relocatable(e, p)) {
-                e.max_bytes = None;
-                e.context = Some(format!(
-                    "realocavel: {} ponteiro(s) em tabela — nao precisa caber no espaco original",
-                    pointers.len()
-                ));
-            } else {
-                e.max_bytes = Some(e.original_bytes.len());
-                e.context = Some("in-place: traducao limitada ao espaco original".to_string());
-            }
-        }
-        Ok(entries)
+    ///
+    /// Ordem: varre tudo, acha os ponteiros, descarta o que nao parece texto
+    /// (string em tabela fica sempre) e so entao corta no teto. Com o teto
+    /// antes, o lixo do comeco do cartucho escondia o texto do fim: no jogo
+    /// medido em 12/10/2026, 16,4 mil das 20 mil primeiras eram lixo.
+    fn extract(&self, data: &[u8]) -> Result<Extraction> {
+        extract_capped(data, MAX_ENTRIES)
     }
 
     /// In-place do que cabe; o que nao cabe e tem ponteiros em tabela vai pro
@@ -245,6 +267,31 @@ mod tests {
         let result = probe(&rom);
         assert!(result.confidence < 0.9);
         assert!(result.confidence > 0.0, "byte fixo ainda presente");
+    }
+
+    #[test]
+    fn cap_counts_text_not_junk() {
+        // Centenas de sequencias de lixo antes do texto e um teto de 40: com
+        // o teto antes do filtro, nenhuma frase do fim do cartucho apareceria.
+        let rom = synth::make_gba_rom_with_junk();
+        let raw = scan_bytes(&rom, &ScanConfig::default()).unwrap().entries;
+        let first_phrase = raw
+            .iter()
+            .position(|e| e.source_text == synth::JUNK_ROM_PHRASES[0])
+            .unwrap();
+        assert!(first_phrase > 40, "lixo antes do texto: {first_phrase}");
+
+        let out = extract_capped(&rom, 40).unwrap();
+        assert!(!out.truncated, "{} entries", out.entries.len());
+        let texts: Vec<&str> = out.entries.iter().map(|e| e.source_text.as_str()).collect();
+        for phrase in synth::JUNK_ROM_PHRASES {
+            assert!(texts.contains(&phrase), "{phrase}: {texts:?}");
+        }
+        assert_eq!(out.discarded + out.entries.len(), raw.len());
+
+        // Teto menor que o texto: corta, e avisa.
+        let cut = extract_capped(&rom, 3).unwrap();
+        assert_eq!((cut.entries.len(), cut.truncated), (3, true));
     }
 
     #[test]

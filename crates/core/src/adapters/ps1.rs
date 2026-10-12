@@ -8,10 +8,10 @@
 //! So o PS1: PS2/PSP leem bytes, e a sobra nao chega garantida na RAM.
 
 use super::iso9660::{
-    self, annotate_sector_slack, apply_iso, detect_map, extract_ascii_by_file,
-    identify_playstation, parse_pvd, walk, PsKind, SectorMap,
+    self, apply_iso, detect_map, extract_ascii_by_file, identify_playstation, parse_pvd, walk,
+    PsKind, SectorMap,
 };
-use crate::adapter::{AppliedImage, GameAdapter, GameInput, VerificationReport};
+use crate::adapter::{AppliedImage, Extraction, GameAdapter, GameInput, VerificationReport};
 use crate::error::{CoreError, Result};
 use crate::types::{
     AdapterCapabilities, Platform, ProbeResult, ResourceDescriptor, SupportLevel, TextEntry,
@@ -93,11 +93,8 @@ impl GameAdapter for Ps1Adapter {
         Ok(iso9660::to_resources(data, map, &files))
     }
 
-    fn extract_structured(&self, data: &[u8]) -> Result<Vec<TextEntry>> {
-        let map = detect_map(data);
-        let mut entries = extract_ascii_by_file(data, map)?;
-        annotate_sector_slack(data, map, &mut entries)?;
-        Ok(entries)
+    fn extract(&self, data: &[u8]) -> Result<Extraction> {
+        extract_ascii_by_file(data, detect_map(data), true)
     }
 
     fn apply_text(&self, data: &[u8], entries: &[TextEntry]) -> Result<AppliedImage> {

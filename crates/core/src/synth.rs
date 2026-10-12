@@ -683,6 +683,60 @@ pub fn make_gba_rom_with_lz77() -> (Vec<u8>, usize) {
     (rom, 0x1000)
 }
 
+/// Texto de verdade do `make_gba_rom_with_junk`, na ordem em que aparece.
+pub const JUNK_ROM_PHRASES: [&str; 3] = [
+    "The old bridge is out. Take the forest road.",
+    "You found a rusty key!",
+    "Press START to begin",
+];
+/// Palavras de menu de 4 letras: o minimo que o scanner le por padrao.
+pub const JUNK_ROM_MENU: [&str; 4] = ["SAVE", "ITEM", "Exit", "Load"];
+/// Mais curtas ainda: so aparecem com `min_chars` menor.
+pub const JUNK_ROM_SHORT: [&str; 3] = ["Yes", "No", "HP"];
+/// Rotulos que nao parecem texto. Os dois primeiros tem ponteiro em tabela.
+pub const JUNK_ROM_LABELS: [&str; 3] = ["LV01", "ST02", "LV03"];
+/// Onde o ruido do `make_gba_rom_with_junk` comeca e acaba.
+pub const JUNK_ROM_NOISE: std::ops::Range<u64> = 0x400..0x7FF0;
+
+/// GBA de 64 KiB pro filtro de "parece texto". O lixo vem ANTES do texto,
+/// como num cartucho de verdade (codigo e graficos primeiro):
+/// - `JUNK_ROM_NOISE`: ruido pseudoaleatorio — centenas de sequencias
+///   imprimiveis que nao sao texto;
+/// - 0x8000: `JUNK_ROM_PHRASES`; 0x8100: `JUNK_ROM_MENU`; 0x8200:
+///   `JUNK_ROM_SHORT`; 0x8300: `JUNK_ROM_LABELS`;
+/// - 0x8400: tabela de ponteiros -> "LV01", "ST02" e "SAVE". "LV03" fica sem
+///   ponteiro: mesma cara, e so ele cai no filtro.
+pub fn make_gba_rom_with_junk() -> Vec<u8> {
+    let mut rom = make_gba_rom("JUNKTEST");
+    rom.resize(64 * 1024, 0);
+    let noise = JUNK_ROM_NOISE.start as usize..JUNK_ROM_NOISE.end as usize;
+    let len = noise.len();
+    rom[noise].copy_from_slice(&make_random(len, 0x4A55));
+
+    let mut at = 0x8000;
+    for text in JUNK_ROM_PHRASES {
+        plant(&mut rom, at, text.as_bytes());
+        at += text.len().next_multiple_of(4) + 4;
+    }
+    for (base, group) in [
+        (0x8100, &JUNK_ROM_MENU[..]),
+        (0x8200, &JUNK_ROM_SHORT[..]),
+        (0x8300, &JUNK_ROM_LABELS[..]),
+    ] {
+        for (i, text) in group.iter().enumerate() {
+            plant(&mut rom, base + i * 8, text.as_bytes());
+        }
+    }
+    for (i, target) in [0x8300u32, 0x8308, 0x8100].into_iter().enumerate() {
+        plant(
+            &mut rom,
+            0x8400 + i * 4,
+            &(0x0800_0000 + target).to_le_bytes(),
+        );
+    }
+    rom
+}
+
 /// Bytes pseudo-aleatorios deterministicos (xorshift), p/ testes negativos.
 pub fn make_random(len: usize, seed: u64) -> Vec<u8> {
     let mut state = seed.max(1);

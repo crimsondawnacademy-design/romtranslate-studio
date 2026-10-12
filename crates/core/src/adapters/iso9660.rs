@@ -7,7 +7,7 @@
 //! Suporta imagens 2048/setor (ISO) e raw 2352/setor (BIN de CD: sync 12 +
 //! header 4 [+ subheader 8 no Mode 2]; dados form1 = 2048 por setor).
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use super::pointers::{
     ensure_pointers_untouched, file_relative_tables, mark_relocatable, relocate, to_file_relative,
@@ -253,14 +253,27 @@ pub enum PsKind {
 
 /// Extracao conservadora comum aos adapters de disco optico: scan ASCII por
 /// regiao de arquivo (no raw 2352, uma regiao por setor — strings que cruzam
-/// setor sao perdidas, documentado), com resource_path e limite in-place.
-pub fn extract_ascii_by_file(data: &[u8], map: SectorMap) -> Result<Vec<crate::types::TextEntry>> {
-    use crate::scan::{scan_bytes, ScanConfig, ScanEncoding};
-    const MAX_TEXT_ENTRIES: usize = 20_000;
+/// setor sao perdidas, documentado), com resource_path e limite in-place. O
+/// que nao parece texto e descartado e contado.
+///
+/// `slack_pointers` (PS1): marca as strings com ponteiro em tabela
+/// (`annotate_sector_slack`) e so depois filtra, arquivo por arquivo — string
+/// em tabela nunca e descartada.
+// ponytail: nesse modo o teto corta as sequencias CRUAS de cada arquivo (as
+// TextEntry dele existem antes do filtro); arquivo com mais sequencias que o
+// teto sai marcado `truncated`. Sem ponteiros o filtro roda no scanner e o
+// teto conta so texto.
+pub fn extract_ascii_by_file(
+    data: &[u8],
+    map: SectorMap,
+    slack_pointers: bool,
+) -> Result<crate::adapter::Extraction> {
+    use crate::scan::{keep_text, scan_bytes, ScanConfig, ScanEncoding, MAX_ENTRIES};
 
     let files = walk(data, map)?;
-    let mut entries: Vec<crate::types::TextEntry> = Vec::new();
-    'outer: for file in files.iter().filter(|f| f.size > 0) {
+    let mut out = crate::adapter::Extraction::default();
+    for file in files.iter().filter(|f| f.size > 0) {
+        let first = out.entries.len();
         for (start, end) in file_regions(data, map, file.extent, file.size)? {
             let outcome = scan_bytes(
                 data,
@@ -268,22 +281,34 @@ pub fn extract_ascii_by_file(data: &[u8], map: SectorMap) -> Result<Vec<crate::t
                     encoding: ScanEncoding::Ascii,
                     region_start: Some(start),
                     region_end: Some(end),
-                    max_entries: MAX_TEXT_ENTRIES - entries.len(),
+                    max_entries: MAX_ENTRIES - out.entries.len(),
+                    only_text: !slack_pointers,
                     ..ScanConfig::default()
                 },
             )?;
+            out.discarded += outcome.discarded;
             for mut e in outcome.entries {
                 e.resource_path = Some(file.path.clone());
                 e.max_bytes = Some(e.original_bytes.len());
                 e.context = Some("in-place: traducao limitada ao espaco original".to_string());
-                entries.push(e);
+                out.entries.push(e);
             }
-            if entries.len() >= MAX_TEXT_ENTRIES {
-                break 'outer;
+            if out.entries.len() >= MAX_ENTRIES {
+                out.truncated = true;
+                break;
             }
         }
+        if slack_pointers {
+            let mut found = out.entries.split_off(first);
+            annotate_sector_slack(data, map, file, &mut found)?;
+            out.discarded += keep_text(&mut found);
+            out.entries.append(&mut found);
+        }
+        if out.entries.len() >= MAX_ENTRIES {
+            break;
+        }
     }
-    Ok(entries)
+    Ok(out)
 }
 
 /// Um arquivo setor a setor: onde comecam os 2048 bytes de dados de cada
@@ -322,12 +347,15 @@ impl FileLayout {
             .map(|s| s + rel % SECTOR_DATA)
     }
 
+    /// Busca binaria: os setores de um arquivo sao contiguos e crescentes, e
+    /// isto roda uma vez por sequencia crua do arquivo.
     fn abs_to_rel(&self, abs: usize) -> Option<usize> {
-        self.sector_starts
-            .iter()
-            .enumerate()
-            .find(|(_, &s)| (s..s + SECTOR_DATA).contains(&abs))
-            .map(|(k, &s)| k * SECTOR_DATA + abs - s)
+        let k = self
+            .sector_starts
+            .partition_point(|&s| s <= abs)
+            .checked_sub(1)?;
+        let s = self.sector_starts[k];
+        (abs < s + SECTOR_DATA).then(|| k * SECTOR_DATA + abs - s)
     }
 
     /// A sobra depois do fim logico precisa estar zerada: qualquer byte ali
@@ -348,47 +376,38 @@ impl FileLayout {
 /// relativos ao arquivo pode crescer pro espaco livre do ULTIMO SETOR dele —
 /// o hardware le setores inteiros, entao essa sobra sempre chega na RAM. O
 /// EXE fica de fora sozinho: ponteiro dele e endereco de RAM (0x80..), nao
-/// offset, e ele divide a RAM com BSS e heap.
-pub fn annotate_sector_slack(
+/// offset, e ele divide a RAM com BSS e heap. `entries` = as strings de `file`.
+fn annotate_sector_slack(
     data: &[u8],
     map: SectorMap,
+    file: &IsoFile,
     entries: &mut [crate::types::TextEntry],
 ) -> Result<()> {
-    let files = walk(data, map)?;
-    let by_path: HashMap<&str, &IsoFile> = files.iter().map(|f| (f.path.as_str(), f)).collect();
-    // `extract_ascii_by_file` devolve as entries de cada arquivo juntas.
-    let mut i = 0;
-    while i < entries.len() {
-        let path = entries[i].resource_path.clone();
-        let end = i + entries[i..]
-            .iter()
-            .take_while(|e| e.resource_path == path)
-            .count();
-        if let Some(file) = path.as_deref().and_then(|p| by_path.get(p)) {
-            let layout = FileLayout::new(data, map, file)?;
-            let room = layout.slack_room();
-            if room > 0 && layout.slack_is_zero(data) {
-                let bytes = read_file(data, map, file.extent, file.size)?;
-                let found = file_relative_tables(
-                    &bytes,
-                    &entries[i..end],
-                    |abs| layout.abs_to_rel(abs),
-                    |rel| layout.rel_to_abs(rel),
-                );
-                for (k, pointers) in found {
-                    let e = &mut entries[i + k];
-                    if mark_relocatable(e, &pointers) {
-                        e.max_bytes = Some(e.original_bytes.len().max(room));
-                        e.context = Some(format!(
-                            "realocavel: {} ponteiro(s) em tabela — cabe ate {room} bytes no \
-                             espaco livre do setor final do arquivo (dividido entre as realocadas)",
-                            pointers.len()
-                        ));
-                    }
-                }
-            }
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let layout = FileLayout::new(data, map, file)?;
+    let room = layout.slack_room();
+    if room == 0 || !layout.slack_is_zero(data) {
+        return Ok(());
+    }
+    let bytes = read_file(data, map, file.extent, file.size)?;
+    let found = file_relative_tables(
+        &bytes,
+        entries,
+        |abs| layout.abs_to_rel(abs),
+        |rel| layout.rel_to_abs(rel),
+    );
+    for (k, pointers) in found {
+        let e = &mut entries[k];
+        if mark_relocatable(e, &pointers) {
+            e.max_bytes = Some(e.original_bytes.len().max(room));
+            e.context = Some(format!(
+                "realocavel: {} ponteiro(s) em tabela — cabe ate {room} bytes no \
+                 espaco livre do setor final do arquivo (dividido entre as realocadas)",
+                pointers.len()
+            ));
         }
-        i = end;
     }
     Ok(())
 }
