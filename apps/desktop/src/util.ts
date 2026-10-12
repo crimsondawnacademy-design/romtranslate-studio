@@ -13,12 +13,16 @@ export function formatBytes(bytes: number): string {
 
 import { TextEncodingWire, TextEntry } from "./types";
 
-/** Bytes da string no encoding destino; null = nao codificavel ou sem encoder. */
+/**
+ * Bytes da string no encoding destino; null = nao codificavel ou sem encoder
+ * aqui. Texto em tabela (.tbl) fica null de proposito: quem mede e o core,
+ * com a tabela do projeto, ao salvar a traducao (as issues voltam pro editor).
+ */
 export function encodedByteLength(
   text: string,
   encoding: TextEncodingWire,
 ): number | null {
-  if (typeof encoding === "object") return null; // tabela custom: sem encoder no front
+  if (typeof encoding === "object") return null; // tabela: o core mede ao salvar
   switch (encoding) {
     case "ascii":
       // eslint-disable-next-line no-control-regex

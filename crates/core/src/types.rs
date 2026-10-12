@@ -217,6 +217,26 @@ impl TextEntry {
     pub fn pointer_offsets(&self) -> Vec<usize> {
         self.pointers().iter().map(|p| p.at).collect()
     }
+
+    /// Traducao ja codificada pela tabela do projeto (`metadata.encoded`):
+    /// os bytes que vao no lugar da string. O adapter nao recebe tabelas —
+    /// quem poe isto e `reinsert`, logo antes de chama-lo. Nunca vai pro banco.
+    pub fn encoded(&self) -> Option<Vec<u8>> {
+        self.metadata
+            .get("encoded")?
+            .as_array()?
+            .iter()
+            .map(|b| b.as_u64().and_then(|b| u8::try_from(b).ok()))
+            .collect()
+    }
+
+    pub fn set_encoded(&mut self, bytes: &[u8]) {
+        // Metadata vem do banco: pode nao ser objeto.
+        if !self.metadata.is_object() {
+            self.metadata = serde_json::json!({});
+        }
+        self.metadata["encoded"] = serde_json::json!(bytes);
+    }
 }
 
 /// Serializa bytes como hex — legivel em project.json/exports e sem base64 dep.

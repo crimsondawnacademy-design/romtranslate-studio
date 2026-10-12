@@ -10,10 +10,21 @@ use crate::adapter::{AppliedImage, ApplyReport};
 use crate::error::{CoreError, Result};
 use crate::types::{TextEncoding, TextEntry};
 
+/// Como a reinsercao le `metadata.terminated`: sem a marca, a string conta
+/// como terminada (a sobra do espaco vira 0x00).
+pub(crate) fn terminated(entry: &TextEntry) -> bool {
+    entry
+        .metadata
+        .get("terminated")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true)
+}
+
 /// Serializa a traducao no encoding da entry. `None` = encoding sem encoder
-/// in-place (tabela custom, Shift-JIS) — o caller decide errar ou ignorar.
-fn encode(entry_id: &str, text: &str, encoding: &TextEncoding) -> Result<Option<Vec<u8>>> {
-    match encoding {
+/// in-place (Shift-JIS) — o caller decide errar ou ignorar.
+fn encode(entry: &TextEntry, text: &str) -> Result<Option<Vec<u8>>> {
+    let entry_id = &entry.id;
+    match &entry.encoding {
         TextEncoding::Ascii => {
             if !text.is_ascii() {
                 return Err(CoreError::Project(format!(
@@ -22,6 +33,19 @@ fn encode(entry_id: &str, text: &str, encoding: &TextEncoding) -> Result<Option<
             }
             Ok(Some(text.as_bytes().to_vec()))
         }
+        // Tabela do projeto: os bytes chegam prontos na entry (com a sobra ja
+        // preenchida), codificados por `reinsert` — que e quem sabe onde a
+        // tabela mora. Sem eles e erro: texto em tabela nao e ignorado calado.
+        TextEncoding::Table(id) => entry
+            .encoded()
+            .filter(|bytes| bytes.len() >= entry.original_bytes.len())
+            .map(Some)
+            .ok_or_else(|| {
+                CoreError::Project(format!(
+                    "entry {entry_id}: texto na tabela \"{id}\" chegou sem codificar — a \
+                     reinsercao por tabela passa por reinsert_project, que le a tabela do projeto"
+                ))
+            }),
         TextEncoding::Utf8 => Ok(Some(text.as_bytes().to_vec())),
         TextEncoding::Utf16Le => Ok(Some(
             text.encode_utf16().flat_map(|u| u.to_le_bytes()).collect(),
@@ -29,7 +53,7 @@ fn encode(entry_id: &str, text: &str, encoding: &TextEncoding) -> Result<Option<
         TextEncoding::Utf16Be => Ok(Some(
             text.encode_utf16().flat_map(|u| u.to_be_bytes()).collect(),
         )),
-        TextEncoding::ShiftJis | TextEncoding::Table(_) => Ok(None),
+        TextEncoding::ShiftJis => Ok(None),
     }
 }
 
@@ -49,7 +73,8 @@ pub struct InPlacePlan {
 /// - traducao serializada tem que caber no espaco original, exceto string
 ///   terminada com ponteiros em tabela quando `allow_relocation`;
 /// - sobra preenchida com terminador (0x00) se o run original era terminado,
-///   senao espaco (fixed-width) — em ASCII/UTF-8; UTF-16 sempre 0x00 (par).
+///   senao espaco (fixed-width) — em ASCII/UTF-8; UTF-16 sempre 0x00 (par);
+///   texto em tabela ja chega com a sobra preenchida (`TblTable::encode_slot`).
 pub fn plan_in_place(
     data: &[u8],
     entries: &[TextEntry],
@@ -86,15 +111,11 @@ pub fn plan_in_place(
                 entry.id
             )));
         }
-        let Some(mut bytes) = encode(&entry.id, translation, &entry.encoding)? else {
+        let Some(mut bytes) = encode(entry, translation)? else {
             report.ignored_generic += 1;
             continue;
         };
-        let terminated = entry
-            .metadata
-            .get("terminated")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(true);
+        let terminated = terminated(entry);
         let is_utf16 = matches!(
             entry.encoding,
             TextEncoding::Utf16Le | TextEncoding::Utf16Be

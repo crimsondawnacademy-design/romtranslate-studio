@@ -288,14 +288,14 @@ fn validator_uses_the_slack_as_ceiling_on_ps1() {
         &[("NEW GAME", "NOVO JOGO"), ("CONTINUE", too_long.as_str())],
     );
 
-    let fits = validate_entry(find(&entries, "MSG.DAT", "NEW GAME"));
+    let fits = validate_entry(find(&entries, "MSG.DAT", "NEW GAME"), None);
     assert!(
         fits.iter().all(|i| i.severity == Severity::Warning),
         "{fits:?}"
     );
     assert!(fits.iter().any(|i| i.message.contains("realocada")));
 
-    let over = validate_entry(find(&entries, "MSG.DAT", "CONTINUE"));
+    let over = validate_entry(find(&entries, "MSG.DAT", "CONTINUE"), None);
     assert!(over
         .iter()
         .any(|i| i.kind == IssueKind::ByteOverflow && i.severity == Severity::Error));

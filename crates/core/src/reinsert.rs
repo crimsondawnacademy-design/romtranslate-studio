@@ -15,8 +15,9 @@ use crate::error::{CoreError, Result};
 use crate::fileio::read_view;
 use crate::hash::sha256_file;
 use crate::project::load_project;
-use crate::types::TranslationStatus;
-use crate::validate::validate_project_db;
+use crate::tbl::ProjectTables;
+use crate::types::{TextEncoding, TextEntry, TranslationStatus};
+use crate::validate::{validate_project_db, Severity};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,16 +62,22 @@ pub fn reinsert_project_with_limit(
 
     // 2. Validacao fresca + bloqueio de erros criticos.
     let mut db = ProjectDb::open(project_dir)?;
-    validate_project_db(&mut db)?;
-    let entries = db.load_entries()?;
+    let validation = validate_project_db(&mut db)?;
+    let mut entries = db.load_entries()?;
     let error_count = entries
         .iter()
         .filter(|e| e.status == TranslationStatus::Error)
         .count();
     if error_count > 0 && !allow_errors {
+        let first = validation
+            .issues
+            .iter()
+            .find(|i| i.severity == Severity::Error)
+            .map(|i| format!(" — o primeiro, na entry {}: {}", i.entry_id, i.message))
+            .unwrap_or_default();
         return Err(CoreError::Project(format!(
             "{error_count} entries com erro de validacao; corrija-as (ou use o modo avancado) \
-             antes de reinserir"
+             antes de reinserir{first}"
         )));
     }
 
@@ -83,6 +90,8 @@ pub fn reinsert_project_with_limit(
             adapter.id()
         )));
     }
+
+    encode_table_entries(project_dir, &mut entries)?;
 
     // 4. Aplica sobre os bytes do original (all-or-nothing) e grava a
     //    working copy atomicamente (nunca o original). Ate o teto: tudo em
@@ -134,6 +143,30 @@ pub fn reinsert_project_with_limit(
     })
 }
 
+/// Codifica a traducao de cada entry lida por tabela e deixa os bytes na
+/// propria entry (`TextEntry::set_encoded`). `GameAdapter::apply_text` nao
+/// recebe tabelas: quem sabe onde elas moram e o projeto, e assim nenhum
+/// adapter precisa saber. Tabela ausente ou caractere fora dela aborta tudo.
+fn encode_table_entries(project_dir: &Path, entries: &mut [TextEntry]) -> Result<()> {
+    let mut tables = ProjectTables::new(project_dir);
+    for entry in entries {
+        let (TextEncoding::Table(id), Some(text)) = (&entry.encoding, &entry.translated_text)
+        else {
+            continue;
+        };
+        let bytes = tables
+            .get(id)?
+            .encode_slot(
+                text,
+                entry.original_bytes.len(),
+                crate::adapters::inplace::terminated(entry),
+            )
+            .map_err(|e| CoreError::Project(format!("entry {}: {e}", entry.id)))?;
+        entry.set_encoded(&bytes);
+    }
+    Ok(())
+}
+
 /// Reinsercao streaming pra imagens acima do teto em memoria: mmap da
 /// origem pra validar e planejar, copia do arquivo (clone barato no APFS) e
 /// escrita so dos trechos alterados. So ISO 9660 2048/setor (DVD de PS2):
@@ -141,7 +174,7 @@ pub fn reinsert_project_with_limit(
 /// com folga no caminho em memoria.
 fn stream_apply_iso(
     source: &Path,
-    entries: &[crate::types::TextEntry],
+    entries: &[TextEntry],
     dest_tmp: &Path,
     in_memory_max: u64,
 ) -> Result<ApplyReport> {

@@ -7,8 +7,10 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::adapters::inplace::terminated;
 use crate::db::{GlobalTm, ProjectDb};
 use crate::error::Result;
+use crate::tbl::{ProjectTables, TblTable};
 use crate::types::{TextEncoding, TextEntry, TranslationStatus};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -23,7 +25,9 @@ pub enum Severity {
 pub enum IssueKind {
     /// Placeholder/control code/tag removido ou inventado ({0}, %s, <BR>, [ITEM], \n).
     PlaceholderMismatch,
-    /// Traducao nao cabe: acima de max_bytes (Error) ou do espaco original (Warning).
+    /// Traducao nao cabe: acima de max_bytes (Error) ou do espaco original
+    /// (Warning). Tambem a string de largura fixa lida por tabela cuja sobra
+    /// nao da pra preencher (Error).
     ByteOverflow,
     /// Original tem texto, traducao esta vazia.
     EmptyTranslation,
@@ -52,29 +56,42 @@ pub struct ValidationReport {
 }
 
 /// Tamanho da traducao codificada no encoding destino.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EncodedLen {
     Bytes(usize),
-    /// O texto tem chars que o encoding nao representa.
-    Unencodable,
-    /// Sem encoder implementado (tabela custom, Shift-JIS) — check pulado.
+    /// O texto nao vira bytes neste encoding; a mensagem diz por que.
+    Unencodable(String),
+    /// Sem encoder implementado (Shift-JIS) — check pulado.
     Unsupported,
 }
 
-pub fn encoded_len(text: &str, encoding: &TextEncoding) -> EncodedLen {
+/// `table` = a tabela do projeto pra entry de encoding `Table`
+/// (`ProjectTables::for_entry`); os outros encodings nao olham pra ela.
+pub fn encoded_len(text: &str, encoding: &TextEncoding, table: Option<&TblTable>) -> EncodedLen {
     match encoding {
         TextEncoding::Ascii => {
             if text.is_ascii() {
                 EncodedLen::Bytes(text.len())
             } else {
-                EncodedLen::Unencodable
+                EncodedLen::Unencodable(
+                    "traducao tem caracteres fora do encoding destino".to_string(),
+                )
             }
         }
         TextEncoding::Utf8 => EncodedLen::Bytes(text.len()),
         TextEncoding::Utf16Le | TextEncoding::Utf16Be => {
             EncodedLen::Bytes(text.encode_utf16().count() * 2)
         }
-        TextEncoding::ShiftJis | TextEncoding::Table(_) => EncodedLen::Unsupported,
+        TextEncoding::Table(id) => match table.map(|table| table.encode(text)) {
+            Some(Ok(bytes)) => EncodedLen::Bytes(bytes.len()),
+            Some(Err(e)) => EncodedLen::Unencodable(format!(
+                "{e} — troque o caractere ou acrescente a linha dele em tables/{id}.tbl"
+            )),
+            None => EncodedLen::Unencodable(format!(
+                "sem a tabela \"{id}\" nao da pra conferir a traducao"
+            )),
+        },
+        TextEncoding::ShiftJis => EncodedLen::Unsupported,
     }
 }
 
@@ -136,8 +153,9 @@ fn count_tokens(text: &str) -> HashMap<String, i32> {
     map
 }
 
-/// Valida UMA entry traduzida. Entry sem traducao retorna vazio.
-pub fn validate_entry(entry: &TextEntry) -> Vec<ValidationIssue> {
+/// Valida UMA entry traduzida. Entry sem traducao retorna vazio. `table` e a
+/// tabela do projeto quando o texto e lido por uma (ver `encoded_len`).
+pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<ValidationIssue> {
     let Some(translation) = entry.translated_text.as_deref() else {
         return Vec::new();
     };
@@ -185,15 +203,19 @@ pub fn validate_entry(entry: &TextEntry) -> Vec<ValidationIssue> {
         }
     }
 
-    // Bytes no encoding destino.
-    match encoded_len(translation, &entry.encoding) {
-        EncodedLen::Unencodable => push(
-            Severity::Error,
-            IssueKind::Unencodable,
-            "traducao tem caracteres fora do encoding destino".to_string(),
-        ),
+    // Bytes no encoding destino. A tabela so vale pra entry lida por tabela.
+    let table = table.filter(|_| matches!(entry.encoding, TextEncoding::Table(_)));
+    match encoded_len(translation, &entry.encoding, table) {
+        EncodedLen::Unencodable(why) => push(Severity::Error, IssueKind::Unencodable, why),
         EncodedLen::Bytes(n) => {
             let original = entry.original_bytes.len();
+            // Texto em tabela: a sobra do espaco tem que ser preenchivel — a
+            // mesma conta que a reinsercao faz.
+            if let Some(Err(e)) =
+                table.map(|table| table.encode_slot(translation, original, terminated(entry)))
+            {
+                push(Severity::Error, IssueKind::ByteOverflow, e.to_string());
+            }
             let relocatable = !entry.pointer_offsets().is_empty();
             // Realocavel pode ter teto (PS1: a sobra do setor final do arquivo):
             // passar dele e erro; entre o original e o teto, aviso.
@@ -246,8 +268,12 @@ pub fn validate_entry(entry: &TextEntry) -> Vec<ValidationIssue> {
 /// - com Error -> `Error`;
 /// - `Error` antigo que ficou limpo -> volta para `Machine`;
 /// - `Reviewed` limpo permanece `Reviewed`.
+///
+/// Tabela `.tbl` ausente do projeto e `Err`, nao issue por entry: sem ela
+/// nada se confere, e marcar tudo como erro apagaria os `Reviewed`.
 pub fn validate_project_db(db: &mut ProjectDb) -> Result<ValidationReport> {
     let entries = db.load_entries()?;
+    let mut tables = ProjectTables::new(db.project_dir());
     let mut issues = Vec::new();
     let mut checked = 0;
     for entry in &entries {
@@ -255,7 +281,7 @@ pub fn validate_project_db(db: &mut ProjectDb) -> Result<ValidationReport> {
             continue;
         }
         checked += 1;
-        let entry_issues = validate_entry(entry);
+        let entry_issues = validate_entry(entry, tables.for_entry(entry)?);
         let has_error = entry_issues.iter().any(|i| i.severity == Severity::Error);
         if has_error {
             db.set_status(&entry.id, TranslationStatus::Error)?;
@@ -307,7 +333,10 @@ pub fn apply_manual_translation(
             translation,
         )?;
     }
-    let issues = validate_entry(&entry);
+    let issues = validate_entry(
+        &entry,
+        ProjectTables::new(db.project_dir()).for_entry(&entry)?,
+    );
     if issues.iter().any(|i| i.severity == Severity::Error) {
         db.set_status(id, TranslationStatus::Error)?;
     }
@@ -322,7 +351,10 @@ pub fn set_reviewed(db: &mut ProjectDb, id: &str, reviewed: bool) -> Result<Tran
         )));
     };
     let status = if reviewed {
-        let issues = validate_entry(&entry);
+        let issues = validate_entry(
+            &entry,
+            ProjectTables::new(db.project_dir()).for_entry(&entry)?,
+        );
         if issues.iter().any(|i| i.severity == Severity::Error) {
             return Err(crate::error::CoreError::Project(
                 "ha erros de validacao nesta entry; corrija antes de marcar como revisada"
@@ -378,14 +410,14 @@ mod tests {
 
     #[test]
     fn placeholder_removal_and_invention_are_errors() {
-        let removed = validate_entry(&entry("HP {0}: 120", "PV: 120", TextEncoding::Utf8));
+        let removed = validate_entry(&entry("HP {0}: 120", "PV: 120", TextEncoding::Utf8), None);
         assert!(kinds(&removed).contains(&IssueKind::PlaceholderMismatch));
         assert!(removed[0].message.contains("{0}"));
 
-        let invented = validate_entry(&entry("Save game", "Salvar %s", TextEncoding::Utf8));
+        let invented = validate_entry(&entry("Save game", "Salvar %s", TextEncoding::Utf8), None);
         assert!(kinds(&invented).contains(&IssueKind::PlaceholderMismatch));
 
-        let ok = validate_entry(&entry("HP {0}: %d", "PV {0}: %d", TextEncoding::Utf8));
+        let ok = validate_entry(&entry("HP {0}: %d", "PV {0}: %d", TextEncoding::Utf8), None);
         assert!(ok.is_empty(), "{ok:?}");
     }
 
@@ -394,49 +426,64 @@ mod tests {
         // max_bytes explicito estourado -> Error.
         let mut e = entry("SAVE", "SALVAR O JOGO AGORA", TextEncoding::Ascii);
         e.max_bytes = Some(6);
-        let issues = validate_entry(&e);
+        let issues = validate_entry(&e, None);
         assert!(issues
             .iter()
             .any(|i| i.kind == IssueKind::ByteOverflow && i.severity == Severity::Error));
 
         // Sem max_bytes: acima do espaco original -> Warning.
-        let long = validate_entry(&entry("HI", "OLA MUNDO", TextEncoding::Ascii));
+        let long = validate_entry(&entry("HI", "OLA MUNDO", TextEncoding::Ascii), None);
         assert!(long
             .iter()
             .any(|i| i.kind == IssueKind::ByteOverflow && i.severity == Severity::Warning));
 
         // Nao-ASCII em encoding ASCII -> Unencodable.
-        let bad = validate_entry(&entry("POTION", "POÇÃO", TextEncoding::Ascii));
+        let bad = validate_entry(&entry("POTION", "POÇÃO", TextEncoding::Ascii), None);
         assert!(kinds(&bad).contains(&IssueKind::Unencodable));
 
         // UTF-16: 2 bytes por unidade.
         assert_eq!(
-            encoded_len("ABC", &TextEncoding::Utf16Le),
+            encoded_len("ABC", &TextEncoding::Utf16Le, None),
             EncodedLen::Bytes(6)
         );
-        // Tabela custom: sem encoder -> check pulado.
+        // Tabela: mede pelos bytes dela (aqui "AB" vale um byte so).
+        let table = TblTable::parse("80=A\n81=B\n82=C\n90=AB\n").unwrap();
+        let enc = TextEncoding::Table("x".into());
+        assert_eq!(encoded_len("ABC", &enc, Some(&table)), EncodedLen::Bytes(2));
+        assert!(matches!(
+            encoded_len("AB!", &enc, Some(&table)),
+            EncodedLen::Unencodable(why) if why.contains("'!'")
+        ));
+        // Sem a tabela nao ha como conferir: erro, nunca check pulado.
+        assert!(matches!(
+            encoded_len("ABC", &enc, None),
+            EncodedLen::Unencodable(_)
+        ));
         assert_eq!(
-            encoded_len("ABC", &TextEncoding::Table("x".into())),
+            encoded_len("ABC", &TextEncoding::ShiftJis, None),
             EncodedLen::Unsupported
         );
     }
 
     #[test]
     fn empty_and_anomalous_translations() {
-        let empty = validate_entry(&entry("WELCOME!", "  ", TextEncoding::Utf8));
+        let empty = validate_entry(&entry("WELCOME!", "  ", TextEncoding::Utf8), None);
         assert_eq!(kinds(&empty), vec![IssueKind::EmptyTranslation]);
 
-        let bloated = validate_entry(&entry(
-            "MENU",
-            "este e um texto absurdamente maior que o original",
-            TextEncoding::Utf8,
-        ));
+        let bloated = validate_entry(
+            &entry(
+                "MENU",
+                "este e um texto absurdamente maior que o original",
+                TextEncoding::Utf8,
+            ),
+            None,
+        );
         assert!(kinds(&bloated).contains(&IssueKind::LengthAnomaly));
 
         let untranslated = TextEntry {
             translated_text: None,
             ..entry("X", "y", TextEncoding::Utf8)
         };
-        assert!(validate_entry(&untranslated).is_empty());
+        assert!(validate_entry(&untranslated, None).is_empty());
     }
 }

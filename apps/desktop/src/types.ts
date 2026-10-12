@@ -88,6 +88,8 @@ export interface ScanOutcome {
   entries: TextEntry[];
   truncated: boolean;
   scannedBytes: number;
+  /** Tabela que o scan leu: a copia em tables/ do projeto. */
+  tblPath: string | null;
 }
 
 export interface OpenProjectReport {

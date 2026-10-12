@@ -67,7 +67,7 @@ Cada `TextEntry` precisa carregar o suficiente para reinserção segura:
 | `original_bytes` | os bytes exatos que a string ocupa hoje (sanity check no apply) |
 | `max_bytes` | limite REAL de reinserção (`None` só se houver relocação de verdade) |
 | `encoding` | o encoding de destino — o validador calcula bytes com ele |
-| `metadata` | o que o SEU apply precisa (`kind`, índice de ponteiro, flags) |
+| `metadata` | o que o SEU apply precisa (`kind`, índice de ponteiro, flags). A chave `encoded` é reservada (veja "Texto lido por tabela") |
 
 Se a plataforma tem tabela de ponteiros, modele-a explicitamente (veja o blob +
 ponteiros do RTSF). **Nunca** faça busca/substituição global de bytes.
@@ -107,6 +107,16 @@ encoding da outra. Resolva a sobreposição na extração (veja
   é zerado no boot ou sobrescrito. Só é seguro onde o dado novo comprovadamente
   chega à memória: ROM mapeada (GBA), arquivo que o jogo acha pela FAT (NDS),
   sobra de setor lido inteiro (PS1).
+- **Texto lido por tabela** (`TextEncoding::Table(id)`, vindo do scanner com
+  `.tbl`): o adapter não recebe tabelas. A orquestração (`reinsert.rs`) lê
+  `<projeto>/tables/<id>.tbl`, codifica a tradução com
+  `TblTable::encode_slot` — já com a sobra preenchida — e entrega os bytes na
+  própria entry (`metadata.encoded`, lido por `TextEntry::encoded()`). Quem
+  usa `plan_in_place`/`apply_in_place` não faz nada: o helper grava esses
+  bytes e devolve `Err` se a entry de tabela chegar sem eles (chamada por
+  fora da orquestração). Adapter com escrita própria grava
+  `entry.encoded()` em vez de codificar. Hoje só o NES tem teste de ida e
+  volta com tabela (`tests/table_reinsert.rs`).
 - Entries sem tradução mantêm o original (`kept_original`); entries de outro
   scanner que você não entende → `ignored_generic`, nunca erro silencioso.
 - Erros orientam o usuário: diga QUAL entry, QUANTOS bytes, o que fazer

@@ -117,8 +117,8 @@ async fn open_project(dir: String) -> Result<OpenProjectReport, String> {
 }
 
 #[tauri::command]
-async fn scan_file(path: String, config: ScanConfig) -> Result<ScanOutcome, String> {
-    blocking(move || scan::scan_file(&PathBuf::from(path), &config)).await
+async fn scan_project(project_dir: String, config: ScanConfig) -> Result<ScanOutcome, String> {
+    blocking(move || scan::scan_project(&PathBuf::from(project_dir), &config)).await
 }
 
 #[tauri::command]
@@ -429,7 +429,7 @@ pub fn run() {
             inspect_file,
             create_project,
             open_project,
-            scan_file,
+            scan_project,
             relative_search,
             save_relative_tbl,
             xray_project,

@@ -43,7 +43,7 @@ Prefere compilar do código? Veja [Rodando](#rodando).
 - **Busca relativa**: jogo de cartucho quase nunca usa ASCII. Digite uma
   palavra que você sabe que aparece no jogo e o app descobre onde o alfabeto
   dele começa e monta o `.tbl` (letras e espaço; números e pontuação você
-  completa no arquivo);
+  completa no arquivo). A tradução é regravada no jogo pela mesma tabela;
 - **Raio-X**: mostra o que o app *não* lê no arquivo — blocos comprimidos em
   LZ77 (o do GBA e do DS) e quantas frases estão presas neles, quanto do
   arquivo é denso (comprimido ou cifrado), e quantas das strings extraídas
@@ -72,7 +72,7 @@ universal**. O que cada plataforma tem hoje:
 | Fixture RTSF (demo) | ✅ | ✅ | ✅ completa | ✅ com relocação + ponteiros | ✅ |
 | Game Boy Advance | ✅ | ✅ | ⚠️ experimental (detecta tabelas de ponteiros) | ⚠️ experimental (in-place + **relocação** de strings com ponteiro em tabela) | ✅ (BPS se o ROM de 16 MiB crescer) |
 | Nintendo DS | ✅ (CRC do header) | ✅ | ⚠️ experimental (por arquivo do filesystem, ASCII + UTF-16) | ⚠️ experimental (in-place + **relocação**: o arquivo cresce e a FAT é reapontada) | ✅ (BPS acima de 16 MiB) |
-| NES | ✅ | ✅ | ⚠️ experimental (in-place; jogos com tabela própria: use `.tbl`) | ⚠️ experimental (in-place) | ✅ |
+| NES | ✅ | ✅ | ⚠️ experimental (in-place; jogos com tabela própria: use `.tbl`) | ⚠️ experimental (in-place; texto lido por `.tbl` volta pela tabela) | ✅ |
 | Super Nintendo | ✅ | ✅ | ⚠️ experimental (in-place) | ⚠️ experimental (in-place, checksum interno recalculado) | ✅ |
 | GameCube | ✅ (magic + FST) | — | ⚠️ experimental (por arquivo do filesystem FST) | ⚠️ experimental (in-place) | ✅ (BPS p/ ISO real) |
 | Wii | ✅ (ISO e WBFS) | — | — | — | — |
@@ -95,10 +95,22 @@ de disco Wii são cifradas: extração exigiria keys, que este projeto não incl
 
 **Texto fora do alcance do scanner**: extração vazia não prova que o jogo tem
 pouco texto. Se ele usa tabela de caracteres própria, a **busca relativa**
-monta o `.tbl`; texto lido por tabela pode ser traduzido e exportado, mas
-ainda **não é regravado** no jogo. Se o texto está comprimido, o **Raio-X**
-mostra quanto — hoje o app só reconhece o LZ77 tipo 0x10 e só para leitura:
-texto comprimido ainda não é extraído nem reinserido.
+monta o `.tbl`, e o texto lido por tabela é **regravado no jogo** por ela. O
+scan guarda uma cópia da tabela em `tables/` dentro do projeto; é essa cópia
+que a validação e a reinserção usam, e é nela que você completa números e
+pontuação. Vale a regra do in-place, medida em bytes da tabela: a tradução
+ocupa o espaço da original ou menos. Caractere que a tabela não tem (um
+acento, uma pontuação que falta completar) é erro que diz qual é e em que
+posição — nunca um byte inventado. Limites: isso está provado de ponta a
+ponta numa fixture sintética de NES, não em jogo real; as outras plataformas
+in-place usam o mesmo caminho, mas não têm teste com tabela. E a sobra de
+uma tradução mais curta vira `0x00` quando o byte depois da string original
+é `0x00` (senão é preenchida com o espaço da tabela) — jogo com outro
+terminador pede conferência no emulador.
+
+Se o texto está comprimido, o **Raio-X** mostra quanto — hoje o app só
+reconhece o LZ77 tipo 0x10 e só para leitura: texto comprimido ainda não é
+extraído nem reinserido.
 
 **"In-place"**: cada string traduzida ocupa o espaço da original (mesmo
 tamanho ou menor) — cobre menus e textos curtos de muitos jogos. O validador
@@ -190,6 +202,7 @@ crates/core/         # tudo testável sem UI
   src/adapters/      # rtsf (referência completa), gba, nds, nes, snes, gamecube,
                      # ps1, ps2, psp; wii e wiiu só detectam
   src/scan.rs        # scanner genérico (Camada A)
+  src/tbl.rs         # tabelas .tbl: leem o jogo e regravam a tradução
   src/relative.rs    # busca relativa: descobre a tabela de caracteres
   src/xray.rs        # raio-X: o que o app não lê (comprimido, denso, sem ponteiro)
   src/lz77.rs        # LZ77 do BIOS do GBA/DS (leitura; base da Camada D)

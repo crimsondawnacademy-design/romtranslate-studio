@@ -160,7 +160,7 @@ fn validation_warns_on_relocatable_but_blocks_fixed_overflow() {
         &[("NEW GAME", "NOVO JOGO"), ("GAME OVER", "FIM DE JOGO")],
     );
 
-    let relocatable = validate_entry(by_text(&entries, "NEW GAME"));
+    let relocatable = validate_entry(by_text(&entries, "NEW GAME"), None);
     assert!(
         relocatable.iter().all(|i| i.severity == Severity::Warning),
         "{relocatable:?}"
@@ -169,7 +169,7 @@ fn validation_warns_on_relocatable_but_blocks_fixed_overflow() {
         .iter()
         .any(|i| i.kind == IssueKind::ByteOverflow && i.message.contains("realocada")));
 
-    let fixed = validate_entry(by_text(&entries, "GAME OVER"));
+    let fixed = validate_entry(by_text(&entries, "GAME OVER"), None);
     assert!(fixed
         .iter()
         .any(|i| i.kind == IssueKind::ByteOverflow && i.severity == Severity::Error));

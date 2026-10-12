@@ -2,7 +2,7 @@
 //! extraidas, translation memory e glossario (spec §13, §20). Um DB por
 //! projeto; TM global cross-projeto fica para depois.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use chrono::Utc;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -15,6 +15,7 @@ pub const DB_FILE: &str = "translations.sqlite";
 
 pub struct ProjectDb {
     conn: Connection,
+    project_dir: PathBuf,
 }
 
 impl ProjectDb {
@@ -63,7 +64,15 @@ impl ProjectDb {
                 failed INTEGER NOT NULL DEFAULT 0
             );",
         )?;
-        Ok(ProjectDb { conn })
+        Ok(ProjectDb {
+            conn,
+            project_dir: project_dir.to_path_buf(),
+        })
+    }
+
+    /// Diretorio do projeto deste banco (as tabelas `.tbl` moram ao lado).
+    pub fn project_dir(&self) -> &Path {
+        &self.project_dir
     }
 
     /// Upsert de entries preservando traducao ja existente quando a nova vem vazia

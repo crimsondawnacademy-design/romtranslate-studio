@@ -62,6 +62,10 @@ pub struct ScanOutcome {
     /// true = parou em max_entries; ha mais strings alem das retornadas.
     pub truncated: bool,
     pub scanned_bytes: u64,
+    /// A tabela que este scan leu (encoding `Table`). Em `scan_project` e a
+    /// copia do projeto — a que vale dali em diante.
+    #[serde(default)]
+    pub tbl_path: Option<PathBuf>,
 }
 
 pub fn scan_file(path: &Path, config: &ScanConfig) -> Result<ScanOutcome> {
@@ -84,6 +88,22 @@ pub fn scan_file(path: &Path, config: &ScanConfig) -> Result<ScanOutcome> {
         "scan concluido"
     );
     Ok(outcome)
+}
+
+/// Scan do arquivo de origem de um projeto. A tabela `.tbl` escolhida entra
+/// no projeto antes (`tbl::adopt_table`) e e lida de la: a reinsercao regrava
+/// pela mesma tabela que leu.
+pub fn scan_project(project_dir: &Path, config: &ScanConfig) -> Result<ScanOutcome> {
+    let mut config = config.clone();
+    if config.encoding == ScanEncoding::Table {
+        if let Some(tbl_path) = config.tbl_path.take() {
+            config.tbl_path = Some(crate::tbl::adopt_table(project_dir, &tbl_path)?);
+        }
+    }
+    scan_file(
+        &crate::project::load_project(project_dir)?.source_path,
+        &config,
+    )
 }
 
 pub fn scan_bytes(data: &[u8], config: &ScanConfig) -> Result<ScanOutcome> {
@@ -161,6 +181,10 @@ pub fn scan_bytes(data: &[u8], config: &ScanConfig) -> Result<ScanOutcome> {
         entries,
         truncated,
         scanned_bytes: (end - start) as u64,
+        tbl_path: match config.encoding {
+            ScanEncoding::Table => config.tbl_path.clone(),
+            _ => None,
+        },
     })
 }
 

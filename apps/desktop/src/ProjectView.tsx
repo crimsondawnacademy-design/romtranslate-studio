@@ -83,6 +83,7 @@ export default function ProjectView({
     lower: null,
   });
   const [tblSaved, setTblSaved] = useState(false);
+  const [tblAdopted, setTblAdopted] = useState(false);
   const [filter, setFilter] = useState("");
   const [busy, setBusy] = useState(false);
   const [savedPath, setSavedPath] = useState<string | null>(null);
@@ -161,6 +162,7 @@ export default function ProjectView({
     if (typeof path === "string") {
       setTblPath(path);
       setTblSaved(false);
+      setTblAdopted(false);
     }
   }
 
@@ -173,8 +175,8 @@ export default function ProjectView({
     setSavedPath(null);
     setBusy(true);
     try {
-      const outcome = await invoke<ScanOutcome>("scan_file", {
-        path: project.sourcePath,
+      const outcome = await invoke<ScanOutcome>("scan_project", {
+        projectDir,
         config: {
           encoding,
           tblPath: encoding === "table" ? tblPath : null,
@@ -185,6 +187,11 @@ export default function ProjectView({
         },
       });
       await invoke<number>("save_entries", { projectDir, entries: outcome.entries });
+      // Tabela de fora foi copiada pro projeto: e a copia que vale agora.
+      if (outcome.tblPath && outcome.tblPath !== tblPath) {
+        setTblPath(outcome.tblPath);
+        setTblAdopted(true);
+      }
       setScanInfo({ found: outcome.entries.length, truncated: outcome.truncated });
       await reloadEntries();
     } catch (e) {
@@ -238,6 +245,7 @@ export default function ProjectView({
       setTblBases(bases);
       setTblPath(path);
       setTblSaved(true);
+      setTblAdopted(false);
     } catch (e) {
       setError(String(e));
     }
@@ -608,7 +616,10 @@ export default function ProjectView({
           {tblSaved && tblPath && (
             <div className="ok">{t("relative.saved", { path: tblPath })}</div>
           )}
-          <p className="hint left">{t("relative.readOnly")}</p>
+          {tblAdopted && tblPath && (
+            <div className="ok">{t("relative.adopted", { path: tblPath })}</div>
+          )}
+          <p className="hint left">{t("relative.writeBack")}</p>
         </div>
       )}
 
