@@ -5,7 +5,7 @@ gerado_por: claude / opus-5.5
 motivo: pausa-longa
 branch: main
 ultimo_commit_de_codigo: 3b4369e (2026-10-12)
-versao_publicada: v0.1.1
+versao_publicada: v0.1.2
 ---
 
 # HANDOFF — RomTranslate Studio
@@ -34,7 +34,7 @@ de trabalho do mantenedor (decisão registrada em `.ctx/DECISIONS.md`).
 | | |
 |---|---|
 | Repositório (público) | https://github.com/crimsondawnacademy-design/romtranslate-studio |
-| Versão publicada | https://github.com/crimsondawnacademy-design/romtranslate-studio/releases/tag/v0.1.1 |
+| Versão publicada | https://github.com/crimsondawnacademy-design/romtranslate-studio/releases/tag/v0.1.2 (12/10/2026, tag no commit `fc2e280`) |
 | Stack | Tauri 2, React 19, Vite 8, TypeScript (pnpm); Rust em workspace |
 | Tamanho | 9.380 linhas no core, 3.739 de testes, 643 na ponte Tauri, 2.116 de frontend |
 | Testes | 150 em Rust (147 rodam; 3 são manuais) e 9 no frontend |
@@ -124,29 +124,27 @@ Está provado só na fixture sintética de NES. Texto comprimido continua só
 Esses três foram conferidos com o backend simulado e, no caso do Codex, com
 uma chamada real pelo core. Falta vê-los no app compilado.
 
-**No código mas ainda não publicado em binário** (depois da v0.1.1): tabelas
-com ponteiros de 16 bits e a correção descrita em 3.1 (`929503b`); busca
-relativa e Raio-X (`401457f`).
+**No código mas ainda não publicado em binário** (depois da v0.1.2): a
+extração estruturada tirando do projeto o lixo antigo sem tradução
+(`84b7d76`) e dois ajustes no limite de tamanho das frases de tabela
+(`bacc368`).
 
 ---
 
 ## 3. Pendências — por prioridade
 
-### 3.1 Decisão pendente: lançar a v0.1.2
+### 3.1 A v0.1.2 saiu em 12/10/2026
 
-A v0.1.1 publicada tem um bug que o commit `929503b` corrige. Ele aparece
-num caso específico de DS ou PS1: o arquivo começa com uma frase, tem uma
-sequência de zeros em algum lugar, e essa primeira frase é traduzida para algo
-maior que o original. O app tratava os zeros como tabela de ponteiros e os
-reescrevia. Se forem só preenchimento, nada acontece; se forem dado do jogo, o
-jogo corrompe. É raro, mas é corrupção silenciosa.
+Publicada com a confirmação por escrito do mantenedor. Ela corrige o bug da
+v0.1.1 (num arquivo de DS ou PS1 que começa com uma frase e tem uma sequência
+de zeros, traduzir essa frase para algo maior fazia o app reescrever os zeros
+como tabela de ponteiros) e leva tudo o que entrou no `main` até o commit
+`fc2e280`. A v0.1.1 e a v0.1.0 têm, no topo das notas, o aviso para usar a
+v0.1.2.
 
-Falta só decidir e executar o passo a passo da seção 6.3. Ao publicar, vale
-pôr na v0.1.1 o mesmo tipo de aviso que a v0.1.0 já tem.
-
-Em 12/10 o mantenedor foi perguntado e não confirmou. A v0.1.2, quando sair,
-leva também a busca relativa e o Raio-X (`401457f`). Não crie a tag sem ele
-dizer.
+As telas novas dessa versão não foram clicadas no app compilado antes do
+lançamento; as notas dizem isso. Vale o mantenedor instalar a v0.1.2 e usar
+uma vez antes de divulgar.
 
 ### 3.2 Prioridade 1: quase nada foi testado em jogo real
 
@@ -213,7 +211,7 @@ com posição relativa a uma seção do arquivo em vez do arquivo inteiro.
 
 O projeto nunca foi divulgado. Em 12/10/2026: 2 estrelas, nenhuma issue,
 nenhum pull request. Os lugares naturais são r/romhacking e ROMhacking.net.
-Divulgue depois da v0.1.2, com o link da tag.
+A v0.1.2 já saiu: divulgue com o link da tag.
 
 ### 3.6 Miudezas
 
