@@ -4,7 +4,7 @@ handoff_gerado: 2026-10-12
 gerado_por: claude / opus-5.5
 motivo: pausa-longa
 branch: main
-ultimo_commit_de_codigo: bb98e7f (2026-10-12)
+ultimo_commit_de_codigo: 3b4369e (2026-10-12)
 versao_publicada: v0.1.1
 ---
 
@@ -63,7 +63,7 @@ validar e revisar, reinserir em cópia de trabalho e exportar patch.
 | RTSF (formato sintético próprio, para testes) | completa | completa | sim |
 | Game Boy Advance | ASCII | no lugar; checksum do header recalculado | sim: vai para o fim do ROM |
 | Nintendo DS | ASCII e UTF-16LE, por arquivo | no lugar; CRC do header recalculado | sim: o arquivo cresce e a FAT é reapontada |
-| NES | ASCII (ou tabela `.tbl` no scanner) | no lugar | não |
+| NES | ASCII (ou tabela `.tbl` no scanner) | no lugar; texto lido por `.tbl` volta pela tabela | não |
 | Super Nintendo | ASCII | no lugar; checksum interno recalculado | não |
 | GameCube | por arquivo do disco | no lugar | não |
 | PlayStation 1 (ISO, BIN raw, `.cue`) | por arquivo do disco | no lugar; EDC/ECC regenerado | sim, pouco: sobra do último setor do arquivo |
@@ -94,8 +94,11 @@ que gera binários para macOS (Apple Silicon e Intel), Windows e Linux.
   estão presas neles, quanto do arquivo é denso (comprimido ou cifrado) e
   quantas strings extraídas têm ponteiro em tabela.
 
-Os dois têm limite declarado na interface: texto lido por tabela **não é
-regravado** no jogo, e texto comprimido é só **contado**.
+Texto lido por tabela **é regravado** no jogo desde 12/10: o scan guarda a
+tabela em `<projeto>/tables/<id>.tbl` e a validação e a reinserção codificam
+a tradução por ela (`crates/core/src/tbl.rs`; decisão no DECISIONS de 12/10).
+Está provado só na fixture sintética de NES. Texto comprimido continua só
+**contado**.
 
 **Também de 12/10** (commits `7ed3686` e `bb98e7f`):
 
@@ -168,11 +171,10 @@ com posição relativa a uma seção do arquivo em vez do arquivo inteiro.
 
 ### 3.4 Prioridade 2: limites de formato que travam uso real
 
-- **Texto em tabela própria não é regravado.** É a pendência que mais pesa:
-  a busca relativa lê o jogo, a IA traduz, mas `inplace::encode` devolve
-  `None` para `TextEncoding::Table` e `validate::encoded_len` devolve
-  `Unsupported`. Falta guardar o `.tbl` no projeto e codificar a tradução por
-  ele. Sem isso nenhum jogo de NES, SNES ou Game Boy vai de ponta a ponta.
+- **Texto em tabela própria: regravado desde 12/10, sem teste em jogo real.**
+  Falta medir num jogo de verdade (o terminador é mesmo `0x00`?), dizer pra
+  IA quais caracteres a tabela tem (hoje ela propõe acento e o validador
+  barra) e ter um teste com tabela numa plataforma com checksum, como o SNES.
 - **Descompressão só detecta.** O Raio-X acha blocos LZ77 tipo 0x10 e conta
   as frases dentro deles; o app não extrai nem reinsere esse texto, e não
   reconhece outros compressores (LZ11 do DS mais novo, Huffman, os próprios

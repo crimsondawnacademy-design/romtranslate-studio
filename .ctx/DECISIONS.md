@@ -576,3 +576,93 @@ assinatura — projeto de 20 mil strings são milhares de chamadas. Windows
 nunca foi testado (o shim `.cmd` do npm pode pedir o caminho completo). Se o
 Codex mudar o nome de uma flag, o erro aparece no "Testar conexão"/na
 primeira tradução, não em silêncio.
+
+## 2026-10-12 — Texto em tabela é regravado: a tabela mora no projeto e o adapter recebe bytes prontos
+
+**Contexto:** a busca relativa lia o jogo por tabela (`TextEncoding::Table(id)`),
+mas a tradução nunca voltava: `inplace::encode` devolvia `None` (a entry caía
+em `ignored_generic`) e `validate::encoded_len` devolvia `Unsupported`. A entry
+só guarda o id da tabela (nome do arquivo sem extensão).
+
+**Decisão 1 — a tabela que vale é a cópia em `<projeto>/tables/<id>.tbl`.**
+
+- `scan::scan_project` (novo; é o que a interface chama) passa por
+  `tbl::adopt_table`: tabela escolhida fora do projeto é copiada antes do scan,
+  e o scan lê a cópia. Leitura, validação e reinserção usam o mesmo arquivo, e
+  o projeto não depende de um arquivo solto no disco (nem na outra máquina).
+- Cópia que já existe com outro conteúdo **não é sobrescrita**: é erro.
+  Alternativa pesada: o arquivo escolhido sempre vence. Recusada porque a
+  mensagem de validação manda completar `tables/<id>.tbl`; um novo scan com o
+  arquivo de fora apagaria essa edição sem aviso. Depois do primeiro scan a
+  interface passa a apontar pra cópia (`ScanOutcome.tbl_path`) e diz onde ela
+  está.
+- Tabela ausente é `Err` da validação inteira e da reinserção, com o caminho
+  esperado — não issue por entry: marcar tudo como `Error` e depois voltar pra
+  `Machine` apagaria os `Reviewed`. Projeto escaneado antes desta mudança com
+  tabela de fora cai aqui: basta escanear de novo ou copiar o arquivo.
+
+**Decisão 2 — `GameAdapter::apply_text` não muda.** O adapter recebe só
+`(data, entries)`, então a tabela tinha que chegar por um destes caminhos:
+
+| Opção | Por que não |
+|---|---|
+| Tabelas como parâmetro do trait | 9 adapters e 29 chamadas em teste mudam pra carregar um argumento que quase todos só repassam |
+| Estado global ou thread-local | esconde a dependência: o adapter passaria a depender de algo que a assinatura não mostra |
+| Gravar o texto de tabela depois do adapter | o checksum do SNES ficaria velho, e o PS1 regenera EDC/ECC comparando com a imagem que recebeu |
+| **Escolhida:** `reinsert.rs` codifica antes e os bytes viajam na entry | — |
+
+`reinsert::encode_table_entries` lê a tabela, codifica e guarda em
+`metadata.encoded` (`TextEntry::set_encoded`/`encoded`) — o mesmo canal por
+onde `terminated` e `pointers` já chegam no planner. `inplace::encode` usa
+esses bytes; sem eles é `Err`, então texto de tabela nunca mais é pulado
+calado. Nenhum adapter foi tocado. Custo assumido: um contrato por chave de
+JSON entre dois módulos. O que o segura: só `reinsert` escreve a chave, sempre
+por cima, ela nunca vai pro banco, e o planner recusa bytes menores que o
+espaço da string.
+
+**Decisão 3 — o codificador (`TblTable::encode`).**
+
+- Casamento mais longo sobre o texto (entrada pode valer vários caracteres:
+  `[FIM]`, `th`). É guloso, sem voltar atrás; o limite está num comentário
+  `ponytail:` no código.
+- Dois bytes com o mesmo texto: vale a **menor chave** (a mais curta; no
+  empate, a de menor valor). A regra existe porque o `HashMap` não tem ordem.
+- Caractere fora da tabela: erro com o caractere e a posição (em caracteres,
+  contando de 1). Nunca um byte inventado.
+- Auto-checagem: o que foi codificado é relido pela própria tabela. Se não
+  volta o mesmo texto (chave de 2 bytes que começa por outra chave), é erro
+  "tabela ambígua" em vez de gravar outro texto.
+- Entrada de texto vazio (`00=`) só existe na leitura.
+
+**Decisão 4 — preenchimento da sobra (`TblTable::encode_slot`), uma função só
+pra validação e reinserção.**
+
+- Original terminada (o byte seguinte é `0x00`): a sobra vira `0x00`, como nos
+  outros encodings.
+- Largura fixa: a sobra é o espaço **da tabela**. Sem espaço na tabela (ou com
+  espaço de 2 bytes numa sobra ímpar) a tradução tem que ter o tamanho exato;
+  o erro aparece já na validação (`ByteOverflow`, severidade `Error`).
+- Limite conhecido: "terminada" é heurística do scanner. Num jogo cujo
+  terminador é outro byte e que tem `0x00` logo depois da string, a sobra
+  ganharia `0x00` dentro do campo. Não dá pra saber sem conhecer o jogo; o
+  README manda conferir no emulador.
+
+**Validação:** `encoded_len` e `validate_entry` recebem `Option<&TblTable>`.
+`ProjectDb` passou a guardar o diretório do projeto, então
+`validate_project_db`, `apply_manual_translation` e `set_reviewed` acham as
+tabelas sem mudar de assinatura. O bloqueio da reinserção agora cita o
+primeiro erro (é o que nomeia o caractere).
+
+**Interface:** o contador de bytes do editor continua sem número pra texto de
+tabela (`encodedByteLength` devolve `null`). Portar o codificador pro
+TypeScript duplicaria a regra; o core mede ao salvar e devolve as issues.
+
+**Prova:** `tests/table_reinsert.rs` (8 testes) e 5 unitários em `tbl.rs`.
+Mutação: com `inplace::encode` devolvendo `None` pra tabela, como era, 6 dos 8
+falham — o de ida e volta inclusive (`applied` 0 em vez de 3).
+
+**O que não está provado:** só a fixture sintética de NES; nenhum jogo real;
+as outras plataformas in-place passam pelo mesmo planner mas não têm teste com
+tabela; chave de 2 bytes e entrada de vários caracteres só em teste unitário.
+E a IA ainda não sabe quais caracteres a tabela tem: ela vai propor acento e
+o validador vai barrar.
