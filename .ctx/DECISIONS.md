@@ -866,6 +866,8 @@ antiga contava tile como frase. O Raio-X agora conta o que a extração leria
 apaga as entries de lixo que já estão no banco (o upsert só acrescenta e
 atualiza). Apagar linha do projeto do usuário é decisão do Rhuan. Hoje a tela
 diz que o que já estava continua na lista, e o caminho é um projeto novo.
+(Resolvido no mesmo dia: ver "A extração estruturada tira do projeto o lixo
+antigo sem tradução", mais abaixo.)
 
 **Limites:** um jogo, em inglês; a regra de caixa e a de vogal só pesam no
 alfabeto latino (kana e kanji passam como letra, então UTF-16 falso do DS
@@ -1096,3 +1098,61 @@ O modelo padrão do Codex muda com o tempo. Nada sobre jogo real.
 
 **Mudança no repo:** só o teste manual (`#[ignore]`) e a documentação.
 Nenhuma linha de `src/` mudou e nenhum teste entrou no conjunto normal.
+
+## 2026-10-12 — A extração estruturada tira do projeto o lixo antigo sem tradução
+
+**Contexto:** era o passo 1a do STATE, deixado de fora da decisão do filtro
+("Parece texto", acima): o upsert só acrescenta e atualiza, então um projeto
+criado antes do filtro ficava com as entries de lixo. No projeto real do Rhuan
+(GBA de 16 MiB) são 20.000 antigas, cerca de 16 mil delas lixo; extrair de
+novo somava as 17.936 novas e a lista crescia. A opção (ii) do passo 1a chegou
+como tarefa pela sessão que coordena o trabalho, em 12/10.
+
+**Decisão 1 — só sai a entry que cumpre as cinco condições**
+(`ProjectDb::remove_stale_junk`, numa transação, depois do upsert):
+
+| condição | o que ela protege |
+|---|---|
+| sem tradução (`translated_text` nulo) | trabalho do usuário e da IA: lixo traduzido fica |
+| fora dos ids que a extração acabou de devolver | o que acabou de ser gravado; formato declarado (RTSF) não filtra e pode devolver string que não parece texto |
+| sem ponteiro em tabela na metadata guardada | ponteiro é evidência mais forte que aparência (decisão 2 do filtro) |
+| encoding diferente de `Table` | texto lido por `.tbl` veio de um scan que o usuário pediu, e a regra é fraca pra ele |
+| não passa em `scan::looks_like_text` | texto que só o Escanear acha ("Yes", "No", "HP" com mínimo de 2 caracteres) |
+
+O número apagado volta em `ExtractOutcome::removed` e vira uma linha na tela.
+A condição da tradução está duas vezes, no filtro em Rust e no `DELETE`
+(`AND translated_text IS NULL`): é a que protege trabalho feito.
+
+**Decisão 2 — só a extração estruturada apaga.** O Escanear é a ferramenta de
+descoberta e o usuário pode ter desligado o filtro de propósito; ele continua
+só acrescentando e atualizando.
+
+**O que não foi feito:**
+
+| opção | por que não |
+|---|---|
+| apagar lixo com tradução de máquina (status `machine`) | é linha com conteúdo: a IA gastou chamada nela e o usuário pode ter conferido sem marcar como revisada |
+| apagar tudo que a extração não devolveu | levaria texto achado só no Escanear e entry de tabela |
+| não limpar quando a extração bate no teto | deixaria sem limpeza os jogos grandes (no DS e no PS1 o teto corta por arquivo e a extração sai `truncated` com facilidade); o custo está em Limites |
+| botão separado de limpeza | um passo a mais pra quem só quer a lista certa; o número na tela já diz o que houve |
+
+**Limites:**
+
+- projeto em que a IA já traduziu o lixo continua com ele (as linhas têm
+  tradução). Pra esse caso o caminho ainda é um projeto novo; a memória de
+  tradução devolve o que presta;
+- não há desfazer. A entry apagada volta pelo Escanear sem filtro, com o mesmo
+  id;
+- extração cortada no teto: uma string com ponteiro que ficou depois do corte
+  e que o banco só conhecia pelo scan cru (sem o ponteiro guardado) sai junto,
+  se não parecer texto e não tiver tradução. No GBA medido o teto fica longe
+  (17.936 de 100 mil);
+- a limpeza relê o banco inteiro (`load_entries`): 0,2 s com 100 mil entries,
+  pela medição da decisão do teto;
+- NÃO rodado no projeto real: o Rhuan re-extrai no app.
+
+**Prova:** `tests/text_filter.rs`, +7 testes e o de re-extração atualizado
+(afirmava que nada saía do banco). Mutação: cada uma das cinco condições
+tirada sozinha derruba exatamente um teste, e `extract_project` sem a chamada
+derruba sete. Na fixture, 432 entries do scan cru viram 21 (`removed` 411) e a
+segunda extração não tira nada.

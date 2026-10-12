@@ -98,8 +98,9 @@ que gera binários para macOS (Apple Silicon e Intel), Windows e Linux.
   `scan::looks_like_text` descarta isso antes do teto de 100 mil strings, e a
   tela diz quantas saíram. No Escanear é a caixa "Só o que parece texto"
   (ligada); na extração estruturada é sempre. String com ponteiro em tabela
-  nunca é descartada. Projeto antigo fica com o lixo que já tinha: decisão em
-  aberto no `.ctx/STATE.md`, passo 1a.
+  nunca é descartada. Projeto antigo: a extração estruturada tira o lixo que
+  ficou sem tradução e mostra quantas strings saíram
+  (`ProjectDb::remove_stale_junk`); o Escanear não apaga nada.
 
 Texto lido por tabela **é regravado** no jogo desde 12/10: o scan guarda a
 tabela em `<projeto>/tables/<id>.tbl` e a validação e a reinserção codificam
