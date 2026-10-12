@@ -666,3 +666,108 @@ as outras plataformas in-place passam pelo mesmo planner mas não têm teste com
 tabela; chave de 2 bytes e entrada de vários caracteres só em teste unitário.
 E a IA ainda não sabe quais caracteres a tabela tem: ela vai propor acento e
 o validador vai barrar.
+
+## 2026-10-12 — A tradução por IA respeita a tabela: lista no prompt, lote por tabela, acento trocado com aviso
+
+**Contexto:** entry de `TextEncoding::Table(id)` era traduzida com o mesmo
+prompt das outras. A tabela da busca relativa só tem letras sem acento e o
+espaço; traduzindo pra pt-BR a IA devolvia `ação`, `início!`, e a validação
+barrava entry por entry (`IssueKind::Unencodable`).
+
+**Decisão 1 — um lote, uma tabela.** `pipeline::run_translation` ordena o que
+sobrou da memória pela tabela (ordenação estável: texto sem tabela primeiro,
+na ordem de sempre) e corta os lotes dentro de cada grupo.
+`TranslationRequest.charset` é do pedido inteiro.
+
+| Opção | Por que não |
+|---|---|
+| Lote misturado, lista de caracteres em cada item | a lista (50+ caracteres) se repete em todo item, e regra por item o modelo segue pior que regra do pedido |
+| Lote misturado, uma lista só (união ou interseção) | união deixa passar caractere que uma das tabelas não tem; interseção proíbe o que a outra tem |
+| **Escolhida:** agrupar por tabela | custo: até um lote incompleto a mais por tabela |
+
+Projeto sem tabela não muda: a ordem das entries é a mesma e o prompt é o
+mesmo, letra por letra (teste com o texto inteiro do prompt antigo, que
+passou contra o código de antes da mudança).
+
+**Decisão 2 — o que vai no prompt.** `TblTable::charset` devolve os
+caracteres das entradas de **um** caractere, em ordem. Entrada de vários
+caracteres fica de fora: código de controle (`[FIM]`) o tradutor copia do
+original, e dupla de letras (`th`) é só compressão. O bloco manda usar só
+aqueles caracteres, abre exceção pra placeholder copiado do original, diz se
+há espaço, manda reescrever sem a pontuação que falta e avisa que vale pro
+glossário (por isso vem **depois** dele). A frase "sem letra acentuada" só
+entra quando a tabela não tem nenhuma letra fora do ASCII.
+
+**Decisão 3 — rede de segurança: troco o acento, e a troca aparece.**
+`TblTable::drop_missing_accents` percorre a resposta como o codificador
+(casamento mais longo); o que a tabela escreve passa inteiro. Caractere que
+ela não escreve é trocado pela letra base **só se** as três condições valem:
+a decomposição canônica do Unicode dá letra base + marcas `U+0300..U+036F`;
+a base é letra ASCII; a tabela tem a base. Senão fica como veio e a validação
+acusa — nada some e nada vira outro símbolo.
+
+- Risco assumido: tirar acento pode mudar o sentido em português (`avô`/`avó`
+  viram `avo`; `é` vira `e`). É a convenção de tradução de jogo sem fonte
+  acentuada, mas não é "sem perda" sempre. Por isso a troca não é calada:
+  `ProjectDb::record_accent_swap` guarda (resposta, gravado) e a validação
+  mostra um aviso por entry (`IssueKind::AccentDropped`, severidade
+  `Warning`) com os dois textos e o caminho do `.tbl`. O aviso vale enquanto
+  a tradução for a gravada ali; editada à mão, some.
+- Por que tabela nova no banco (`accent_swaps`) e não `entries.metadata`: um
+  novo scan troca a metadata inteira e o aviso sumiria (há teste). Por que
+  não só um número no resumo da tradução: some ao fechar o painel e não diz
+  em qual frase olhar.
+- Base só ASCII de propósito: `й` → `и` e `が` → `か` também são
+  decomposições canônicas, mas dão outra letra.
+- Fica de fora, e continua erro: maiúscula ↔ minúscula; aspas e travessão
+  tipográficos; acento solto (`e` + `U+0301`, comentário `ponytail:` no
+  código); letra sem decomposição (`ß`, `ø`). Tradução digitada à mão não é
+  mexida. Texto `Ascii` tem o mesmo problema e não entrou (a tarefa era a
+  tabela).
+- Troca parcial é gravada: `INÍCIO!` vira `INICIO!`, com o aviso da troca e o
+  erro do `!`. Sobra menos pro usuário corrigir.
+
+**Decisão 4 — memória de tradução.**
+
+- Acerto da memória (do projeto ou global) em entry de tabela passa pela
+  mesma rede. Se nem sem os acentos a tabela escreve (veio de jogo de outro
+  encoding, com pontuação), o acerto é descartado e o provider é quem
+  responde, com a lista.
+- Resposta de lote de tabela **não vai pra memória global**: ela é moldada
+  pela tabela de um jogo (`OPCOES`), e a memória global entrega pra projeto
+  de qualquer encoding sem perguntar ao provider. A memória do projeto
+  guarda a resposta crua. Limite conhecido: a edição manual
+  (`apply_manual_translation`) continua alimentando a global, como antes.
+
+**Decisão 5 — `icu_normalizer` como dependência direta do core.** A
+decomposição precisa dos dados do Unicode e a biblioteca padrão não os tem.
+O crate já estava na árvore (reqwest → url → idna), com a mesma feature
+(`compiled_data`): o `Cargo.lock` ganhou uma linha e nenhum crate novo é
+baixado. Alternativas: `unicode-normalization` (crate novo) e uma tabela de
+letras digitada à mão (erro de digitação vira troca errada, e sem biblioteca
+não há com o que conferir).
+
+**Tabela ausente:** `run_translation` agora erra no começo, com o caminho
+esperado, em vez de traduzir às cegas — igual à validação e à reinserção.
+
+**Prova:** `tests/table_translate.rs` (5 testes, provider de mentira) e 5
+unitários em `tbl.rs` e `provider.rs`. Mutação: sem a troca, sem a lista no
+prompt, com a memória global recebendo tudo, com o acerto da memória sem
+filtro, com lote misturado e com a base sem conferir a tabela — as seis
+quebram algum teste.
+
+**Medido com modelo de verdade (12/10, Ollama local, `llama3.2:3b`, as 7
+frases da fixture):** nenhuma pontuação fora da tabela; 4 das 7 respostas
+ainda vieram com acento e as 4 foram gravadas sem ele; 0 erros de validação.
+Uma rodada, um modelo pequeno: é indício, não garantia. O teste fica no repo
+atrás de `#[ignore]`.
+
+**O que a medição mostrou e NÃO foi resolvido:** as 7 traduções ficaram
+maiores que o espaço da original. Texto de tabela é in-place e vem do scanner
+com `max_bytes` vazio, então o prompt não diz o tamanho; a validação só avisa
+(`ByteOverflow`, `Warning`) e a reinserção recusa pedindo pra encurtar. É a
+próxima parede do fluxo de tabela.
+
+**Não conferido:** a interface no app compilado (só typecheck, lint, build e
+paridade do i18n — o aviso chega pelo mesmo canal dos outros, como texto do
+core); modelo maior; jogo real.

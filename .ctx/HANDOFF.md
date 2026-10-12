@@ -172,9 +172,14 @@ com posição relativa a uma seção do arquivo em vez do arquivo inteiro.
 ### 3.4 Prioridade 2: limites de formato que travam uso real
 
 - **Texto em tabela própria: regravado desde 12/10, sem teste em jogo real.**
-  Falta medir num jogo de verdade (o terminador é mesmo `0x00`?), dizer pra
-  IA quais caracteres a tabela tem (hoje ela propõe acento e o validador
-  barra) e ter um teste com tabela numa plataforma com checksum, como o SNES.
+  Falta medir num jogo de verdade (o terminador é mesmo `0x00`?) e ter um
+  teste com tabela numa plataforma com checksum, como o SNES. Desde 12/10 a
+  IA recebe a lista de caracteres da tabela e o acento que a tabela não tem
+  é gravado como a letra base, com aviso de validação (`.ctx/DECISIONS.md`,
+  "A tradução por IA respeita a tabela"). Medido uma vez, com `llama3.2:3b`
+  local: sem pontuação fora da tabela, 4 de 7 respostas com acento (gravadas
+  sem ele) — e as 7 maiores que o espaço, porque a IA ainda não recebe o
+  tamanho da string de tabela. Esse é o próximo passo desse fluxo.
 - **Descompressão só detecta.** O Raio-X acha blocos LZ77 tipo 0x10 e conta
   as frases dentro deles; o app não extrai nem reinsere esse texto, e não
   reconhece outros compressores (LZ11 do DS mais novo, Huffman, os próprios
