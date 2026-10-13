@@ -11,6 +11,14 @@ numero: 3
 
 # HANDOFF 3 — RomTranslate Studio
 
+> **Adendo de 13/10/2026.** Este handoff descreve a v0.1.3. Depois dele: o
+> primeiro jogo inteiro saiu traduzido e rodou num emulador; a tradução passou
+> a ir em paralelo e a repedir o que não cabe; o core ganhou CLI
+> (`romtranslate`, em `apps/cli`); a interface ganhou identidade nova; o README
+> virou apresentação e o texto técnico foi pra `docs/DETALHES.md`. As seções 2,
+> 3 e 5 abaixo estão desatualizadas nesses pontos: o que vale é o
+> `.ctx/STATE.md` (entradas de 13/10 e próximos passos 0a e 0b).
+
 Pra quem pega o projeto frio: leia as seções **1 a 3**. O resto é consulta.
 O estado vivo fica em `.ctx/STATE.md`; o porquê de cada decisão, em
 `.ctx/DECISIONS.md`; a especificação do produto, em `docs/SPEC.md`.

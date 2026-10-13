@@ -1515,3 +1515,63 @@ que a tela faz; (3) as mensagens são em português sem acento, como as do
 core, e não passam pelo i18n da interface; (4) no macOS o cofre do sistema
 pode pedir permissão na primeira vez que a CLI ler uma chave de API gravada
 pelo app — não foi exercitado.
+
+## 2026-10-13 — Batches em paralelo e repergunta do que não coube
+
+**Contexto:** no primeiro jogo inteiro (13/10), o pipeline um batch por vez
+levava 25 a 40 s por chamada do Codex CLI (~2,5 h pro banco de texto), e 7% das
+respostas voltavam maiores que o espaço da frase e ficavam de fora da
+reinserção. Fora do app, um laço traduz → confere o tamanho → corrige zerou os
+estouros em 9.866 trechos. O Rhuan pediu a tradução "rápida e prática".
+
+**Decisão:** (1) `TranslateOptions.parallel`, padrão 4: os batches vão em
+levas, na mesma task (sem `spawn`, sem dependência nova), e as respostas são
+gravadas em ordem. (2) `shorten_rounds`, padrão 2: o que o provider respondeu
+NESTA rodada e não cabe volta a ele com a tradução anterior e o teto em
+caracteres. (3) Padrão de 25 frases por chamada.
+
+**Isto reabre a decisão de 12/10 "com modelo capaz o limite basta":** ela foi
+medida em 7 frases de fixture. Em jogo real, com o mesmo modelo, 7% estouram
+na primeira resposta e a repergunta leva a 199 de 200.
+
+**Por que só o que o provider respondeu na rodada:** tradução escrita à mão
+ou vinda da memória não é trocada sem a pessoa pedir. **Por que não aceitar
+qualquer resposta mais curta:** resposta vazia "cabe" em todo espaço — a
+medição pegou uma; só troca o que cabe e tem texto.
+
+**Alternativas descartadas:** `tokio::spawn` por batch (exigiria provider
+`'static` e `Arc` por toda a API); crate `futures` só pelo `join_all` (mexe no
+`Cargo.lock` no mesmo momento em que outra sessão acrescentava um crate);
+repergunta até caber (um provider que não encurta gastaria chamadas sem fim —
+para na rodada sem nenhum acerto).
+
+**Consequências assumidas:** `estimate_translation` deixou de ser teto (não
+conta a repergunta); a memória GLOBAL fica com a primeira resposta de batch
+ASCII, a comprida — a do projeto recebe a curta; com provider que limita taxa,
+4 chamadas juntas podem bater no limite antes; Ollama local não ganha nada.
+
+## 2026-10-13 — Identidade visual nova e página do projeto
+
+**Pedido do Rhuan:** "um design bem cartoonesco, rebranding (as cores e os
+tons)" e "atualize a página do projeto do github, de maneira que consigamos
+alcançar o máximo de estrelas; coloca a opção de donate, meu pix é [telefone]".
+
+**Decisão:** tema claro como principal (creme, rosa, céu, amarelo, texto
+ameixa), contorno grosso e sombra dura; o escuro segue o sistema. Cores só em
+tokens no `:root`. `logo.svg` é a fonte única do logo e dos ícones. Nenhum
+personagem, nome, silhueta ou asset de terceiros — só paleta e forma próprias.
+README de apresentação em inglês (alcance) com versão em português, e o texto
+técnico em `docs/DETALHES.md`. Apoio: seção com a chave Pix e `FUNDING.yml`
+apontando pra ela.
+
+**Regra que a página segue:** tudo o que ela afirma tem medição no
+`.ctx/STATE.md`, e ela diz o que NÃO foi provado (ninguém jogou até o fim, um
+jogo só, tabela e região à mão, Windows e Linux sem ninguém abrir).
+
+## 2026-10-13 — Site do projeto só depois da validação completa do tradutor
+
+**Decisão do Rhuan:** o site (conta Crimson Dawn, projeto pessoal) fica
+MAPEADO e só é construído depois de o tradutor estar validado, "pra não fazer
+grande mídia sem ter algo minimamente pronto". O mapa e a condição proposta
+estão no `.ctx/STATE.md`, próximo passo 0b. Nada de infraestrutura da empresa.
+
