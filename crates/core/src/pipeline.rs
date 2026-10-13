@@ -152,7 +152,12 @@ fn batch_request(
             .map(|e| BatchItem {
                 id: e.id.clone(),
                 text: e.source_text.clone(),
-                context: line_note(e).or_else(|| e.context.clone()),
+                // Mensagem de banco: a nota da entry e pra tela; pro modelo vai
+                // so a largura da linha.
+                context: e
+                    .context
+                    .clone()
+                    .filter(|_| crate::adapters::bank::line_width(e).is_none()),
                 max_bytes: e.max_bytes,
                 // Texto de tabela sem ponteiro em tabela so e gravado no
                 // lugar: o espaco da original e o teto, e o modelo
@@ -174,6 +179,7 @@ fn batch_request(
                         (e.encoding == TextEncoding::ShiftJis && !e.can_grow())
                             .then(|| e.max_bytes.unwrap_or(e.original_bytes.len()))
                     }),
+                max_line: crate::adapters::bank::line_width(e),
             })
             .collect(),
         source_language: opts.source_language.clone(),
@@ -181,18 +187,6 @@ fn batch_request(
         glossary: relevant_terms(glossary, batch),
         charset: charset.map(Charset::chars),
     }
-}
-
-/// O aviso da largura da caixa de texto pra mensagem de banco: ela pode
-/// crescer, mas cada linha tem que caber na caixa.
-fn line_note(entry: &TextEntry) -> Option<String> {
-    let width = crate::adapters::bank::line_width(entry)?;
-    Some(format!(
-        "The game's text box shows {width} characters per line. A line is the text between two \
-         codes in square brackets (and before the first and after the last one): write every \
-         line with at most {width} characters, counting spaces. Keep every code in square \
-         brackets exactly as it is, in the same order."
-    ))
 }
 
 /// Lotes seguidos que podem falhar (cada um ja com as suas tentativas) antes

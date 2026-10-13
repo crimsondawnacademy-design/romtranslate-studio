@@ -20,6 +20,12 @@ pub struct BatchItem {
     /// coisa da tabela. Fora desse caso o campo nem aparece no pedido.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_chars: Option<usize>,
+    /// So em mensagem que pode crescer e tem a largura da caixa de texto
+    /// conhecida (`adapters::bank`): quantos caracteres cabem numa linha.
+    /// Vai no item, e a regra vai uma vez so no prompt: sao milhares de
+    /// mensagens por rodada.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_line: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -133,6 +139,14 @@ pub fn build_system_prompt(req: &TranslationRequest) -> String {
              - If the natural translation is longer, use shorter words or drop words until it fits. Shorter is always fine.\n",
         );
     }
+    if req.items.iter().any(|item| item.max_line.is_some()) {
+        p.push_str(
+            "Line width (STRICT): some items have \"maxLine\", the number of characters the game's text box shows per line.\n\
+             - In those items a line is the text between two codes in square brackets (and before the first and after the last one).\n\
+             - Write every line of the translation with at most maxLine characters, counting spaces. The translation as a whole may be longer than the source.\n\
+             - Keep every code in square brackets exactly as it is and in the same order: you cannot add, remove or move line breaks.\n",
+        );
+    }
     p.push_str(
         "Respond with ONLY valid JSON in this exact shape, one entry per input item, same ids:\n\
          {\"translations\":[{\"id\":\"...\",\"translation\":\"...\"}]}\n",
@@ -202,6 +216,7 @@ mod tests {
                 context: None,
                 max_bytes: Some(24),
                 max_chars: None,
+                max_line: None,
             }],
             source_language: Some("en-US".into()),
             target_language: "pt-BR".into(),

@@ -276,6 +276,7 @@ mod tests {
                 context: None,
                 max_bytes: Some(12),
                 max_chars: None,
+                max_line: None,
             }],
             source_language: None,
             target_language: "pt-BR".to_string(),

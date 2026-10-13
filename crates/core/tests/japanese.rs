@@ -871,8 +871,18 @@ mod bank {
             .flat_map(|r| r.items.iter())
             .find(|i| i.text == synth::jis16_message(0))
             .expect("a primeira mensagem foi pedida");
-        assert_eq!(item.max_chars, None);
-        let note = item.context.as_deref().unwrap_or_default();
-        assert!(note.contains("characters per line"), "{note}");
+        // Sem teto de tamanho: a largura da linha, no item, e a regra dela uma
+        // vez so no prompt.
+        assert_eq!((item.max_chars, item.max_line), (None, Some(18)));
+        assert_eq!(item.context, None);
+        let request = requests
+            .iter()
+            .find(|r| r.items.iter().any(|i| i.max_line.is_some()))
+            .unwrap();
+        let prompt = romtranslate_core::provider::build_system_prompt(request);
+        assert_eq!(prompt.matches("maxLine").count(), 2, "{prompt}");
+        assert!(serde_json::to_string(item)
+            .unwrap()
+            .contains("\"maxLine\":18"));
     }
 }
