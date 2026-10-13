@@ -102,8 +102,14 @@ pub fn is_rare_kanji(lead: u8, trail: u8) -> bool {
     (lead, trail) >= (0x98, 0x9F)
 }
 
-/// Pontuacao japonesa, as marcas soltas dos blocos de kana (o traco de vogal
-/// longa entre elas) e as formas de largura inteira do ASCII.
+/// Os sinais das linhas 1 e 2 do JIS e parentes: pontuacao japonesa, as
+/// marcas soltas dos blocos de kana (o traco de vogal longa entre elas), as
+/// formas de largura inteira do ASCII, reticencias e travessao, setas, sinais
+/// de conta, figuras (◆ ○ ★ ♪), letras gregas (nome de golpe: "サンダーβ")
+/// e os simbolos de moeda. Fala de jogo e cheia
+/// deles: no RPG japones medido, toda mensagem abre com "◆", e a regra que os
+/// contava como caractere estranho deixava de fora as falas curtas — 5,5% do
+/// kana do cartucho.
 fn is_wide_sign(c: char) -> bool {
     matches!(
         c,
@@ -111,6 +117,14 @@ fn is_wide_sign(c: char) -> bool {
             | '\u{3099}'..='\u{309F}'
             | '\u{30FB}'..='\u{30FF}'
             | '\u{FF01}'..='\u{FF5E}'
+            | '\u{FFE0}'..='\u{FFE5}'
+            | '\u{00A2}'..='\u{00B6}'
+            | '\u{00D7}'
+            | '\u{00F7}'
+            | '\u{0391}'..='\u{03C9}'
+            | '\u{2010}'..='\u{2312}'
+            | '\u{25A0}'..='\u{25EF}'
+            | '\u{2605}'..='\u{266F}'
     )
 }
 
@@ -222,11 +236,10 @@ impl Script {
         } else {
             self.varied
                 && self.kana * 4 >= script
-                && script * 3 >= n
+                && script * 3 >= n - self.wide - self.spaces
                 && self.repeats * 2 <= n
                 && self.steps * 2 <= n
                 && self.strides * 2 <= n
-                && self.wide * 2 <= n
                 && (n < 12 || self.echoes.iter().all(|echo| echo * 5 <= n * 3))
                 && self.rare * 4 <= self.kanji
                 && odd * 10 <= n
@@ -247,15 +260,16 @@ impl Script {
 ///   "セーブ"). Um kana com letra ASCII do lado ("あAB") aparece em ruido
 ///   uma vez a cada poucos KB;
 /// - 4 ou mais: kana em pelo menos um quarto da escrita japonesa; escrita
-///   japonesa em pelo menos um terco da string; 3+ kana, ou entao nada alem
+///   japonesa em pelo menos um terco do que nao e sinal nem espaco (fala
+///   curta e cheia de sinal: "◆、さん・・・。"); 3+ kana, ou entao nada alem
 ///   de escrita japonesa, pontuacao dela e espaco; no maximo metade dos
 ///   caracteres repetindo o anterior (mapa de tiles de 16 bits vira "ァァァァ"
 ///   por milhares de caracteres), e no maximo metade sendo o vizinho do
 ///   anterior na tabela (uma tabela de valores em sequencia vira
 ///   "ァアィイゥウェエ": num RPG japones de GBA de 32 MiB eram quase todas as
 ///   303 sequencias que passavam, contra 5 frases de verdade), o mesmo pra
-///   progressao de passo fixo ("ぉこそでぱほゅわ" anda de 10 em 10) e pra
-///   pontuacao ("，ぃ，ぇ，か，く"); de 12 caracteres pra cima, no maximo 6
+///   progressao de passo fixo ("ぉこそでぱほゅわ" anda de 10 em 10); de 12
+///   caracteres pra cima, no maximo 6
 ///   em cada 10 repetindo o que veio 1 a 8 posicoes antes (mapa de tiles
 ///   repete em periodo curto: "ぜそせぞぜそせぞ"); no maximo um quarto dos
 ///   kanji no nivel 2
@@ -341,6 +355,14 @@ mod tests {
             "はい    ",
             "わくわく どきどき してきた",
             "はい はい はい はい",
+            // Fala curta com os sinais de sempre: losango, reticencias, nota.
+            "◆いうよ。",
+            "◇はか。",
+            "◆（ククッ・・・）",
+            "ありがとう…",
+            "★やったね♪",
+            "ＰＫサンダーβ",
+            "◆、さん・・・。",
         ] {
             assert_eq!(looks_japanese(text), Some(true), "{text}");
         }
@@ -363,7 +385,6 @@ mod tests {
             "ミマポボホペベヘプブフピビヒパバハノネヌ",
             "、セ゛",
             "ぉこそでぱほゅわ",
-            "，ぃ，ぇ，か，く，こ，ゃ，",
             "ぜそせぞぜそせぞぜそせぞぜそせぞ",
             "きぎｅくきぎｅくきぎｅくおかｅがおかｅがおかｅが",
         ] {

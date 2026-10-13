@@ -14,7 +14,7 @@
 //! o `.tbl` gerado junto: validacao, traducao e reinsercao seguem o caminho
 //! de qualquer tabela do projeto.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 use std::sync::OnceLock;
 
@@ -30,8 +30,6 @@ pub const TABLE_ID: &str = "jis16";
 const CELLS: usize = 94;
 /// O JIS X 0208 vai ate a linha 84.
 const ROWS: usize = 84;
-/// Onde comeca o nivel 2 do JIS (linha 48): os kanji raros.
-const LEVEL_2: usize = 47 * CELLS;
 /// De 0xFF00 pra cima a unidade e codigo de controle do jogo; 0xFFFF fecha a
 /// mensagem.
 const CONTROL: u16 = 0xFF00;
@@ -55,6 +53,16 @@ const MIN_SPACES: u32 = 100;
 const NEIGHBOR_GAP: usize = 128;
 const MIN_GROUP: usize = 3;
 const ALONE_CHARS: usize = 16;
+/// Usos pra julgar um comando (`find_params`) ou a marca de fala
+/// (`find_bullet`).
+const MIN_USES: u32 = 15;
+/// Abaixo disto, codigo sem caractere na tabela e desenho proprio do jogo.
+const GLYPHS: u16 = (ROWS * CELLS) as u16;
+/// As figuras do fim da linha 1 e do comeco da linha 2 do JIS, de "☆" a "〓":
+/// e com uma delas que jogo marca o comeco de uma fala.
+const SHAPES: std::ops::RangeInclusive<u16> = 88..=107;
+/// Uma mensagem nao passa disto (em unidades): o que passa e dado.
+const MAX_SPAN: usize = 16 * 1024;
 
 /// Codigo -> caractere, 0 onde a tabela nao tem nada. Montada uma vez.
 fn chars() -> &'static [u16] {
@@ -93,25 +101,70 @@ fn token(code: u16) -> String {
     format!("[{code:04X}]")
 }
 
+/// Comando com o parametro dele, numa peca so: `[FF08:0003]`.
+fn token_with(code: u16, param: u16) -> String {
+    format!("[{code:04X}:{param:04X}]")
+}
+
+fn key(code: u16) -> String {
+    format!("{:02X}{:02X}", code & 0xFF, code >> 8)
+}
+
+/// O que o arquivo mostrou do jeito que ESTE jogo usa a codificacao.
+#[derive(Debug, Default)]
+struct Dialect {
+    /// O codigo que o jogo usa como espaco entre palavras, se tem um fora da
+    /// tabela (`find_space`).
+    space: Option<u16>,
+    /// Comandos que levam um parametro na unidade seguinte
+    /// (`find_params`).
+    params: HashSet<u16>,
+    /// As figuras com que as falas abrem (`find_bullets`).
+    bullets: HashSet<u16>,
+}
+
 /// O `.tbl` desta codificacao: uma linha por caractere (chave = os 2 bytes do
-/// codigo, o menos significativo primeiro), os codigos de controle como
-/// `[FFxx]` e o espaco. `space` = o codigo que o jogo usa como espaco entre
-/// palavras; sem ele o espaco e o codigo 0 (o de largura inteira do JIS).
-pub fn table_text(space: Option<u16>) -> String {
+/// codigo, o menos significativo primeiro), o espaco, os codigos de controle
+/// como `[FFxx]`, cada par comando + parametro de `pairs` como `[FFxx:pppp]`
+/// e, como `[xxxx]`, os codigos em que a tabela padrao nao tem nada — e onde
+/// o jogo poe os desenhos dele (kanji proprio, icone). `space` = o codigo que
+/// o jogo usa como espaco entre palavras; sem ele o espaco e o codigo 0 (o de
+/// largura inteira do JIS).
+pub fn table_text(space: Option<u16>, pairs: &BTreeSet<(u16, u16)>) -> String {
     let mut out = String::from(
         "# Tabela gerada pelo RomTranslate Studio: codigos de 16 bits na ordem do JIS X 0208\n\
          # (codigo = posicao do caractere na tabela, gravado em little-endian).\n\
+         # [FFxx] e comando do jogo; [FFxx:pppp], comando com o parametro dele.\n\
+         # [xxxx] e um desenho proprio do jogo (kanji, icone) num codigo que a tabela\n\
+         # padrao deixa vazio: troque pelo caractere certo se souber qual e.\n\
          # Pode ser completada a mao: o app nao sobrescreve este arquivo.\n",
     );
     let space = space.unwrap_or(0);
-    let _ = writeln!(out, "{:02X}{:02X}= ", space & 0xFF, space >> 8);
-    for code in 0..(ROWS * CELLS) as u16 {
-        if let Some(c) = decode(code).filter(|_| code != space) {
-            let _ = writeln!(out, "{:02X}{:02X}={c}", code & 0xFF, code >> 8);
+    let _ = writeln!(out, "{}= ", key(space));
+    for code in 1..GLYPHS {
+        if code == space {
+            continue;
+        }
+        match decode(code) {
+            Some(c) => {
+                let _ = writeln!(out, "{}={c}", key(code));
+            }
+            None => {
+                let _ = writeln!(out, "{}={}", key(code), token(code));
+            }
         }
     }
     for code in CONTROL..END {
-        let _ = writeln!(out, "{:02X}FF={}", code & 0xFF, token(code));
+        let _ = writeln!(out, "{}={}", key(code), token(code));
+    }
+    for &(code, param) in pairs {
+        let _ = writeln!(
+            out,
+            "{}{}={}",
+            key(code),
+            key(param),
+            token_with(code, param)
+        );
     }
     out
 }
@@ -126,33 +179,85 @@ pub struct Kuten16 {
     pub table: String,
 }
 
-fn units(data: &[u8]) -> impl Iterator<Item = u16> + '_ {
+fn units(data: &[u8]) -> Vec<u16> {
     data.as_chunks::<2>()
         .0
         .iter()
         .map(|pair| u16::from_le_bytes(*pair))
+        .collect()
+}
+
+fn is_script(code: u16) -> bool {
+    decode(code).is_some_and(|c| is_kana(c) || is_kanji(c))
 }
 
 /// O codigo fora da tabela que mais aparece entre dois kana, se aparece
 /// bastante: jogo que escreve em kana separa as palavras com espaco, e o
 /// espaco dele nao precisa ser o do JIS.
-fn find_space(data: &[u8]) -> Option<u16> {
+fn find_space(codes: &[u16]) -> Option<u16> {
     let kana = |code: u16| decode(code).is_some_and(is_kana);
     let mut between: HashMap<u16, u32> = HashMap::new();
-    let mut window = [0u16; 2];
-    for (i, code) in units(data).enumerate() {
-        let [left, middle] = window;
-        let odd = middle != 0 && middle < CONTROL && decode(middle).is_none();
-        if i >= 2 && odd && kana(left) && kana(code) {
-            *between.entry(middle).or_default() += 1;
+    for w in codes.windows(3) {
+        let odd = w[1] != 0 && w[1] < CONTROL && decode(w[1]).is_none();
+        if odd && kana(w[0]) && kana(w[2]) {
+            *between.entry(w[1]).or_default() += 1;
         }
-        window = [middle, code];
     }
     between
         .into_iter()
         .max_by_key(|&(code, count)| (count, code))
         .filter(|&(_, count)| count >= MIN_SPACES)
         .map(|(code, _)| code)
+}
+
+/// Os comandos que levam um parametro: os que, em `MIN_USES` usos ou mais,
+/// quase nunca (menos de 1 em 10) sao seguidos de algo que continua um texto
+/// — kana, kanji, espaco, outro comando ou o fim da mensagem. Depois da
+/// quebra de linha vem texto; depois de "toca o som n" vem o n. So contam os
+/// usos dentro das mensagens de `spans` e logo antes delas: fora do texto,
+/// 0xFFxx e um numero qualquer, seguido de qualquer coisa.
+///
+/// Medido no jogo real: `FF01` (quebra de linha, 13 mil usos) e seguido de
+/// texto 96% das vezes; `FF04`, `FF23`, `FF06`, `FF22`, `FF0B`, `FF08` (de
+/// 166 a 1.846 usos cada), 0% a 1% — sempre um numero pequeno. Sem isto o
+/// numero era lido como letra e entrava na frase: traduzir a frase trocava o
+/// parametro do comando.
+fn find_params(codes: &[u16], space: Option<u16>, spans: &[Span]) -> HashSet<u16> {
+    let mut uses: HashMap<u16, (u32, u32)> = HashMap::new();
+    for span in spans {
+        // O comando logo antes da mensagem conta: o parametro dele foi lido
+        // como a primeira letra dela.
+        for i in span.begin.saturating_sub(1)..span.end.min(codes.len() - 1) {
+            if (CONTROL..END).contains(&codes[i]) {
+                let next = codes[i + 1];
+                let goes_on = next >= CONTROL || Some(next) == space || is_script(next);
+                let (count, plausible) = uses.entry(codes[i]).or_default();
+                *count += 1;
+                *plausible += u32::from(goes_on);
+            }
+        }
+    }
+    uses.into_iter()
+        .filter(|&(_, (count, plausible))| count >= MIN_USES && plausible * 10 < count)
+        .map(|(code, _)| code)
+        .collect()
+}
+
+/// As marcas de fala do jogo: as figuras (`SHAPES`: ☆★○●◎◇◆□■△▲▽▼※ e as
+/// setas) com que pelo menos `MIN_USES` mensagens de `spans` abrem logo
+/// depois do fim de outra. No jogo medido sao duas, "◆" (6.673 falas) e "◇".
+fn find_bullets(codes: &[u16], spans: &[Span]) -> HashSet<u16> {
+    let mut first: HashMap<u16, u32> = HashMap::new();
+    for span in spans {
+        if span.begin > 0 && codes[span.begin - 1] == END && SHAPES.contains(&codes[span.begin]) {
+            *first.entry(codes[span.begin]).or_default() += 1;
+        }
+    }
+    first
+        .into_iter()
+        .filter(|&(_, count)| count >= MIN_USES)
+        .map(|(code, _)| code)
+        .collect()
 }
 
 /// Texto longo o bastante pra valer fora de uma fila de textos.
@@ -164,123 +269,250 @@ fn stands_alone(text: &str) -> bool {
     text.chars().count() >= ALONE_CHARS && hiragana * 2 >= ALONE_CHARS
 }
 
-/// Uma unidade lida: caractere, codigo de controle ou nada disso.
-enum Unit {
+/// Uma peca lida a partir de uma unidade.
+enum Piece {
+    /// Caractere da tabela (o espaco do jogo vem como ' ').
     Char(char),
+    /// Desenho proprio do jogo num codigo que a tabela deixa vazio.
+    Glyph,
+    /// Comando do jogo, com ou sem parametro.
     Control,
     Other,
 }
 
-fn read(code: u16, space: Option<u16>) -> Unit {
-    if Some(code) == space {
-        Unit::Char(' ')
-    } else if (CONTROL..END).contains(&code) {
-        Unit::Control
-    } else {
-        decode(code).map_or(Unit::Other, Unit::Char)
+impl Dialect {
+    /// A peca que comeca em `codes[i]`, quantas unidades ela ocupa e como
+    /// ela aparece no texto.
+    fn piece(&self, codes: &[u16], i: usize) -> (Piece, usize) {
+        let code = codes[i];
+        if Some(code) == self.space {
+            (Piece::Char(' '), 1)
+        } else if (CONTROL..END).contains(&code) {
+            let with_param = self.params.contains(&code) && i + 1 < codes.len();
+            (Piece::Control, if with_param { 2 } else { 1 })
+        } else if let Some(c) = decode(code) {
+            (Piece::Char(c), 1)
+        } else if code != 0 && code < GLYPHS {
+            (Piece::Glyph, 1)
+        } else {
+            (Piece::Other, 1)
+        }
     }
+
+    fn text_of(&self, codes: &[u16], i: usize) -> String {
+        match self.piece(codes, i) {
+            (Piece::Char(c), _) => c.to_string(),
+            (Piece::Control, 2) => token_with(codes[i], codes[i + 1]),
+            _ => token(codes[i]),
+        }
+    }
+}
+
+/// Uma sequencia de pecas que pode ser uma mensagem: de `begin` a `end` (em
+/// unidades), do primeiro ao ultimo caractere ou desenho.
+struct Span {
+    begin: usize,
+    end: usize,
+    /// Caracteres e desenhos, espacos do meio inclusive.
+    chars: usize,
+    script: Script,
+}
+
+/// A sequencia que comeca em `codes[at]` (um caractere que nao e espaco, ou
+/// um desenho) e a unidade onde a varredura continua. Comando e espaco so
+/// entram quando vem outro caractere depois: no fim sao fecho de mensagem e
+/// preenchimento de campo.
+fn span_at(codes: &[u16], dialect: &Dialect, at: usize) -> (Span, usize) {
+    let mut span = Span {
+        begin: at,
+        end: at,
+        chars: 0,
+        script: Script::default(),
+    };
+    let (mut spaces, mut glyphs) = (0, 0);
+    let mut i = at;
+    while i < codes.len() && i - at < MAX_SPAN {
+        let (piece, len) = dialect.piece(codes, i);
+        match piece {
+            Piece::Char(' ') => spaces += 1,
+            Piece::Char(_) | Piece::Glyph => {
+                for _ in 0..std::mem::take(&mut spaces) {
+                    span.script.push(' ');
+                    span.chars += 1;
+                }
+                // O desenho proprio conta como um kanji qualquer, um por
+                // codigo: e o que ele quase sempre e.
+                let c = match piece {
+                    Piece::Char(c) => c,
+                    _ => char::from_u32(0x4E00 + codes[i] as u32).unwrap_or('\u{4E00}'),
+                };
+                glyphs += usize::from(matches!(piece, Piece::Glyph));
+                // Sem a conta de kanji raro do Shift-JIS: jogo com fonte
+                // propria guarda os poucos kanji que usa na ordem dele, e
+                // pela tabela padrao metade deles cai no nivel 2 (no jogo
+                // medido, os resumos de capitulo, cheios de kanji, ficavam de
+                // fora por isso).
+                span.script.push(c);
+                span.chars += 1;
+                span.end = i + len;
+            }
+            Piece::Control => {}
+            Piece::Other => break,
+        }
+        i += len;
+    }
+    // Sequencia que e quase so desenho proprio e dado, nao texto.
+    if glyphs * 4 > span.chars {
+        span.chars = 0;
+    }
+    (span, i.max(at + 1))
+}
+
+/// As sequencias de `codes` que passam por mensagem no jeito `dialect` de
+/// ler: comeco limpo, a regra de `Script` e, as curtas, fim limpo tambem.
+fn scan(codes: &[u16], dialect: &Dialect) -> Vec<Span> {
+    // Unidades que sao parametro de comando: nunca abrem uma mensagem.
+    let mut is_param = vec![false; codes.len()];
+    let mut i = 0;
+    while i < codes.len() {
+        let (piece, len) = dialect.piece(codes, i);
+        if matches!(piece, Piece::Control) && len == 2 {
+            is_param[i + 1] = true;
+        }
+        i += len;
+    }
+    // Antes de uma mensagem vem o fim de outra, um comando (ou o parametro
+    // dele) ou preenchimento. Sequencia que comeca depois de outro valor
+    // qualquer comeca no meio de um dado: a primeira "letra" dela pode ser o
+    // ultimo numero de uma tabela.
+    let clean_edge = |at: Option<usize>| {
+        at.and_then(|at| codes.get(at).map(|&code| (at, code)))
+            .is_none_or(|(at, code)| code == 0 || code >= CONTROL || is_param[at])
+    };
+
+    let mut found = Vec::new();
+    let mut i = 0;
+    while i < codes.len() {
+        let opens = !is_param[i]
+            && matches!(
+                dialect.piece(codes, i).0,
+                Piece::Glyph | Piece::Char('\u{21}'..)
+            );
+        if !opens {
+            i += 1;
+            continue;
+        }
+        // Numero de cabecalho da mensagem: logo depois do fim da anterior,
+        // um valor baixo (pontuacao da linha 1, se fosse texto) seguido da
+        // marca de fala do jogo. Fica fora da entry. No jogo medido sao 414
+        // falas assim, com valores de 1 a 52.
+        let header = i > 0
+            && codes[i - 1] == END
+            && codes[i] < *SHAPES.start()
+            && codes
+                .get(i + 1)
+                .is_some_and(|next| dialect.bullets.contains(next));
+        if header {
+            i += 1;
+        }
+        let (span, next) = span_at(codes, dialect, i);
+        // O espaco do jogo antes e depois nao conta: a linha de baixo de uma
+        // fala costuma abrir com um, logo depois da quebra de linha.
+        let is_space = |at: &usize| Some(codes[*at]) == dialect.space;
+        let before = (0..span.begin).rev().find(|at| !is_space(at));
+        let after = (span.end..codes.len()).find(|at| !is_space(at));
+        let clean = header || clean_edge(before);
+        // Ate 3 caracteres so entre comandos ou zeros dos dois lados: valor
+        // pequeno de mapa de tiles vira "あい" o tempo todo.
+        let anchored = span.chars > 3 || after.is_none_or(|at| clean_edge(Some(at)));
+        if clean && anchored && span.chars > 0 && span.script.verdict() == Some(true) {
+            found.push(span);
+        }
+        i = next;
+    }
+    found
 }
 
 /// As mensagens de `data` nesta codificacao, ou `None` se o arquivo nao
 /// guarda texto assim (menos de `MIN_SENTENCES` frases). Cada entry vai do
-/// primeiro ao ultimo caractere de uma sequencia de caracteres e codigos de
-/// controle; os codigos do meio viram `[FFxx]` no texto, e os das pontas
-/// ficam de fora (nao sao mexidos).
+/// primeiro ao ultimo caractere de uma sequencia de caracteres, desenhos e
+/// comandos; os comandos do meio viram `[FFxx]` no texto (`[FFxx:pppp]` se
+/// levam parametro), e os das pontas ficam de fora (nao sao mexidos).
+///
+/// Sao duas leituras: a primeira acha onde esta o texto, e e nele que se ve
+/// quais comandos levam parametro e com que marca as falas abrem; a segunda
+/// le de novo sabendo disso.
 pub fn extract(data: &[u8]) -> Option<Kuten16> {
-    let space = find_space(data);
-    let codes: Vec<u16> = units(data).collect();
-    let mut entries = Vec::new();
-    let mut spans: Vec<(usize, usize)> = Vec::new();
-    let mut i = 0;
-    while i < codes.len() {
-        if !matches!(read(codes[i], space), Unit::Char(c) if c != ' ') {
-            i += 1;
-            continue;
-        }
-        // Do primeiro ao ultimo caractere que nao e espaco: controle e
-        // espaco so entram no texto quando vem outro caractere depois (no
-        // fim sao fecho de mensagem e preenchimento de campo).
-        let begin = i;
-        let mut end = i;
-        let mut chars = 0;
-        let mut script = Script::default();
+    let codes = units(data);
+    let mut dialect = Dialect {
+        space: find_space(&codes),
+        ..Dialect::default()
+    };
+    let first = scan(&codes, &dialect);
+    dialect.params = find_params(&codes, dialect.space, &first);
+    dialect.bullets = find_bullets(&codes, &first);
+    let found = scan(&codes, &dialect);
+
+    // Texto de jogo vem em fila; fora de fila so fica a sequencia longa.
+    let text_of = |span: &Span| -> String {
         let mut text = String::new();
-        let mut pending = String::new();
-        while let Some(&code) = codes.get(i) {
-            match read(code, space) {
-                Unit::Char(' ') => pending.push(' '),
-                Unit::Char(c) => {
-                    for _ in pending.chars().filter(|p| *p == ' ') {
-                        script.push(' ');
-                        chars += 1;
-                    }
-                    text.push_str(&pending);
-                    pending.clear();
-                    text.push(c);
-                    script.push(c);
-                    chars += 1;
-                    if is_kanji(c) && code as usize >= LEVEL_2 {
-                        script.note_rare_kanji();
-                    }
-                    end = i + 1;
-                }
-                Unit::Control => pending.push_str(&token(code)),
-                Unit::Other => break,
-            }
-            i += 1;
+        let mut i = span.begin;
+        while i < span.end {
+            text.push_str(&dialect.text_of(&codes, i));
+            i += dialect.piece(&codes, i).1;
         }
-        // Ate 3 caracteres so entre controles ou zeros: valor pequeno de
-        // mapa de tiles vira "あい" o tempo todo.
-        let edge = |at: Option<usize>| {
-            at.and_then(|at| codes.get(at))
-                .is_none_or(|&code| code == 0 || code >= CONTROL)
-        };
-        let anchored = chars > 3 || (edge(begin.checked_sub(1)) && edge(Some(end)));
-        if !anchored || script.verdict() != Some(true) {
+        text
+    };
+    let mut entries = Vec::new();
+    let mut spans = Vec::new();
+    let mut pairs = BTreeSet::new();
+    let mut group = 0;
+    for i in 0..found.len() {
+        let last = found
+            .get(i + 1)
+            .is_none_or(|next| (next.begin - found[i].end) * 2 > NEIGHBOR_GAP);
+        if !last {
             continue;
         }
-        let (offset, len) = (begin * 2, (end - begin) * 2);
-        spans.push((offset, len));
-        entries.push(TextEntry {
-            id: format!("scan-{offset:08x}"),
-            resource_path: None,
-            offset: Some(offset as u64),
-            original_bytes: data[offset..offset + len].to_vec(),
-            source_text: text,
-            translated_text: None,
-            context: Some(
-                "in-place: traducao limitada ao espaco original (cada letra ocupa 2 bytes)"
-                    .to_string(),
-            ),
-            max_bytes: Some(len),
-            encoding: TextEncoding::Table(TABLE_ID.to_string()),
-            status: TranslationStatus::Untranslated,
-            metadata: serde_json::json!({
-                "scanner": TABLE_ID,
-                "chars": chars,
-                "terminated": codes.get(end) == Some(&0),
-            }),
-        });
-    }
-    // Fora de fila so fica a sequencia longa.
-    let mut keep = vec![false; entries.len()];
-    let mut group = 0;
-    for i in 0..entries.len() {
-        let last = spans
-            .get(i + 1)
-            .is_none_or(|next| next.0 - (spans[i].0 + spans[i].1) > NEIGHBOR_GAP);
-        if last {
-            let grouped = i + 1 - group >= MIN_GROUP;
-            for j in group..=i {
-                keep[j] = grouped || stands_alone(&entries[j].source_text);
+        let grouped = i + 1 - group >= MIN_GROUP;
+        for span in &found[group..=i] {
+            let text = text_of(span);
+            if !grouped && !stands_alone(&text) {
+                continue;
             }
-            group = i + 1;
+            let mut at = span.begin;
+            while at < span.end {
+                let (piece, len) = dialect.piece(&codes, at);
+                if matches!(piece, Piece::Control) && len == 2 {
+                    pairs.insert((codes[at], codes[at + 1]));
+                }
+                at += len;
+            }
+            let (offset, len) = (span.begin * 2, (span.end - span.begin) * 2);
+            spans.push((offset, len));
+            entries.push(TextEntry {
+                id: format!("scan-{offset:08x}"),
+                resource_path: None,
+                offset: Some(offset as u64),
+                original_bytes: data[offset..offset + len].to_vec(),
+                source_text: text,
+                translated_text: None,
+                context: Some(
+                    "in-place: traducao limitada ao espaco original (cada letra ocupa 2 bytes)"
+                        .to_string(),
+                ),
+                max_bytes: Some(len),
+                encoding: TextEncoding::Table(TABLE_ID.to_string()),
+                status: TranslationStatus::Untranslated,
+                metadata: serde_json::json!({
+                    "scanner": TABLE_ID,
+                    "chars": span.chars,
+                    "terminated": codes.get(span.end) == Some(&0),
+                }),
+            });
         }
+        group = i + 1;
     }
-    let mut kept = keep.iter();
-    entries.retain(|_| *kept.next().unwrap_or(&false));
-    let mut kept = keep.iter();
-    spans.retain(|_| *kept.next().unwrap_or(&false));
     let sentences = entries
         .iter()
         .filter(|e| is_sentence(&e.source_text))
@@ -289,7 +521,7 @@ pub fn extract(data: &[u8]) -> Option<Kuten16> {
     (sentences >= MIN_SENTENCES).then(|| Kuten16 {
         entries,
         spans,
-        table: table_text(space),
+        table: table_text(dialect.space, &pairs),
     })
 }
 
@@ -320,19 +552,26 @@ mod tests {
 
     #[test]
     fn the_table_reads_and_writes_what_extract_reads() {
-        let text = table_text(Some(0x00AC));
+        let pairs = BTreeSet::from([(0xFF08, 0x0003)]);
+        let text = table_text(Some(0x00AC), &pairs);
         assert!(text.contains("\n1B01=あ\n"), "hiragana");
         assert!(text.contains("\nAC00= \n"), "o espaco do jogo");
         assert!(text.contains("\n01FF=[FF01]\n"), "codigo de controle");
+        assert!(
+            text.contains("\n08FF0300=[FF08:0003]\n"),
+            "comando com parametro"
+        );
+        // Codigo que a tabela padrao deixa vazio: desenho proprio do jogo.
+        assert!(text.contains("\nAD00=[00AD]\n"), "desenho proprio");
         assert!(!text.contains("\n0000="), "zero e preenchimento");
         assert!(!text.contains("FFFF="), "0xFFFF fecha a mensagem");
         let table = crate::tbl::TblTable::parse(&text).unwrap();
         assert_eq!(
-            table.encode("あ [FF01]").unwrap(),
-            [0x1B, 0x01, 0xAC, 0x00, 0x01, 0xFF]
+            table.encode("あ [FF01][FF08:0003][00AD]").unwrap(),
+            [0x1B, 0x01, 0xAC, 0x00, 0x01, 0xFF, 0x08, 0xFF, 0x03, 0x00, 0xAD, 0x00]
         );
         // Sem espaco proprio, o espaco e o codigo 0.
-        assert!(table_text(None).contains("\n0000= \n"));
+        assert!(table_text(None, &BTreeSet::new()).contains("\n0000= \n"));
     }
 
     #[test]

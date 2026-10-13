@@ -895,26 +895,45 @@ pub const JIS16_PREDICATES: [&str; 10] = [
 ];
 /// Nomes curtos da tabela de itens de `make_gba_rom_jis16`.
 pub const JIS16_NAMES: [&str; 4] = ["リンゴ", "パン", "くすり", "ランプ"];
+/// Um nome com um desenho proprio do jogo no meio (codigo `JIS16_GLYPH`, que
+/// a tabela padrao deixa vazio), como a extracao o le.
+pub const JIS16_GLYPH_NAME: &str = "ハ[03FE]ミツ";
+pub const JIS16_GLYPH: u16 = 0x03FE;
 /// O codigo que o cartucho usa como espaco entre palavras (fora do JIS).
 pub const JIS16_SPACE: u16 = 0x00AC;
 /// Onde comeca o roteiro de `make_gba_rom_jis16`.
 pub const JIS16_SCRIPT_AT: usize = 0x2000;
 
+/// Como a mensagem `i` de `make_gba_rom_jis16` e gravada, pelo sujeito dela
+/// (de 6 em 6): as do sujeito 1 abrem com o comando `FF08` e o parametro
+/// dele; as do 2, com um numero de cabecalho antes do losango; as do 3 tem o
+/// comando `FF23` com parametro no meio; o resto e so texto.
+fn jis16_pattern(i: usize) -> usize {
+    (i / JIS16_PREDICATES.len()) % 6
+}
+
 /// A mensagem `i` de `make_gba_rom_jis16`, como a extracao a le: o losango,
-/// o sujeito, a quebra de linha (`[FF01]`) e o predicado.
+/// o sujeito, a quebra de linha (`[FF01]`) e o predicado. O comando e o
+/// numero que vem ANTES do losango nao fazem parte dela.
 pub fn jis16_message(i: usize) -> String {
     format!(
-        "◆{}[FF01]{}",
+        "◆{}{}[FF01]{}",
         JIS16_SUBJECTS[i / JIS16_PREDICATES.len()],
+        if jis16_pattern(i) == 3 {
+            "[FF23:0001]"
+        } else {
+            ""
+        },
         JIS16_PREDICATES[i % JIS16_PREDICATES.len()]
     )
 }
 
 /// GBA de 64 KiB com o texto em codigos de 16 bits na ordem do JIS
-/// (`crate::kuten`): em 0x1000 os nomes de `JIS16_NAMES`, cada um fechado
-/// por 0xFFFF; em `JIS16_SCRIPT_AT` as 120 mensagens de `jis16_message`,
-/// cada uma seguida de 0xFF03 0xFF00 (espera o botao) e 0xFFFF. O espaco
-/// entre palavras e `JIS16_SPACE`. O ASCII de `make_gba_rom` continua la.
+/// (`crate::kuten`): em 0x1000 os nomes de `JIS16_NAMES` e `JIS16_GLYPH_NAME`,
+/// cada um fechado por 0xFFFF; em `JIS16_SCRIPT_AT` as 120 mensagens de
+/// `jis16_message`, cada uma seguida de 0xFF03 0xFF00 (espera o botao) e
+/// 0xFFFF, nos quatro jeitos de `jis16_pattern`. O espaco entre palavras e
+/// `JIS16_SPACE`. O ASCII de `make_gba_rom` continua la.
 pub fn make_gba_rom_jis16() -> Vec<u8> {
     let mut rom = make_gba_rom("JIS16");
     rom.resize(64 * 1024, 0);
@@ -933,13 +952,26 @@ pub fn make_gba_rom_jis16() -> Vec<u8> {
         names.extend(units(name));
         names.push(0xFFFF);
     }
+    names.extend(units("ハ"));
+    names.push(JIS16_GLYPH);
+    names.extend(units("ミツ"));
+    names.push(0xFFFF);
     plant(&mut rom, 0x1000, &bytes(&names));
 
     let mut script = Vec::new();
-    for subject in JIS16_SUBJECTS {
-        for predicate in JIS16_PREDICATES {
+    for (s, subject) in JIS16_SUBJECTS.iter().enumerate() {
+        for (p, predicate) in JIS16_PREDICATES.iter().enumerate() {
+            let pattern = s % 6;
+            match pattern {
+                1 => script.extend([0xFF08, 0x0003]),
+                2 => script.push(0x0005 + p as u16),
+                _ => {}
+            }
             script.push(crate::kuten::encode('◆').expect("losango"));
             script.extend(units(subject));
+            if pattern == 3 {
+                script.extend([0xFF23, 0x0001]);
+            }
             script.push(0xFF01);
             script.extend(units(predicate));
             script.extend([0xFF03, 0xFF00, 0xFFFF]);

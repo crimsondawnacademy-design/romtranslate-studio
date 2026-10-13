@@ -377,7 +377,7 @@ mod jis16 {
     use super::*;
     use romtranslate_core::kuten;
     use romtranslate_core::reinsert::{reinsert_project_with, ErrorPolicy};
-    use romtranslate_core::synth::{JIS16_NAMES, JIS16_SCRIPT_AT};
+    use romtranslate_core::synth::{JIS16_GLYPH_NAME, JIS16_NAMES, JIS16_SCRIPT_AT};
     use romtranslate_core::tbl::{ProjectTables, TblTable};
 
     fn table_encoding() -> TextEncoding {
@@ -425,7 +425,7 @@ mod jis16 {
             .iter()
             .filter(|e| e.encoding == table_encoding())
             .collect();
-        assert_eq!(japanese.len(), 120 + JIS16_NAMES.len());
+        assert_eq!(japanese.len(), 120 + JIS16_NAMES.len() + 1);
 
         // A mensagem inteira, com a quebra de linha como codigo no meio; os
         // codigos do fim (espera o botao, fim) ficam fora da entry.
@@ -439,6 +439,11 @@ mod jis16 {
         for name in JIS16_NAMES {
             assert_eq!(by_text(&out.entries, name).encoding, table_encoding());
         }
+        // Desenho proprio do jogo no meio do nome: fica no texto como codigo.
+        assert_eq!(
+            by_text(&out.entries, JIS16_GLYPH_NAME).original_bytes.len(),
+            4 * 2
+        );
         // O texto do jogo vem na frente, e a tabela vem junto.
         assert_eq!(out.entries[0].encoding, table_encoding());
         assert_eq!(out.tables.len(), 1);
@@ -447,6 +452,25 @@ mod jis16 {
         assert_eq!(
             table.encode(&synth::jis16_message(0)).unwrap(),
             first.original_bytes
+        );
+
+        // Comando com parametro antes do losango (mensagem 10) e numero de
+        // cabecalho (mensagem 20): nenhum dos dois entra na frase, e a
+        // unidade logo antes da entry e o parametro ou o cabecalho, intacto.
+        for (i, before) in [(10, 0x0003u16), (20, 0x0005)] {
+            let e = by_text(&out.entries, &synth::jis16_message(i));
+            let at = e.offset.unwrap() as usize;
+            assert_eq!(read_units(&rom[at..at + 2]), "◆", "mensagem {i}");
+            assert_eq!(rom[at - 2..at], before.to_le_bytes(), "mensagem {i}");
+        }
+        // Comando com parametro no meio da fala (mensagem 30): uma peca so,
+        // que a tabela le e grava.
+        let named = by_text(&out.entries, &synth::jis16_message(30));
+        assert!(named.source_text.contains("は[FF23:0001][FF01]"));
+        assert!(out.tables[0].1.contains("\n23FF0100=[FF23:0001]\n"));
+        assert_eq!(
+            table.encode(&named.source_text).unwrap(),
+            named.original_bytes
         );
 
         // Num jogo assim o que o scanner de 8 bits le sai da fila.
@@ -472,7 +496,11 @@ mod jis16 {
 
     #[test]
     fn plain_letters_are_written_in_their_full_width_form() {
-        let table = TblTable::parse(&kuten::table_text(Some(synth::JIS16_SPACE))).unwrap();
+        let table = TblTable::parse(&kuten::table_text(
+            Some(synth::JIS16_SPACE),
+            &Default::default(),
+        ))
+        .unwrap();
         // "a" nao existe na tabela japonesa; "ａ" existe, e e o que e gravado.
         let bytes = table.encode("Ola, vila!").unwrap();
         assert_eq!(bytes.len(), 10 * 2);
@@ -505,7 +533,7 @@ mod jis16 {
         let tmp = TempDir::new("jis16");
         let (dir, rom) = project(&tmp);
         let outcome = extract_project(&dir).unwrap();
-        assert_eq!(outcome.jis16, 120 + JIS16_NAMES.len());
+        assert_eq!(outcome.jis16, 120 + JIS16_NAMES.len() + 1);
         assert!(dir.join("tables/jis16.tbl").is_file());
         // A tabela do projeto nao e sobrescrita numa segunda extracao.
         fs::write(dir.join("tables/jis16.tbl"), "AC00= \n1B01=あ\n").unwrap();

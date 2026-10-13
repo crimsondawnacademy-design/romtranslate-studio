@@ -248,14 +248,32 @@ aparece entre dois kana) e grava no projeto a tabela `tables/jis16.tbl`,
 por onde a validação, a tradução e a reinserção passam como em qualquer
 texto de tabela. Texto de jogo vem em fila (o roteiro, a tabela de nomes, a
 de títulos de música): só vale a sequência que tem pelo menos duas vizinhas
-a até 128 bytes, ou a que é longa sozinha. No jogo medido: 11.676 mensagens
-na fila (865 KiB de texto, 7.620 delas com comando no meio), todas nas seis
-regiões de texto do cartucho menos 48 (0,4%), que são dado com cara de kana;
-e 6.575 strings de 8 bits (ASCII e Shift-JIS) tiradas da fila, porque num
-jogo assim o que o scanner de 8 bits lê é quase tudo dado. No jogo ocidental
-de GBA e em ruído, nada é reconhecido. Os kanji desse jogo saem trocados: ele
-tem uma lista própria de kanji, fora da ordem da tabela (são 0,13% dos
-caracteres, em 207 mensagens); o `jis16.tbl` pode ser corrigido à mão. **Gravar de volta** é onde aperta: a tabela japonesa não tem a
+a até 128 bytes, ou a que é longa sozinha, e que começa logo depois do fim
+de outra mensagem, de um comando ou de preenchimento.
+
+O leitor faz duas passadas, e na primeira aprende o jeito daquele jogo:
+
+- **comando com parâmetro**: o comando que quase nunca é seguido de algo que
+  continue um texto leva um número depois dele, e o par vira uma peça só no
+  texto (`[FF08:0003]`). Sem isso o número era lido como letra, e traduzir a
+  frase trocava o parâmetro do comando;
+- **marca de fala e número de cabeçalho**: as figuras com que as falas abrem
+  ("◆", "◇"); um valor baixo entre o fim de uma mensagem e a marca é
+  cabeçalho, e fica fora da frase;
+- **desenho próprio do jogo**: código que a tabela padrão deixa vazio (kanji
+  e ícone da fonte do jogo) fica no texto como `[xxxx]`, e a linha
+  correspondente do `jis16.tbl` pode ser trocada pelo caractere certo.
+
+No jogo medido: 12.296 mensagens na fila (876 KiB de texto), que cobrem
+96,6% do kana do cartucho; o que fica de fora são regiões de dado. 7 comandos
+com parâmetro e 2 marcas de fala descobertos; 414 falas tinham número de
+cabeçalho. Sobram umas 70 sequências (0,6%) que são dado com cara de texto,
+em tabelas da fonte e do teclado de nomes. As 6.669 strings de 8 bits (ASCII
+e Shift-JIS) saem da fila, porque num jogo assim o que o scanner de 8 bits lê
+é quase tudo dado. No jogo ocidental de GBA e em ruído, nada é reconhecido.
+Os kanji desse jogo não seguem a ordem da tabela (ele tem uma lista própria):
+os que caem em código vazio aparecem como `[xxxx]`, os outros saem como um
+kanji qualquer. São poucos (o jogo escreve quase tudo em kana). **Gravar de volta** é onde aperta: a tabela japonesa não tem a
 letra "a", tem a de largura inteira "ａ", então cada letra da tradução
 ocupa 2 bytes e é gravada nessa forma (`TblTable::encode`), sem acento; e
 como a frase não muda de lugar, a tradução pode ter no máximo o mesmo número
