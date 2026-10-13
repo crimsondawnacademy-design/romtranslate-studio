@@ -131,6 +131,13 @@ pub fn build_system_prompt(req: &TranslationRequest) -> String {
             "- If a punctuation mark or a digit is not listed, rephrase without it.\n\
              - This also applies to glossary terms: adapt them to the character set.\n",
         );
+        // Marca de fala e enfeite que a fonte do jogo tem: sem isto o modelo
+        // os tira da traducao junto com o japones.
+        if charset.chars().any(|c| "◆◇☆★○●◎□■△▲▽▼※♪".contains(c)) {
+            p.push_str(
+                "- The symbols in that list that are not letters, digits or punctuation (such as ◆, ◇, ★, ♪) are marks the game shows: keep each one of the source text exactly where it is.\n",
+            );
+        }
     }
     if req.items.iter().any(|item| item.max_chars.is_some()) {
         p.push_str(

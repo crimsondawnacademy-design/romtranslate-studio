@@ -153,6 +153,8 @@ pub struct Script {
     /// Caracteres a mesma distancia do anterior que o anterior estava do
     /// que veio antes dele: progressao de passo fixo.
     strides: usize,
+    /// Caracteres de codigo maior que o do anterior.
+    ups: usize,
     last_gap: Option<i64>,
     /// Os ultimos `PERIODS` caracteres e, pra cada periodo de 1 a `PERIODS`,
     /// quantos caracteres repetiram o que veio esse tanto antes.
@@ -178,6 +180,7 @@ impl Script {
         let gap = self.last.map(|last| c as i64 - last as i64);
         self.steps += usize::from(gap.is_some_and(|gap| gap.abs() == 1));
         self.strides += usize::from(gap.is_some() && gap == self.last_gap);
+        self.ups += usize::from(gap.is_some_and(|gap| gap > 0));
         self.last_gap = gap;
         self.last = Some(c);
         if is_kana(c) {
@@ -240,6 +243,7 @@ impl Script {
                 && self.repeats * 2 <= n
                 && self.steps * 2 <= n
                 && self.strides * 2 <= n
+                && (n < 10 || self.spaces > 0 || self.ups * 5 < (n - 1) * 4)
                 && (n < 12 || self.echoes.iter().all(|echo| echo * 5 <= n * 3))
                 && self.rare * 4 <= self.kanji
                 && odd * 10 <= n
@@ -268,7 +272,10 @@ impl Script {
 ///   anterior na tabela (uma tabela de valores em sequencia vira
 ///   "ァアィイゥウェエ": num RPG japones de GBA de 32 MiB eram quase todas as
 ///   303 sequencias que passavam, contra 5 frases de verdade), o mesmo pra
-///   progressao de passo fixo ("ぉこそでぱほゅわ" anda de 10 em 10); de 12
+///   progressao de passo fixo ("ぉこそでぱほゅわ" anda de 10 em 10); de 10
+///   caracteres pra cima e sem espaco, menos de 8 em cada 10 em ordem
+///   crescente (a fileira do teclado de nomes, "タチツテトラリルレロ", e
+///   tabela de letras, nao fala); de 12
 ///   caracteres pra cima, no maximo 6
 ///   em cada 10 repetindo o que veio 1 a 8 posicoes antes (mapa de tiles
 ///   repete em periodo curto: "ぜそせぞぜそせぞ"); no maximo um quarto dos
@@ -386,6 +393,7 @@ mod tests {
             "、セ゛",
             "ぉこそでぱほゅわ",
             "ぜそせぞぜそせぞぜそせぞぜそせぞ",
+            "タチツテトラリルレロバビブベボ",
             "きぎｅくきぎｅくきぎｅくおかｅがおかｅがおかｅが",
         ] {
             assert_eq!(looks_japanese(text), Some(false), "{text}");

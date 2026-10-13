@@ -19,6 +19,9 @@ use crate::types::{TextEncoding, TextEntry};
 pub const TABLES_DIR: &str = "tables";
 /// Acima disto a lista de caracteres da tabela nao vai inteira pro prompt.
 const PROMPT_CHARSET_MAX: usize = 400;
+/// Os sinais que vao pro prompt junto do ASCII numa tabela grande demais pra
+/// ir inteira: marcas de fala e enfeites que a traducao tem que manter.
+const KEPT_SIGNS: &str = "◆◇☆★○●◎□■△▲▽▼※♪…「」『』";
 
 /// A forma de largura inteira de um caractere ASCII imprimivel: "a" -> "ａ",
 /// "!" -> "！" (o bloco U+FF01..U+FF5E e o ASCII deslocado). O espaco nao
@@ -190,7 +193,14 @@ impl TblTable {
             })
             .collect();
         if chars.len() > PROMPT_CHARSET_MAX {
-            return (' '..='~').filter(|c| self.writes(*c)).collect();
+            // Com o ASCII vao as figuras e os sinais que jogo usa pra marcar
+            // fala e enfeitar texto, se a tabela os tem: fora da lista, o
+            // modelo os tira da traducao (no piloto de 13/10/2026 sumiu o
+            // losango que abre cada fala).
+            return (' '..='~')
+                .filter(|c| self.writes(*c))
+                .chain(KEPT_SIGNS.chars().filter(|c| chars.contains(c)))
+                .collect();
         }
         chars.sort_unstable();
         chars.into_iter().collect()

@@ -516,9 +516,11 @@ mod jis16 {
         // A lista pro prompt e o ASCII que a tabela escreve, nao os 7 mil
         // caracteres dela.
         let charset = table.charset();
-        assert!(charset.len() < 100, "{}", charset.len());
+        assert!(charset.chars().count() < 130, "{charset}");
         assert!(charset.contains('a') && charset.contains('Z') && charset.contains('!'));
         assert!(!charset.contains('あ'));
+        // As marcas de fala vao junto: fora da lista, o modelo as tira.
+        assert!(charset.contains('◆') && charset.contains('♪'));
         // 2 bytes por letra: num espaco de 20 bytes cabem 10.
         assert_eq!(table.chars_that_fit(20), 10);
 
@@ -623,7 +625,8 @@ mod jis16 {
             .find(|r| r.items.iter().any(|i| i.text == synth::jis16_message(0)))
             .expect("a primeira mensagem foi pedida");
         let charset = request.charset.as_deref().expect("lista de caracteres");
-        assert!(charset.len() < 100 && charset.contains('a') && !charset.contains('あ'));
+        assert!(charset.chars().count() < 130 && charset.contains('a') && !charset.contains('あ'));
+        assert!(romtranslate_core::provider::build_system_prompt(request).contains("keep each one"));
         // 27 unidades: 26 letras e a quebra de linha, que o modelo conta como
         // os 6 caracteres de "[FF01]".
         let item = request
