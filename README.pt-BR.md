@@ -22,7 +22,7 @@
 
 ![Tela de projeto do RomTranslate Studio com as falas extraídas, as traduções e o estado da validação](docs/assets/screenshot.png)
 
-<p align="center"><i>Projeto de demonstração com dados inventados. Nenhum conteúdo de jogo real fica neste repositório.</i></p>
+<p align="center"><i>Projeto de demonstração com dados inventados. Nenhum conteúdo de jogo real fica neste repositório. <a href="docs/assets/screenshot-full.png">Veja a tela inteira.</a></i></p>
 
 ## O que ele faz
 

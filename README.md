@@ -22,7 +22,7 @@
 
 ![RomTranslate Studio project screen with extracted lines, translations and validation status](docs/assets/screenshot.png)
 
-<p align="center"><i>Demo project with made-up data. No real game content is stored in this repository.</i></p>
+<p align="center"><i>Demo project with made-up data. No real game content is stored in this repository. <a href="docs/assets/screenshot-full.png">See the whole screen.</a></i></p>
 
 ## What it does
 

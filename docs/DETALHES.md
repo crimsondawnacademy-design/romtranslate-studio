@@ -11,7 +11,7 @@ em vez de cópias modificadas.
 detecção → extração → tradução com IA → validação/revisão → reinserção em
 cópia de trabalho → **patch IPS ou BPS** com manifest.
 
-![Tela de projeto do RomTranslate Studio: extração de strings de um ISO de PS2 com traduções, statuses e validação](assets/screenshot.png)
+![Tela de projeto do RomTranslate Studio: extração de strings de um ISO de PS2 com traduções, statuses e validação](assets/screenshot-full.png)
 
 *Projeto fictício de demonstração — nenhum dado de jogo real.*
 
