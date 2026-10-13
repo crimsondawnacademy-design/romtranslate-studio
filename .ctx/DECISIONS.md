@@ -1592,3 +1592,67 @@ inventado — nunca tela de jogo comercial.
 **Hospedagem:** Cloudflare Pages na conta Crimson Dawn (projeto
 `romtranslate-studio`), como os outros sites pessoais dele. Fonte em `site/`
 neste repositório; publicar é `site/publicar.sh`, rodado à mão.
+
+
+## 2026-10-13 — Texto comprimido: extrair e regravar o bloco LZ77 (GBA)
+
+**Contexto:** o Raio-X contava os blocos LZ77 tipo 0x10 e as frases presas
+neles, e a decisão de 12/10 deixava "reinserir pede recomprimir e reapontar o
+bloco" para depois. O Rhuan pediu para resolver no app o que o site lista em
+"O que ainda não faz".
+
+**Decisão:**
+- A extração do GBA lê as frases de dentro dos blocos que são texto. Bloco é
+  texto com pelo menos uma frase (12+ caracteres, com espaço) e um terço do
+  bloco descomprimido em strings com cara de texto.
+- Dentro do bloco a tradução é in-place: o tamanho descomprimido não muda,
+  porque o jogo pode guardar posições para dentro dele.
+- O bloco recomprimido volta para o lugar se couber nos bytes que o original
+  ocupava; se crescer, só muda de lugar com ponteiro em TABELA (2+ ponteiros
+  de ROM seguidos, cada um para o início de um bloco válido), como as strings.
+  Sem uma coisa nem outra o bloco fica como no original e a contagem sai em
+  `ApplyReport::packed_left_out`: a política `Block` recusa a reinserção, a
+  `Skip` segue.
+- A string crua do scanner que cai dentro de QUALQUER bloco válido deixa de
+  ser extraída: são os literais do stream, e tradução gravada ali corrompe o
+  bloco. Com ponteiro em tabela ela fica (ponteiro vale mais que um bloco que
+  pode ser coincidência).
+- `lz77::pack` escolhe as cópias por programação dinâmica (literal 9 bits,
+  cópia 17), não pela mais longa: nunca sai maior que um compressor guloso.
+
+**Medido no jogo real de GBA do mantenedor (16 MiB, texto não comprimido, só
+contagens):** 1.599 blocos achados em 30 ms; os 400 primeiros de até 64 KiB,
+recomprimidos sem mudança, couberam todos no espaço do original; 1.726
+strings cruas saíram por estarem dentro de bloco e todas já eram nome
+interno; com a regra de "duas frases" um bloco de tiles de 13 KiB passava por
+texto (15 "frases" de letra solta, 2,5% do bloco), com a do terço nenhum.
+
+**Consequência / o que fica de fora:** nenhum jogo real com texto comprimido
+foi medido. Bloco que mistura dado binário com pouco texto não é lido. Texto
+com tabela de ponteiros dentro do bloco não cresce. DS (arquivo inteiro
+comprimido) e LZ11 seguem só contados. Projeto extraído antes disto pode ter
+tradução de string crua dentro de bloco: na reinserção ela perde para o bloco
+(`ignored_generic`).
+
+## 2026-10-13 — O probe olha o arquivo inteiro quando o começo não decide
+
+**Contexto:** um amigo do Rhuan abriu um ISO de PS2 de 2,7 GiB no Windows e a
+tela disse "Formato não reconhecido". O probe só recebe os primeiros 128 KiB
+(`PROBE_HEAD_LEN`), e num DVD o diretório raiz e o `SYSTEM.CNF` ficam depois
+disso, atrás da ponte UDF: o adapter de PS2 parava em 45% e o de PS1 em 40%,
+abaixo do corte de 50%. Os ISOs sintéticos punham a raiz no setor 18, então
+nenhum teste via isso.
+
+**Decisão:** `GameInput::whole()` abre o arquivo por mapeamento em memória
+(nada é carregado além do que for lido) e os probes de PS1, PS2 e PSP recorrem
+a ele quando `head` não decide. A regra "probe só lê de `head`" vira "lê de
+`head`; quem precisa de mais pede `whole`". Aumentar a janela não resolveria:
+a posição do diretório depende de quem gravou o disco.
+
+**Conferido:** ISO sintético com a raiz no setor 262 (falhava, passa) e uma
+imagem ISO+UDF gerada pelo `hdiutil makehybrid`, com os mesmos 45% e 40% antes
+e 96% depois. Nenhum DVD de jogo real passou por aqui.
+
+**Lição:** disco sintético montado por nós repete as nossas suposições de
+layout. Formato de disco pede pelo menos uma imagem feita por outra
+ferramenta.

@@ -100,7 +100,7 @@ Toda plataforma real é **experimental**. Jogos usam motores, compressões e tab
 
 ## O que ainda não faz
 
-- Texto dentro de bloco comprimido é contado (LZ77 no GBA e no DS), mas não extraído.
+- Texto comprimido: no Game Boy Advance o app extrai e regrava o texto de dentro dos blocos LZ77, e a tradução precisa caber no espaço da original dentro do bloco. Isso foi conferido só com arquivo de teste: nenhum jogo real com texto comprimido passou por aqui. No DS o texto comprimido é só contado, e outros compressores não são reconhecidos.
 - Não lê Shift-JIS, então jogo em japonês fica de fora por enquanto.
 - Não edita fonte nem texto desenhado como imagem (tela de título, alguns menus).
 - A maior parte do texto só pode ter o tamanho do original. Crescer depende de uma tabela de ponteiros que o app reconheça; tabela indicada pelo usuário está no roteiro.

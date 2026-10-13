@@ -254,9 +254,15 @@ são texto e batem na regra; a marca é refeita a cada extração enquanto a
 string não tem tradução (desfazer e extrair de novo marca outra vez); nome
 interno que já recebeu tradução num projeto antigo fica como está.
 
-Se o texto está comprimido, o **Raio-X** mostra quanto — hoje o app só
-reconhece o LZ77 tipo 0x10 e só para leitura: texto comprimido ainda não é
-extraído nem reinserido.
+Se o texto está comprimido, o **Raio-X** mostra quanto. O app só reconhece
+o LZ77 tipo 0x10. No Game Boy Advance a extração estruturada lê as frases de
+dentro dos blocos que são texto (pelo menos uma frase e um terço do bloco em
+strings com cara de texto) e a reinserção recomprime o bloco: ele volta para
+o lugar se couber nos bytes que ocupava, vai para o fim do ROM se o jogo
+tiver uma tabela de ponteiros para ele, e fica como no original (com a
+contagem na tela) se não tiver nenhum dos dois. Dentro do bloco a tradução
+ocupa o espaço da frase original. Conferido só com arquivo sintético. No DS
+e nos outros consoles o texto comprimido ainda é só contado.
 
 **"In-place"**: cada string traduzida ocupa o espaço da original (mesmo
 tamanho ou menor) — cobre menus e textos curtos de muitos jogos. O validador
