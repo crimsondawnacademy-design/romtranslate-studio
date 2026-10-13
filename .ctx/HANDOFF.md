@@ -196,6 +196,17 @@ com posição relativa a uma seção do arquivo em vez do arquivo inteiro.
   nas 4 rodadas com o limite e as 7 estouraram sem ele; por isso a
   repergunta automática não foi construída (`.ctx/DECISIONS.md`, "com modelo
   capaz o limite basta"). Falta medir em jogo real e com diálogo longo.
+- **Texto ASCII: sem barreira de acento desde 12/10, medido num jogo só.**
+  O lote ASCII leva a lista do ASCII imprimível (o mesmo bloco do texto de
+  tabela) e a resposta com acento, ou com aspas e travessão tipográficos, é
+  gravada com a letra base e o sinal simples, com aviso de validação. Texto
+  UTF-8 e UTF-16 vai em lote separado e fica com o acento. Nome interno do
+  jogo (só maiúsculas, dígitos e sublinhado) é marcado na extração e fica
+  fora da tradução e da reinserção (`.ctx/DECISIONS.md`, "Texto ASCII: lista
+  no lote"). Medido em 12/10 num GBA real, 30 falas, ChatGPT pelo Codex CLI,
+  3 rodadas: 26 a 27 de 30 passam na validação sem intervenção (10 a 12 sem
+  a mudança) e 2.326 de 17.936 strings saem da fila. O que sobra barrado é
+  tradução maior que o campo de uma linha da caixa de texto.
 - **Descompressão só detecta.** O Raio-X acha blocos LZ77 tipo 0x10 e conta
   as frases dentro deles; o app não extrai nem reinsere esse texto, e não
   reconhece outros compressores (LZ11 do DS mais novo, Huffman, os próprios

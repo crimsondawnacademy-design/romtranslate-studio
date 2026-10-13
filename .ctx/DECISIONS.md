@@ -1211,3 +1211,154 @@ espaço; edição manual de entry de tabela alimenta a memória global; a exceç
 de "realocável" pra texto de tabela não tem caminho real nem teste de ida e
 volta; e não há repergunta do que estoura (decisão registrada acima, medida
 com modelo capaz).
+
+## 2026-10-12 — Texto ASCII: lista no lote e acento trocado com aviso; nome interno fica fora da tradução
+
+**Contexto:** primeiro teste de ponta a ponta em jogo real (12/10, GBA de 16
+MiB, texto em ASCII). De 30 falas traduzidas pra pt-BR, 13 foram barradas por
+acento (`IssueKind::Unencodable`) e 1 por tamanho. E as 1.590 strings com
+ponteiro em tabela eram, quase todas, nomes internos (sala, script), não
+texto — iam pra IA e podiam ser regravadas. O texto de tabela já tinha a
+saída pro acento (decisão de 12/10, "A tradução por IA respeita a tabela");
+o texto `Ascii` tinha ficado de fora.
+
+**Decisão 1 — o conjunto de caracteres é do encoding, não só da tabela.**
+`pipeline::Charset` tem dois casos: `Ascii` (o ASCII imprimível) e
+`Table(tabela do projeto)`. Dele saem a lista que vai em
+`TranslationRequest.charset`, a rede por onde a resposta passa antes de
+gravar e a conferência do acerto de memória. Não há um segundo mecanismo: o
+prompt é o mesmo bloco `Character set (STRICT)`, que já diz "sem letra
+acentuada" quando a lista não tem nenhuma. UTF-8 e UTF-16 escrevem tudo: sem
+conjunto, sem lista, sem troca. Shift-JIS fica sem conjunto — não tem encoder
+nem extrator aqui, e o conjunto dele não cabe numa linha de prompt.
+
+**Decisão 2 — um lote, um conjunto.** A regra "um lote, uma tabela" virou
+`charset_group`: sem restrição (UTF-8, UTF-16), ASCII, e cada tabela. Uma
+entry UTF-16 nunca divide lote com uma ASCII — se dividisse, receberia o
+"sem letra acentuada" no prompt e teria o acento trocado na gravação. A
+ordenação segue estável dentro de cada grupo. O que muda de ordem: só
+projeto que mistura ASCII com UTF (DS), onde o texto sem restrição passa a
+ir primeiro. Projeto de um encoding só não muda.
+
+**Decisão 3 — aspas, travessão e reticências tipográficos entram na mesma
+troca, em ASCII e em tabela.** [evolui a decisão de 12/10, que deixava esses
+sinais como erro] `tbl::plain_equivalent` devolve a letra base (como antes)
+ou o sinal ASCII: `‘ ’` → `'`, `“ ”` → `"`, `– —` → `-`, `…` → `...`. Em
+tabela a troca só vale se a tabela escreve o sinal simples.
+
+- Por que entram: o equivalente não muda palavra nem sentido, e sem a troca
+  a frase fica barrada por um caractere que o usuário trocaria à mão pelo
+  mesmo sinal. Uma regra só pros dois caminhos, em vez de ASCII trocando e
+  tabela não.
+- Por que com aviso, e não calada: nada é trocado sem aparecer. É o mesmo
+  registro (`accent_swaps`) e o mesmo aviso (`AccentDropped`) do acento.
+- Custo conhecido: `…` vira três caracteres. Medido: em 1 das 3 rodadas de
+  controle uma frase passou do campo por causa disso — deixou de ser erro de
+  caractere e virou erro de tamanho, que manda encurtar.
+- Fica de fora, e continua erro com o caractere e a posição: `º`, `ª`, `ß`,
+  `«»`, espaço não separável, acento solto.
+
+**Decisão 4 — memória de tradução.** Acerto de memória em entry ASCII passa
+pela mesma rede; se nem assim é ASCII, é descartado e o provider responde
+(mesma regra da tabela). O tamanho NÃO é conferido em ASCII (em tabela é):
+acerto maior que o campo segue sendo gravado e acusado pela validação, como
+sempre foi. A resposta de lote ASCII continua indo pra memória global — a de
+tabela não vai.
+
+| Opção | Por que não |
+|---|---|
+| Não alimentar a memória global com lote ASCII (igual à tabela) | todo adapter extrai ASCII; a memória global deixaria de servir de um jogo pro outro, que é o que ela faz hoje (há teste) |
+| Marcar na memória qual conjunto moldou a resposta | coluna nova e migração nos dois bancos, e a chave é uma linha por texto: resposta ASCII apagaria a acentuada |
+| **Escolhida:** continua como era | custo: entry UTF-8 ou UTF-16 pode receber da memória uma tradução sem acento, feita num lote ASCII (mesmo projeto no DS, ou outro projeto). A marca na memória é o caminho se aparecer projeto que misture os dois |
+
+**Decisão 5 — o erro de ASCII diz qual caractere e onde.** Era "tradução tem
+caracteres fora do encoding destino". Agora traz o caractere e a posição,
+como o erro de tabela. O aviso da troca tem texto por encoding.
+
+**Decisão 6 — nome interno: a regra.** `scan::looks_like_identifier`, sem
+contar espaço nas pontas:
+
+1. só maiúsculas ASCII, dígitos e `_`, com pelo menos uma letra;
+2. e pelo menos um `_` ou um dígito;
+3. minúscula só num pedaço entre `_` que também tem dígito (hexadecimal).
+
+Por que cada parte, com os números do jogo medido (só contagens):
+
+- Ponteiro em tabela não serve de critério: das 1.590 strings com ponteiro,
+  21 são texto de menu (palavra única em maiúsculas, nomes de idioma com
+  espaço de preenchimento). E 32 nomes não têm ponteiro.
+- O item 2 é o que separa nome de texto: palavra de menu em maiúsculas
+  (`START`) e frase com espaço (`NEW GAME`) não batem.
+- O item 3 e o espaço nas pontas vieram da medição: sem eles, 116 nomes com
+  ponteiro continuavam na fila (número de sala em hexadecimal minúsculo, e
+  nome em campo de largura fixa).
+- Resultado: 2.326 de 17.936 marcadas — 1.596 com `_` (1.564 com ponteiro) e
+  730 só com dígito colado, que nesse jogo são gráfico que passou no filtro
+  de texto, não nome. Das 1.590 com ponteiro, 1.565 marcadas; as 25 de fora
+  são texto (21) e lixo (4). Nenhuma string com cara de fala foi marcada.
+- Erra pro outro lado: `PLAYER1`, `STAGE1` e `1UP` são texto e batem (a
+  parte "só dígito colado"). Ficou porque nome sem `_` existe (`SALA12`) e o
+  erro aparece na tela e se desfaz; exigir `_` é a saída se num jogo isso
+  pesar.
+
+**Decisão 7 — nome interno: a marca.** `TranslationStatus::Internal`, posto
+pelo scanner (`scan_bytes`, por onde passam todos os adapters que varrem) na
+hora em que a entry nasce. `run_translation` pula quem tem esse status; sem
+tradução a reinserção mantém o original. `validate::unmark_internal` volta a
+entry pra pendente (botão "É texto do jogo"). A entry não é apagada.
+
+| Opção | Por que não |
+|---|---|
+| Apagar a entry | ela pode ter ponteiro em tabela, o Raio-X conta com ela, e apagar não tem desfazer |
+| Só uma função, sem estado, consultada na tradução | a interface não tem como saber quais são sem repetir a regra em TypeScript, e desfazer precisa de estado de qualquer jeito |
+| Marca fora de `entries` (tabela própria, como `accent_swaps`), que sobrevive à extração | mais código pra fechar uma janela estreita (ver limites) |
+| **Escolhida:** status na própria entry | o selo, o filtro e a contagem saem de graça do que a tela já faz com status |
+
+Limites assumidos: (a) a marca é refeita a cada extração enquanto a entry
+não tem tradução — desfazer e extrair de novo marca outra vez (com tradução,
+o status é preservado pelo upsert); (b) não há marcar à mão o que a regra
+não pegou, pelo mesmo motivo: a extração desfaria; (c) projeto antigo só
+ganha a marca extraindo de novo, e nome interno que já recebeu tradução
+continua com ela e é regravado; (d) a fixture RTSF não passa pelo scanner e
+não é marcada.
+
+**Prova:** `tests/ascii_translate.rs` (7 testes, fixture
+`synth::make_gba_rom_with_names`, provider de mentira) e 3 unitários (`scan`,
+`tbl`). Mutação: 14, cada uma derruba teste — troca de acento desligada;
+lote ASCII sem lista; lote misturando ASCII e UTF; sinais tipográficos sem
+troca; tradução sem pular nome interno; scanner sem marcar; regra sem exigir
+`_` ou dígito; sem a minúscula em hexadecimal; sem tirar o espaço das
+pontas; erro sem o caractere; troca sem aviso; memória que ASCII não
+escreve sendo usada; desfazer que não desfaz; UTF-16 tratado como ASCII.
+
+**Medido em jogo real (12/10, mesmo dump, ChatGPT pelo Codex CLI,
+`gpt-6-astra`, 30 falas espalhadas, lote de 10, 3 rodadas de cada):**
+
+| Pedido | Fora de ASCII | Passam como a IA respondeu | Passam como o app grava | Maiores que o campo |
+|---|---|---|---|---|
+| sem a lista (controle) | 17, 18, 19 | 12, 10, 10 | 29, 28, 28 | 1, 2, 2 |
+| com a lista | 0, 0, 0 | 26, 27, 27 | 26, 27, 27 | 4, 3, 3 |
+
+- A amostra não é a mesma do teste anterior (que deu 16 de 30 como a IA
+  respondeu): o critério é o mesmo (20 a 90 caracteres, espaço, maioria
+  minúscula), mas aqui deu 6.666 candidatas contra 6.624 lá. Por isso o
+  controle foi refeito na mesma amostra.
+- Com a lista o modelo não usou acento em nenhuma das 90 respostas e a
+  troca não agiu. Sem a lista, a troca sozinha resolve o acento.
+- O que sobra é tamanho, e com a lista houve mais estouro (10 em 90 contra
+  5 em 90). Amostra pequena, mesmas 30 falas nas 6 rodadas: não dá pra
+  afirmar que é a lista. Fica anotado como suspeita.
+- Hipótese testada FORA do repositório e não construída: mandar no item
+  ASCII o teto estrito (`maxChars` = `maxBytes`). Uma rodada completa: 4 de
+  30 maiores, igual. A segunda rodada bateu no limite da assinatura do Codex
+  (20 traduzidas: 3 maiores). Não melhorou; o que estoura é linha solta da
+  caixa de texto, que é o item (c) da lista do teste real.
+- Ponta a ponta, primeira rodada com a lista: reinserção bloqueada pelos 4
+  erros (certo); com as 26 válidas, 26 aplicadas, 0 realocadas, verificação
+  ok, arquivo do mesmo tamanho, 698 bytes alterados, nenhum fora de string
+  traduzida, 26 traduções relidas do arquivo, patch IPS de 885 bytes.
+
+**Não conferido:** app compilado (a interface foi vista no preview com
+backend simulado alimentado pelo JSON do core, em pt-BR); en-US na tela (só
+paridade das chaves); o projeto real do Rhuan (não foi aberto); outro jogo,
+outro idioma, outro modelo; o jogo rodando num emulador.
