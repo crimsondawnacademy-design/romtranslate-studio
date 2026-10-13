@@ -134,6 +134,18 @@ pub fn estimate_translation(
     Ok((estimate, sample))
 }
 
+const UNREAD_NOTE: &str = "the 4-digit codes that do not start with FF, like [045C], are \
+     Japanese characters (kanji) the app could not read: they are part of the words, not \
+     commands. Leave them out of the translation and translate the sentence around them.";
+
+/// A entry tem kanji da fonte do jogo que a tabela nao leu (`[045C]`)?
+fn unread_glyphs(entry: &TextEntry) -> bool {
+    entry.encoding == TextEncoding::Table(crate::kuten::TABLE_ID.to_string())
+        && extract_tokens(&entry.source_text)
+            .iter()
+            .any(|token| crate::kuten::is_glyph_token(token))
+}
+
 /// O pedido de um lote: os itens, o glossario que aparece neles e, quando o
 /// texto e gravado por um conjunto de caracteres, a lista e o teto de cada um.
 fn batch_request(
@@ -149,15 +161,25 @@ fn batch_request(
     TranslationRequest {
         items: batch
             .iter()
-            .map(|e| BatchItem {
+            .map(|e| (e, crate::adapters::bank::Layout::of(e)))
+            .map(|(e, layout)| BatchItem {
                 id: e.id.clone(),
-                text: e.source_text.clone(),
+                // Onde o app quebra as linhas, a frase vai inteira pro modelo.
+                text: match &layout {
+                    Some(layout) => layout.flow(&e.source_text),
+                    None => e.source_text.clone(),
+                },
                 // Mensagem de banco: a nota da entry e pra tela; pro modelo vai
-                // so a largura da linha.
-                context: e
-                    .context
-                    .clone()
-                    .filter(|_| crate::adapters::bank::line_width(e).is_none()),
+                // so a largura da linha. E, onde ha kanji que a tabela nao
+                // leu, o aviso de que aquilo e texto: sem ele o modelo copia
+                // o codigo pra traducao, como faz com os comandos.
+                context: if unread_glyphs(e) {
+                    Some(UNREAD_NOTE.to_string())
+                } else {
+                    e.context
+                        .clone()
+                        .filter(|_| crate::adapters::bank::line_width(e).is_none())
+                },
                 max_bytes: e.max_bytes,
                 // Texto de tabela sem ponteiro em tabela so e gravado no
                 // lugar: o espaco da original e o teto, e o modelo
@@ -179,7 +201,7 @@ fn batch_request(
                         (e.encoding == TextEncoding::ShiftJis && !e.can_grow())
                             .then(|| e.max_bytes.unwrap_or(e.original_bytes.len()))
                     }),
-                max_line: crate::adapters::bank::line_width(e),
+                max_line: crate::adapters::bank::line_width(e).filter(|_| layout.is_none()),
             })
             .collect(),
         source_language: opts.source_language.clone(),

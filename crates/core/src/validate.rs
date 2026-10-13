@@ -187,12 +187,24 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
         return issues;
     }
 
-    // Placeholders / control codes / tags (multiset dos dois lados).
-    let source_tokens = count_tokens(&entry.source_text);
-    let translation_tokens = count_tokens(translation);
+    // Placeholders / control codes / tags (multiset dos dois lados). A quebra
+    // de linha que o app tira e poe sozinho nao entra na conta.
+    let layout = crate::adapters::bank::Layout::of(entry);
+    let mut source_tokens = count_tokens(&entry.source_text);
+    let mut translation_tokens = count_tokens(translation);
+    if let Some(layout) = &layout {
+        source_tokens.remove(layout.soft());
+        translation_tokens.remove(layout.soft());
+    }
+    // Kanji da fonte do jogo que a tabela nao leu (`[045C]`) e texto: some na
+    // traducao junto com o resto do japones.
+    let unread = |token: &str| {
+        entry.encoding == TextEncoding::Table(crate::kuten::TABLE_ID.to_string())
+            && crate::kuten::is_glyph_token(token)
+    };
     for (token, &n) in &source_tokens {
         let have = translation_tokens.get(token).copied().unwrap_or(0);
-        if have < n {
+        if have < n && !unread(token) {
             push(
                 Severity::Error,
                 IssueKind::PlaceholderMismatch,
@@ -269,10 +281,23 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
     }
 
     // Mensagem que pode crescer ainda tem que caber na caixa de texto: cada
-    // linha (trecho entre dois codigos) ate a largura medida no jogo.
+    // linha (trecho entre dois codigos) ate a largura medida no jogo. Onde o
+    // app quebra as linhas, so sobra a palavra que sozinha nao cabe.
     if let Some(width) = crate::adapters::bank::line_width(entry) {
-        let line = crate::adapters::bank::longest_line(translation);
-        if line > width {
+        let line = match &layout {
+            Some(layout) => layout.wrap(translation).1,
+            None => crate::adapters::bank::longest_line(translation),
+        };
+        if line > width && layout.is_some() {
+            push(
+                Severity::Warning,
+                IssueKind::ByteOverflow,
+                format!(
+                    "uma palavra da traducao ocupa {line} caracteres; a caixa de texto do jogo \
+                     mostra {width} por linha — ela vai passar da borda"
+                ),
+            );
+        } else if line > width {
             push(
                 Severity::Warning,
                 IssueKind::ByteOverflow,

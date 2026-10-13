@@ -999,6 +999,34 @@ pub const JIS16_BANK_PADDING: std::ops::Range<usize> = 0x20000..0x38000;
 /// mensagem fecha com 0xFF03 0xFF00 0xFFFF. Com `padding`, 96 KiB de 0xFF em
 /// `JIS16_BANK_PADDING`, e dado depois.
 pub fn make_gba_rom_jis16_bank(padding: bool) -> Vec<u8> {
+    jis16_bank(padding, false)
+}
+
+/// A terceira linha das mensagens compridas de
+/// `make_gba_rom_jis16_bank_scrolling`.
+pub const JIS16_THIRD_LINE: &str = "それから ひとやすみ する。";
+
+/// A mensagem `i` de `make_gba_rom_jis16_bank_scrolling`, como a extracao a
+/// le: a de `jis16_message` com um espaco abrindo a linha de baixo e, uma em
+/// cada dez, uma terceira linha.
+pub fn jis16_scrolling_message(i: usize) -> String {
+    let third = if i % JIS16_PREDICATES.len() == 9 {
+        format!("[FF01] {JIS16_THIRD_LINE}")
+    } else {
+        String::new()
+    };
+    jis16_message(i).replace("[FF01]", "[FF01] ") + &third
+}
+
+/// O banco de `make_gba_rom_jis16_bank(true)` num jogo cuja caixa de texto
+/// ROLA, como a do jogo medido: a linha de baixo abre com um espaco (o texto
+/// fica alinhado depois do losango) e uma mensagem em cada dez tem tres
+/// linhas emendadas pela quebra — mais do que a caixa mostra de uma vez.
+pub fn make_gba_rom_jis16_bank_scrolling() -> Vec<u8> {
+    jis16_bank(true, true)
+}
+
+fn jis16_bank(padding: bool, scrolls: bool) -> Vec<u8> {
     let mut rom = make_gba_rom("JISBANK");
     rom.resize(256 * 1024, 0);
     let units = |text: &str| -> Vec<u16> {
@@ -1031,7 +1059,14 @@ pub fn make_gba_rom_jis16_bank(padding: bool) -> Vec<u8> {
                 text.extend([0xFF23, 0x0001]);
             }
             text.push(0xFF01);
+            if scrolls {
+                text.push(JIS16_SPACE);
+            }
             text.extend(units(JIS16_PREDICATES[p]));
+            if scrolls && p == 9 {
+                text.extend([0xFF01, JIS16_SPACE]);
+                text.extend(units(JIS16_THIRD_LINE));
+            }
             text.extend([0xFF03, 0xFF00, 0xFFFF]);
         }
         table.extend([0x0000, 0xFFFF]);

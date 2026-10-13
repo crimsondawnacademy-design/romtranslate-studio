@@ -17,7 +17,7 @@
 //! estava, fica la; senao vai pro espaco livre do arquivo (preenchimento de
 //! 0xFF, e o lugar dos blocos que sairam) e o diretorio e reapontado.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::adapter::ApplyReport;
 use crate::error::{CoreError, Result};
@@ -35,6 +35,10 @@ const MAX_TEXT: usize = 0xFFFE;
 /// So preenchimento longo assim (em bytes de 0xFF seguidos) e tratado como
 /// espaco livre: trecho curto de 0xFF pode ser dado.
 const MIN_PADDING: usize = 64 * 1024;
+/// Usos de um codigo (ou de uma fila deles) pra valer como medida do jogo.
+const MIN_RUNS: usize = 15;
+/// Paragrafos mais altos que a caixa pra valer como prova de que ela rola.
+const MIN_TALL: usize = 8;
 
 fn u16_at(data: &[u8], at: usize) -> Option<u16> {
     Some(u16::from_le_bytes(data.get(at..at + 2)?.try_into().ok()?))
@@ -247,24 +251,419 @@ pub(crate) fn is_banked(entry: &TextEntry) -> bool {
     entry.metadata.get("bank").is_some_and(|v| v.is_object())
 }
 
+/// Uma peca do texto de uma entry: trecho de texto ou codigo em colchetes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Piece<'a> {
+    Text(&'a str),
+    Code(&'a str),
+}
+
+fn pieces(text: &str) -> Vec<Piece<'_>> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    while at < text.len() {
+        let rest = &text[at..];
+        let code = rest.strip_prefix('[').and_then(|inside| inside.find(']'));
+        let len = match code {
+            Some(close) => close + 2,
+            // Ate o proximo colchete; um '[' que nao fecha e texto.
+            None => rest
+                .char_indices()
+                .skip(1)
+                .find(|&(_, c)| c == '[')
+                .map_or(rest.len(), |(i, _)| i),
+        };
+        out.push(match code {
+            Some(_) => Piece::Code(&rest[..len]),
+            None => Piece::Text(&rest[..len]),
+        });
+        at += len;
+    }
+    out
+}
+
+/// O comeco de um codigo, sem os parametros: `[FF23:0002]` -> `[FF23`.
+fn head(code: &str) -> &str {
+    code.split([':', ']']).next().unwrap_or(code)
+}
+
+/// Marca de fala e afins (■◆○★♪※, setas): abre uma linha, nao continua uma
+/// frase.
+fn is_mark(c: char) -> bool {
+    matches!(c, '\u{2190}'..='\u{27BF}' | '\u{203B}')
+}
+
 /// O tamanho do trecho mais longo de `text` entre dois codigos em colchetes.
 pub(crate) fn longest_line(text: &str) -> usize {
-    let (mut longest, mut line, mut inside) = (0, 0, false);
-    for c in text.chars() {
-        match c {
-            '[' => {
-                inside = true;
-                line = 0;
-            }
-            ']' if inside => inside = false,
-            _ if !inside => {
-                line += 1;
-                longest = longest.max(line);
-            }
-            _ => {}
+    pieces(text)
+        .iter()
+        .map(|piece| match piece {
+            Piece::Text(text) => text.chars().count(),
+            Piece::Code(_) => 0,
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+/// Como o jogo arruma o texto na caixa, medido nas mensagens do proprio banco
+/// (`learn`) e guardado em cada entry dele. Com isto o app quebra as linhas
+/// da traducao sozinho: quem traduz escreve a frase inteira.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct Layout {
+    /// Caracteres que cabem numa linha da caixa.
+    width: usize,
+    /// O codigo que quebra a linha, como aparece no texto: `[FF01]`.
+    soft: String,
+    /// A linha de baixo abre com um espaco quando a de cima abre com espaco
+    /// ou marca de fala: o texto fica alinhado depois da marca.
+    indent: bool,
+    /// Os codigos do meio da linha que a entry tem, pelo comeco (`[FF23`), e
+    /// quanto cada um ocupa na tela (um nome que o jogo escreve ali, ou
+    /// nada). Codigo fora daqui fecha a linha.
+    wide: HashMap<String, usize>,
+}
+
+/// O que `learn` mediu num banco: o `Layout` (com a largura dos codigos do
+/// meio da linha que deu pra medir), os codigos que fecham a linha e a maior
+/// largura medida, que e a que leva o codigo raro demais pra medir — quebrar a
+/// linha cedo nao estraga nada, passar da caixa estraga.
+struct Learned {
+    layout: Layout,
+    ends: HashSet<String>,
+    widest: usize,
+}
+
+impl Learned {
+    /// O `Layout` de uma entry: do banco, so os codigos do meio da linha que
+    /// ela tem.
+    fn of(&self, source: &str) -> Layout {
+        let wide = pieces(source)
+            .iter()
+            .filter_map(|piece| match *piece {
+                Piece::Code(code) if !self.ends.contains(code) => Some(code),
+                _ => None,
+            })
+            .map(|code| {
+                let width = self.layout.inline(code).unwrap_or(self.widest);
+                (head(code).to_string(), width)
+            })
+            .collect();
+        Layout {
+            wide,
+            ..self.layout.clone()
         }
     }
-    longest
+}
+
+/// Mede o `Layout` de um banco pelos textos originais dele. `None` = sem
+/// prova de que da pra mexer nas linhas: nenhuma quebra de linha achada, ou
+/// nenhum sinal de que a caixa rola sozinha.
+///
+/// - Fecha a linha o codigo sem parametro que separa dois trechos que, juntos,
+///   nao caberiam na caixa (em 1 de cada 20 usos ou mais). Codigo do meio da
+///   linha nunca separa trechos assim. Os que so aparecem juntos ("espera o
+///   botao" + "linha nova") entram em grupo.
+/// - A quebra de linha e, dos que fecham a linha, o que mais aparece sozinho.
+/// - A caixa rola: tem paragrafo (linhas emendadas so pela quebra) mais alto
+///   que o de 9 em cada 10 — texto que o jogo so consegue mostrar rolando.
+///   Sem isso, linha a mais na traducao poderia sair da caixa.
+/// - Um codigo do meio da linha ocupa o que os autores deixaram pra ele: a
+///   largura da caixa menos a linha mais cheia (99 em cada 100) que o tem.
+///
+/// Medido no jogo real (so contagens): quebra `FF01`, sozinha 10 mil vezes;
+/// 19 mil paragrafos, 97% de 1 ou 2 linhas e 540 de 3 a 70; 92% das linhas de
+/// baixo abrem com espaco; o comando que escreve o nome de um personagem
+/// deixa 6 ou 7 caracteres de folga, o de pausa, nenhum.
+fn learn(sources: &[&str], width: usize) -> Option<Learned> {
+    let texts: Vec<Vec<Piece>> = sources.iter().map(|source| pieces(source)).collect();
+    // Fila de codigos entre dois trechos -> (usos, vezes em que os dois
+    // trechos juntos passam da caixa). A chave sao os codigos sem parametro.
+    let mut runs: HashMap<Vec<&str>, (usize, usize)> = HashMap::new();
+    for text in &texts {
+        let mut left: Option<usize> = None;
+        let mut key: Vec<&str> = Vec::new();
+        for piece in text {
+            match *piece {
+                Piece::Code(code) if !code.contains(':') => key.push(code),
+                Piece::Code(_) => {}
+                Piece::Text(right) => {
+                    let right = right.chars().count();
+                    if let (Some(left), false) = (left, key.is_empty()) {
+                        key.sort_unstable();
+                        key.dedup();
+                        let (uses, over) = runs.entry(std::mem::take(&mut key)).or_default();
+                        *uses += 1;
+                        *over += usize::from(left + right > width);
+                    }
+                    key.clear();
+                    left = Some(right);
+                }
+            }
+        }
+    }
+    let breaks = |(uses, over): (usize, usize)| uses >= MIN_RUNS && over * 20 >= uses;
+    let alone: HashMap<&str, usize> = runs
+        .iter()
+        .filter(|(key, seen)| key.len() == 1 && breaks(**seen))
+        .map(|(key, seen)| (key[0], seen.0))
+        .collect();
+    let soft = alone
+        .iter()
+        .max_by_key(|&(code, uses)| (*uses, *code))
+        .map(|(code, _)| *code)?;
+    let mut ends: HashSet<&str> = alone.keys().copied().collect();
+    for (key, seen) in &runs {
+        if key.len() > 1 && breaks(*seen) && !key.iter().any(|code| alone.contains_key(code)) {
+            ends.extend(key);
+        }
+    }
+
+    // Linhas e paragrafos, sabendo o que fecha a linha.
+    let mut paragraphs: Vec<usize> = Vec::new();
+    let (mut softs, mut indented) = (0usize, 0usize);
+    let mut room: HashMap<&str, Vec<usize>> = HashMap::new();
+    for text in &texts {
+        let mut lines = 1;
+        let mut visible = 0;
+        let mut inline: Vec<&str> = Vec::new();
+        // Linha fechada, a espera do texto seguinte: `true` = por mais que a
+        // quebra sozinha.
+        let mut closed: Option<bool> = None;
+        for piece in text.iter().copied().chain([Piece::Code("")]) {
+            match piece {
+                Piece::Text(text) => {
+                    match closed.take() {
+                        Some(false) => {
+                            lines += 1;
+                            softs += 1;
+                            indented += usize::from(text.starts_with(' '));
+                        }
+                        Some(true) => paragraphs.push(std::mem::replace(&mut lines, 1)),
+                        None => {}
+                    }
+                    visible += text.chars().count();
+                }
+                Piece::Code(code) if !code.is_empty() && !ends.contains(code) => inline.push(code),
+                Piece::Code(code) => {
+                    if let ([only], true) = (&inline[..], visible > 0) {
+                        room.entry(head(only)).or_default().push(visible);
+                    }
+                    visible = 0;
+                    inline.clear();
+                    closed = Some(closed.unwrap_or(false) || code != soft);
+                }
+            }
+        }
+        paragraphs.push(lines);
+    }
+    paragraphs.sort_unstable();
+    let usual = paragraphs[(paragraphs.len() * 9).div_ceil(10).saturating_sub(1)];
+    let tall = paragraphs.iter().filter(|lines| **lines > usual).count();
+    if tall < MIN_TALL || tall * 100 < paragraphs.len() {
+        return None;
+    }
+
+    let wide: HashMap<String, usize> = room
+        .into_iter()
+        .filter(|(_, seen)| seen.len() >= MIN_RUNS)
+        .map(|(head, mut seen)| {
+            seen.sort_unstable();
+            let full = seen[(seen.len() * 99).div_ceil(100) - 1];
+            (head.to_string(), width.saturating_sub(full))
+        })
+        .collect();
+    Some(Learned {
+        widest: wide.values().copied().max().unwrap_or(0),
+        ends: ends.iter().map(|code| code.to_string()).collect(),
+        layout: Layout {
+            width,
+            soft: soft.to_string(),
+            indent: indented * 2 >= softs,
+            wide,
+        },
+    })
+}
+
+impl Layout {
+    /// O `Layout` guardado na entry (`tag`), se o banco dela tem um.
+    pub(crate) fn of(entry: &TextEntry) -> Option<Self> {
+        let bank = entry.metadata.get("bank")?;
+        Some(Self {
+            width: bank.get("line")?.as_u64()? as usize,
+            soft: bank.get("break")?.as_str()?.to_string(),
+            indent: bank.get("indent")?.as_bool()?,
+            wide: bank
+                .get("wide")?
+                .as_object()?
+                .iter()
+                .map(|(head, width)| (head.clone(), width.as_u64().unwrap_or(0) as usize))
+                .collect(),
+        })
+    }
+
+    /// O codigo que quebra a linha: o app tira e poe, a traducao nao precisa
+    /// ter os mesmos do original.
+    pub(crate) fn soft(&self) -> &str {
+        &self.soft
+    }
+
+    /// A largura de um codigo do meio da linha; `None` = fecha a linha.
+    fn inline(&self, code: &str) -> Option<usize> {
+        self.wide.get(head(code)).copied()
+    }
+
+    /// Depois de uma quebra de linha a frase continua? Continua se vem letra,
+    /// pontuacao ou um codigo do meio da linha; marca de fala, outro codigo
+    /// que fecha linha ou o fim do texto, nao.
+    fn goes_on(&self, rest: &[Piece]) -> bool {
+        for piece in rest {
+            match piece {
+                Piece::Code(code) => return *code != self.soft && self.inline(code).is_some(),
+                Piece::Text(text) => {
+                    if let Some(c) = text.chars().find(|c| *c != ' ') {
+                        return !is_mark(c);
+                    }
+                }
+            }
+        }
+        false
+    }
+
+    /// `text` sem as quebras de linha que so existem pra caber na caixa: a
+    /// quebra no meio de uma frase vira um espaco. E o que vai pro tradutor.
+    /// Quebra logo depois de outra (linha em branco) ou de outro codigo que
+    /// fecha a linha e de proposito, e fica.
+    pub(crate) fn flow(&self, text: &str) -> String {
+        let pieces = pieces(text);
+        let mut out = String::with_capacity(text.len());
+        let mut joined = false;
+        for (i, piece) in pieces.iter().enumerate() {
+            let mid_line = i > 0
+                && match pieces[i - 1] {
+                    Piece::Text(_) => true,
+                    Piece::Code(code) => self.inline(code).is_some(),
+                };
+            match *piece {
+                Piece::Code(code)
+                    if code == self.soft && mid_line && self.goes_on(&pieces[i + 1..]) =>
+                {
+                    out.truncate(out.trim_end_matches(' ').len());
+                    out.push(' ');
+                    joined = true;
+                }
+                Piece::Code(code) => {
+                    out.push_str(code);
+                    joined = false;
+                }
+                Piece::Text(text) => {
+                    out.push_str(if joined {
+                        text.trim_start_matches(' ')
+                    } else {
+                        text
+                    });
+                    joined = false;
+                }
+            }
+        }
+        out
+    }
+
+    /// `text` arrumado na caixa: a linha que passaria da largura e quebrada
+    /// entre palavras, com a quebra do proprio jogo. As quebras que a
+    /// traducao ja tem ficam onde estao: sao de quem traduziu. Devolve tambem
+    /// a linha mais larga que saiu (maior que a caixa = palavra que nao cabe
+    /// nela).
+    ///
+    /// ponytail: a conta comeca do zero no inicio da entry; mensagem que abre
+    /// com um comando que escreve (um nome) antes do texto tem a primeira
+    /// linha contada a menos. Corrigir = levar a largura desse comando pra ca.
+    pub(crate) fn wrap(&self, text: &str) -> (String, usize) {
+        let mut line = Line {
+            layout: self,
+            out: String::with_capacity(text.len() + 16),
+            col: 0,
+            widest: 0,
+            fresh: true,
+            lead: false,
+            gap: 0,
+            word: String::new(),
+            word_width: 0,
+        };
+        for piece in pieces(text) {
+            match piece {
+                Piece::Text(text) => {
+                    for c in text.chars() {
+                        if c == ' ' {
+                            line.place();
+                            line.gap += 1;
+                        } else {
+                            line.word.push(c);
+                            line.word_width += 1;
+                        }
+                    }
+                }
+                Piece::Code(code) => match self.inline(code) {
+                    Some(width) => {
+                        line.word.push_str(code);
+                        line.word_width += width;
+                    }
+                    None => {
+                        line.place();
+                        line.out.push_str(code);
+                        (line.fresh, line.lead, line.gap) = (true, false, 0);
+                    }
+                },
+            }
+        }
+        line.place();
+        (line.out, line.widest)
+    }
+}
+
+/// A linha que `Layout::wrap` esta montando.
+struct Line<'a> {
+    layout: &'a Layout,
+    out: String,
+    /// Largura ja usada na linha, e a maior que uma linha chegou a ter.
+    col: usize,
+    widest: usize,
+    /// A linha de cima do paragrafo ainda esta vazia.
+    fresh: bool,
+    /// A linha de cima abriu com espaco ou marca de fala: as de baixo levam
+    /// o recuo.
+    lead: bool,
+    /// Espacos vistos antes da palavra que esta chegando.
+    gap: usize,
+    word: String,
+    word_width: usize,
+}
+
+impl Line<'_> {
+    /// Poe a palavra que chegou na linha, ou na de baixo se ela nao cabe.
+    fn place(&mut self) {
+        if self.word.is_empty() {
+            return;
+        }
+        if self.fresh {
+            // O comeco do paragrafo fica como veio, espacos inclusive.
+            self.col = self.gap;
+            self.lead = self.gap > 0 || self.word.chars().next().is_some_and(is_mark);
+            self.fresh = false;
+            self.out.extend(std::iter::repeat_n(' ', self.col));
+        } else if self.col + 1 + self.word_width <= self.layout.width {
+            self.col += 1;
+            self.out.push(' ');
+        } else {
+            self.col = usize::from(self.layout.indent && self.lead);
+            self.out.push_str(&self.layout.soft);
+            self.out.extend(std::iter::repeat_n(' ', self.col));
+        }
+        self.out.push_str(&self.word);
+        self.col += self.word_width;
+        self.widest = self.widest.max(self.col);
+        self.word.clear();
+        (self.word_width, self.gap) = (0, 0);
+    }
 }
 
 /// Marca as entries que estao inteiras dentro de uma mensagem de banco: elas
@@ -273,37 +672,40 @@ pub(crate) fn longest_line(text: &str) -> usize {
 /// Junto vai a largura da caixa de texto, medida no proprio jogo: o tamanho
 /// de linha (trecho entre dois comandos) que 999 em cada mil linhas do banco
 /// respeitam. No jogo medido sao 31 mil linhas e o corte e seco: 99,96% tem
-/// ate 20 caracteres. A traducao pode crescer, mas cada linha dela tem que
-/// caber na caixa.
+/// ate 20 caracteres. E, quando da pra medir, o `Layout` do banco: ai o app
+/// quebra as linhas da traducao sozinho. Sem ele, cada linha da traducao tem
+/// que caber na caixa do jeito que vier.
 pub(crate) fn tag(entries: &mut [TextEntry], banks: &[Bank]) -> usize {
     let mut tagged = 0;
     for bank in banks {
-        let mut inside = Vec::new();
-        let mut lines: Vec<usize> = Vec::new();
-        for (i, entry) in entries.iter().enumerate() {
-            let Some(at) = entry.offset.map(|o| o as usize) else {
-                continue;
-            };
-            let room = bank
-                .room_at(at)
-                .filter(|room| room.segment_of(at, entry.original_bytes.len()).is_some());
-            if let Some(room) = room {
-                inside.push((i, room.pairs[0]));
-                lines.extend(
-                    entry
-                        .source_text
-                        .split(['[', ']'])
-                        .step_by(2)
-                        .map(|line| line.chars().count())
-                        .filter(|n| *n > 0),
-                );
-            }
-        }
+        let inside: Vec<(usize, usize)> = entries
+            .iter()
+            .enumerate()
+            .filter_map(|(i, entry)| {
+                let at = entry.offset? as usize;
+                let room = bank.room_at(at)?;
+                room.segment_of(at, entry.original_bytes.len())?;
+                Some((i, room.pairs[0]))
+            })
+            .collect();
+        let sources: Vec<&str> = inside
+            .iter()
+            .map(|&(i, _)| entries[i].source_text.as_str())
+            .collect();
+        let mut lines: Vec<usize> = sources
+            .iter()
+            .flat_map(|source| pieces(source))
+            .filter_map(|piece| match piece {
+                Piece::Text(text) => Some(text.chars().count()),
+                Piece::Code(_) => None,
+            })
+            .collect();
         lines.sort_unstable();
         // ponytail: com menos de mil linhas o corte de 99,9% e a maior linha.
         let line = lines
             .get((lines.len() * 999).div_ceil(1000).saturating_sub(1))
             .copied();
+        let learned = line.and_then(|width| learn(&sources, width));
         for (i, pair) in inside {
             let entry = &mut entries[i];
             entry.metadata["bank"] = serde_json::json!({
@@ -311,13 +713,25 @@ pub(crate) fn tag(entries: &mut [TextEntry], banks: &[Bank]) -> usize {
                 "pair": pair,
                 "line": line,
             });
+            if let Some(learned) = &learned {
+                let layout = learned.of(&entry.source_text);
+                entry.metadata["bank"]["break"] = serde_json::json!(layout.soft);
+                entry.metadata["bank"]["indent"] = serde_json::json!(layout.indent);
+                entry.metadata["bank"]["wide"] = serde_json::json!(layout.wide);
+            }
             entry.max_bytes = None;
-            entry.context = Some(match line {
-                Some(line) => format!(
+            entry.context = Some(match (line, &learned) {
+                (Some(line), Some(_)) => format!(
+                    "realocavel: a mensagem pode crescer (o bloco e remontado) e o app quebra \
+                     as linhas na largura da caixa de texto do jogo ({line} caracteres)"
+                ),
+                (Some(line), None) => format!(
                     "realocavel: a mensagem pode crescer (o bloco e remontado); cada linha \
                      cabe {line} caracteres na caixa de texto do jogo"
                 ),
-                None => "realocavel: a mensagem pode crescer (o bloco e remontado)".to_string(),
+                (None, _) => {
+                    "realocavel: a mensagem pode crescer (o bloco e remontado)".to_string()
+                }
             });
             tagged += 1;
         }
@@ -634,6 +1048,69 @@ mod tests {
         assert_eq!(longest_line("abc[FF01]defgh[FF03][FF00]ij"), 5);
         assert_eq!(longest_line("[FF01]"), 0);
         assert_eq!(longest_line("sem codigo"), 10);
+    }
+
+    fn layout() -> Layout {
+        Layout {
+            width: 12,
+            soft: "[FF01]".to_string(),
+            indent: true,
+            wide: HashMap::from([("[FF23".to_string(), 6), ("[FF04".to_string(), 0)]),
+        }
+    }
+
+    #[test]
+    fn the_sentence_flows_and_the_marks_keep_their_lines() {
+        let layout = layout();
+        // A quebra no meio da frase vira um espaco so, com ou sem recuo; a
+        // que vem antes de uma marca de fala, de outro codigo que fecha a
+        // linha ou do fim, fica.
+        assert_eq!(
+            layout.flow("◆um dois[FF01] tres[FF01]quatro[FF01]◆cinco[FF03][FF00] seis[FF01]"),
+            "◆um dois tres quatro[FF01]◆cinco[FF03][FF00] seis[FF01]"
+        );
+        // Linha em branco (duas quebras) e quebra depois de outro codigo que
+        // fecha a linha sao de proposito.
+        assert_eq!(layout.flow("um[FF01][FF01] dois"), "um[FF01][FF01] dois");
+        assert_eq!(
+            layout.flow("um[FF03][FF00][FF01]dois"),
+            "um[FF03][FF00][FF01]dois"
+        );
+        // Codigo do meio da linha continua a frase.
+        assert_eq!(layout.flow("de[FF01] [FF23:0002]！"), "de [FF23:0002]！");
+        assert_eq!(layout.flow("sem quebra"), "sem quebra");
+    }
+
+    #[test]
+    fn the_lines_are_broken_between_words_inside_the_box() {
+        let layout = layout();
+        // Com marca: as linhas de baixo levam o recuo. Depois do codigo que
+        // fecha a linha a conta recomeca, e o espaco do comeco fica.
+        let (text, widest) = layout.wrap("◆um dois tres quatro cinco[FF03][FF00] seis sete oito");
+        assert_eq!(
+            text,
+            "◆um dois[FF01] tres quatro[FF01] cinco[FF03][FF00] seis sete[FF01] oito"
+        );
+        assert_eq!(widest, 12);
+        // Sem marca nem espaco no comeco, sem recuo.
+        assert_eq!(
+            layout.wrap("um dois tres quatro").0,
+            "um dois tres[FF01]quatro"
+        );
+        // O codigo que escreve um nome ocupa a largura dele; a pausa, nada.
+        assert_eq!(
+            layout.wrap("◆oi [FF23:0002], tudo[FF04:001E] bem?").0,
+            "◆oi [FF23:0002],[FF01] tudo[FF04:001E] bem?"
+        );
+        // A quebra que a traducao ja tem fica, com o que vem depois dela; a
+        // palavra maior que a caixa fica inteira e aparece na conta.
+        assert_eq!(
+            layout.wrap("◆um[FF01] dois tres quatro[FF01]cinco").0,
+            "◆um[FF01] dois tres[FF01] quatro[FF01]cinco"
+        );
+        let (text, widest) = layout.wrap("◆paralelepipedos sim");
+        assert_eq!((text.as_str(), widest), ("◆paralelepipedos[FF01] sim", 16));
+        assert_eq!(layout.wrap("").0, "");
     }
 
     #[test]

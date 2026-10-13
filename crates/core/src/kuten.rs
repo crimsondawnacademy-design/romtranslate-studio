@@ -56,6 +56,9 @@ const ALONE_CHARS: usize = 16;
 /// Usos pra julgar um comando (`find_params`) ou a marca de fala
 /// (`find_bullet`).
 const MIN_USES: u32 = 15;
+/// Um comando leva ate isto de parametros. Numero em mais posicoes seguidas
+/// do que isto nao e parametro: e texto de outro alfabeto.
+const MAX_PARAMS: usize = 4;
 /// Abaixo disto, codigo sem caractere na tabela e desenho proprio do jogo.
 const GLYPHS: u16 = (ROWS * CELLS) as u16;
 /// As figuras do fim da linha 1 e do comeco da linha 2 do JIS, de "☆" a "〓":
@@ -97,17 +100,27 @@ pub fn encode(c: char) -> Option<u16> {
     chars().iter().position(|&u| u == unit).map(|i| i as u16)
 }
 
-fn token(code: u16) -> String {
-    format!("[{code:04X}]")
-}
-
-/// Comando com o parametro dele, numa peca so: `[FF08:0003]`.
-fn token_with(code: u16, param: u16) -> String {
-    format!("[{code:04X}:{param:04X}]")
+/// Um codigo como aparece no texto, e o comando com os parametros dele numa
+/// peca so: `[FF01]`, `[FF08:0003]`.
+fn token_of(units: &[u16]) -> String {
+    let units: Vec<String> = units.iter().map(|u| format!("{u:04X}")).collect();
+    format!("[{}]", units.join(":"))
 }
 
 fn key(code: u16) -> String {
     format!("{:02X}{:02X}", code & 0xFF, code >> 8)
+}
+
+/// `token` e um desenho proprio do jogo (`[045C]`: caractere da fonte dele num
+/// codigo que a tabela deixa vazio, quase sempre kanji)? E texto do original,
+/// nao comando: a traducao nao precisa repetir.
+pub fn is_glyph_token(token: &str) -> bool {
+    let code = token
+        .strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .filter(|hex| hex.len() == 4)
+        .and_then(|hex| u16::from_str_radix(hex, 16).ok());
+    code.is_some_and(|code| code < CONTROL)
 }
 
 /// O que o arquivo mostrou do jeito que ESTE jogo usa a codificacao.
@@ -116,25 +129,25 @@ struct Dialect {
     /// O codigo que o jogo usa como espaco entre palavras, se tem um fora da
     /// tabela (`find_space`).
     space: Option<u16>,
-    /// Comandos que levam um parametro na unidade seguinte
-    /// (`find_params`).
-    params: HashSet<u16>,
+    /// Quantos parametros leva cada comando que aparece o bastante pra medir
+    /// (`find_params`). Vazio = nada medido ainda (a primeira leitura).
+    params: HashMap<u16, usize>,
     /// As figuras com que as falas abrem (`find_bullets`).
     bullets: HashSet<u16>,
 }
 
 /// O `.tbl` desta codificacao: uma linha por caractere (chave = os 2 bytes do
 /// codigo, o menos significativo primeiro), o espaco, os codigos de controle
-/// como `[FFxx]`, cada par comando + parametro de `pairs` como `[FFxx:pppp]`
-/// e, como `[xxxx]`, os codigos em que a tabela padrao nao tem nada — e onde
+/// como `[FFxx]`, cada comando com os parametros dele (`commands`) como
+/// `[FFxx:pppp]` e, como `[xxxx]`, os codigos em que a tabela padrao nao tem nada — e onde
 /// o jogo poe os desenhos dele (kanji proprio, icone). `space` = o codigo que
 /// o jogo usa como espaco entre palavras; sem ele o espaco e o codigo 0 (o de
 /// largura inteira do JIS).
-pub fn table_text(space: Option<u16>, pairs: &BTreeSet<(u16, u16)>) -> String {
+pub fn table_text(space: Option<u16>, commands: &BTreeSet<Vec<u16>>) -> String {
     let mut out = String::from(
         "# Tabela gerada pelo RomTranslate Studio: codigos de 16 bits na ordem do JIS X 0208\n\
          # (codigo = posicao do caractere na tabela, gravado em little-endian).\n\
-         # [FFxx] e comando do jogo; [FFxx:pppp], comando com o parametro dele.\n\
+         # [FFxx] e comando do jogo; [FFxx:pppp], comando com os parametros dele.\n\
          # [xxxx] e um desenho proprio do jogo (kanji, icone) num codigo que a tabela\n\
          # padrao deixa vazio: troque pelo caractere certo se souber qual e.\n\
          # Pode ser completada a mao: o app nao sobrescreve este arquivo.\n",
@@ -150,21 +163,16 @@ pub fn table_text(space: Option<u16>, pairs: &BTreeSet<(u16, u16)>) -> String {
                 let _ = writeln!(out, "{}={c}", key(code));
             }
             None => {
-                let _ = writeln!(out, "{}={}", key(code), token(code));
+                let _ = writeln!(out, "{}={}", key(code), token_of(&[code]));
             }
         }
     }
     for code in CONTROL..END {
-        let _ = writeln!(out, "{}={}", key(code), token(code));
+        let _ = writeln!(out, "{}={}", key(code), token_of(&[code]));
     }
-    for &(code, param) in pairs {
-        let _ = writeln!(
-            out,
-            "{}{}={}",
-            key(code),
-            key(param),
-            token_with(code, param)
-        );
+    for units in commands {
+        let keys: String = units.iter().map(|u| key(*u)).collect();
+        let _ = writeln!(out, "{keys}={}", token_of(units));
     }
     out
 }
@@ -210,36 +218,53 @@ fn find_space(codes: &[u16]) -> Option<u16> {
         .map(|(code, _)| code)
 }
 
-/// Os comandos que levam um parametro: os que, em `MIN_USES` usos ou mais,
-/// quase nunca (menos de 1 em 10) sao seguidos de algo que continua um texto
-/// — kana, kanji, espaco, outro comando ou o fim da mensagem. Depois da
-/// quebra de linha vem texto; depois de "toca o som n" vem o n. So contam os
-/// usos dentro das mensagens de `spans` e logo antes delas: fora do texto,
-/// 0xFFxx e um numero qualquer, seguido de qualquer coisa.
+/// Quantos parametros leva cada comando com `MIN_USES` usos ou mais: as
+/// posicoes seguidas, logo depois dele, em que quase nunca (menos de 1 em 10)
+/// vem algo que continua um texto. Depois da quebra de linha vem texto; depois
+/// de "toca o som n" vem o n. Outro comando na posicao nao conta nem pra um
+/// lado nem pro outro: comando segue comando o tempo todo. A marca de fala
+/// continua um texto (`Dialect::goes_on`): sem ela na conta, o comando que
+/// vem sempre antes de uma fala ficava com a marca como parametro. So contam os usos
+/// dentro das mensagens de `spans` e logo antes delas: fora do texto, 0xFFxx e
+/// um numero qualquer, seguido de qualquer coisa.
 ///
-/// Medido no jogo real: `FF01` (quebra de linha, 13 mil usos) e seguido de
-/// texto 96% das vezes; `FF04`, `FF23`, `FF06`, `FF22`, `FF0B`, `FF08` (de
-/// 166 a 1.846 usos cada), 0% a 1% — sempre um numero pequeno. Sem isto o
-/// numero era lido como letra e entrava na frase: traduzir a frase trocava o
-/// parametro do comando.
-fn find_params(codes: &[u16], space: Option<u16>, spans: &[Span]) -> HashSet<u16> {
-    let mut uses: HashMap<u16, (u32, u32)> = HashMap::new();
+/// Medido no jogo real: `FF01` (quebra de linha, 11 mil usos) e seguido de
+/// texto 95% das vezes; `FF04`, `FF23`, `FF06`, `FF22`, `FF08`, 0% — um numero
+/// pequeno, e texto de novo na posicao seguinte; `FF26`, dois numeros; `FF0B`,
+/// numero ate onde se olha (mais de `MAX_PARAMS`: ele troca de alfabeto, e a
+/// leitura para nele). Sem isto o numero era lido como letra e entrava na
+/// frase: traduzir a frase trocava o parametro do comando.
+fn find_params(codes: &[u16], dialect: &Dialect, spans: &[Span]) -> HashMap<u16, usize> {
+    // Por comando: os usos e, em cada posicao seguinte, (quantas vezes nao
+    // era outro comando, quantas dessas continuavam um texto).
+    type After = [(u32, u32); MAX_PARAMS + 1];
+    let mut seen: HashMap<u16, (u32, After)> = HashMap::new();
     for span in spans {
         // O comando logo antes da mensagem conta: o parametro dele foi lido
         // como a primeira letra dela.
         for i in span.begin.saturating_sub(1)..span.end.min(codes.len() - 1) {
-            if (CONTROL..END).contains(&codes[i]) {
-                let next = codes[i + 1];
-                let goes_on = next >= CONTROL || Some(next) == space || is_script(next);
-                let (count, plausible) = uses.entry(codes[i]).or_default();
-                *count += 1;
-                *plausible += u32::from(goes_on);
+            if !(CONTROL..END).contains(&codes[i]) {
+                continue;
+            }
+            let (uses, after) = seen.entry(codes[i]).or_default();
+            *uses += 1;
+            for (slot, &next) in after.iter_mut().zip(&codes[i + 1..]) {
+                if !(CONTROL..END).contains(&next) {
+                    slot.0 += 1;
+                    slot.1 += u32::from(dialect.goes_on(next));
+                }
             }
         }
     }
-    uses.into_iter()
-        .filter(|&(_, (count, plausible))| count >= MIN_USES && plausible * 10 < count)
-        .map(|(code, _)| code)
+    seen.into_iter()
+        .filter(|&(_, (uses, _))| uses >= MIN_USES)
+        .map(|(code, (_, after))| {
+            let params = after
+                .iter()
+                .take_while(|&&(n, text)| n >= MIN_USES && text * 10 < n)
+                .count();
+            (code, params)
+        })
         .collect()
 }
 
@@ -281,6 +306,13 @@ enum Piece {
 }
 
 impl Dialect {
+    /// O que continua um texto depois de um comando: kana, kanji, o espaco
+    /// do jogo, a marca de fala ou o fim da mensagem. Numero (parametro)
+    /// quase nunca e isso.
+    fn goes_on(&self, next: u16) -> bool {
+        next == END || Some(next) == self.space || self.bullets.contains(&next) || is_script(next)
+    }
+
     /// A peca que comeca em `codes[i]`, quantas unidades ela ocupa e como
     /// ela aparece no texto.
     fn piece(&self, codes: &[u16], i: usize) -> (Piece, usize) {
@@ -288,8 +320,21 @@ impl Dialect {
         if Some(code) == self.space {
             (Piece::Char(' '), 1)
         } else if (CONTROL..END).contains(&code) {
-            let with_param = self.params.contains(&code) && i + 1 < codes.len();
-            (Piece::Control, if with_param { 2 } else { 1 })
+            let rest = &codes[i + 1..];
+            let params = match self.params.get(&code) {
+                // Numero ate onde se mediu: o que vem depois nao e desta tabela.
+                Some(&n) if n > MAX_PARAMS => return (Piece::Other, 1),
+                Some(&n) => n.min(rest.len()),
+                None if self.params.is_empty() => 0,
+                // Comando raro demais pra medir: fica com ele o que vem depois
+                // e nao continua um texto.
+                None => rest
+                    .iter()
+                    .take(MAX_PARAMS)
+                    .take_while(|&&next| next < CONTROL && !self.goes_on(next))
+                    .count(),
+            };
+            (Piece::Control, 1 + params)
         } else if let Some(c) = decode(code) {
             (Piece::Char(c), 1)
         } else if code != 0 && code < GLYPHS {
@@ -302,8 +347,8 @@ impl Dialect {
     fn text_of(&self, codes: &[u16], i: usize) -> String {
         match self.piece(codes, i) {
             (Piece::Char(c), _) => c.to_string(),
-            (Piece::Control, 2) => token_with(codes[i], codes[i + 1]),
-            _ => token(codes[i]),
+            (Piece::Control, len) => token_of(&codes[i..i + len]),
+            _ => token_of(&codes[i..=i]),
         }
     }
 }
@@ -382,8 +427,8 @@ fn scan(codes: &[u16], dialect: &Dialect, starts: &HashSet<usize>) -> Vec<Span> 
     let mut i = 0;
     while i < codes.len() {
         let (piece, len) = dialect.piece(codes, i);
-        if matches!(piece, Piece::Control) && len == 2 {
-            is_param[i + 1] = true;
+        if matches!(piece, Piece::Control) {
+            is_param[i + 1..i + len].fill(true);
         }
         i += len;
     }
@@ -461,8 +506,8 @@ pub fn extract(data: &[u8], starts: &HashSet<usize>) -> Option<Kuten16> {
         ..Dialect::default()
     };
     let first = scan(&codes, &dialect, starts);
-    dialect.params = find_params(&codes, dialect.space, &first);
     dialect.bullets = find_bullets(&codes, &first);
+    dialect.params = find_params(&codes, &dialect, &first);
     let found = scan(&codes, &dialect, starts);
 
     // Texto de jogo vem em fila; fora de fila so fica a sequencia longa.
@@ -477,7 +522,7 @@ pub fn extract(data: &[u8], starts: &HashSet<usize>) -> Option<Kuten16> {
     };
     let mut entries = Vec::new();
     let mut spans = Vec::new();
-    let mut pairs = BTreeSet::new();
+    let mut commands = BTreeSet::new();
     let mut group = 0;
     for i in 0..found.len() {
         let last = found
@@ -495,8 +540,8 @@ pub fn extract(data: &[u8], starts: &HashSet<usize>) -> Option<Kuten16> {
             let mut at = span.begin;
             while at < span.end {
                 let (piece, len) = dialect.piece(&codes, at);
-                if matches!(piece, Piece::Control) && len == 2 {
-                    pairs.insert((codes[at], codes[at + 1]));
+                if matches!(piece, Piece::Control) && len > 1 {
+                    commands.insert(codes[at..at + len].to_vec());
                 }
                 at += len;
             }
@@ -533,7 +578,7 @@ pub fn extract(data: &[u8], starts: &HashSet<usize>) -> Option<Kuten16> {
     (sentences >= MIN_SENTENCES).then(|| Kuten16 {
         entries,
         spans,
-        table: table_text(dialect.space, &pairs),
+        table: table_text(dialect.space, &commands),
     })
 }
 
@@ -564,18 +609,21 @@ mod tests {
 
     #[test]
     fn the_table_reads_and_writes_what_extract_reads() {
-        let pairs = BTreeSet::from([(0xFF08, 0x0003)]);
-        let text = table_text(Some(0x00AC), &pairs);
+        let commands = BTreeSet::from([vec![0xFF08, 0x0003], vec![0xFF26, 0x0003, 0x0001]]);
+        let text = table_text(Some(0x00AC), &commands);
         assert!(text.contains("\n1B01=あ\n"), "hiragana");
         assert!(text.contains("\nAC00= \n"), "o espaco do jogo");
         assert!(text.contains("\n01FF=[FF01]\n"), "codigo de controle");
         assert!(
-            text.contains("\n08FF0300=[FF08:0003]\n"),
+            text.contains("\n08FF0300=[FF08:0003]\n")
+                && text.contains("\n26FF03000100=[FF26:0003:0001]\n"),
             "comando com parametro"
         );
         // Codigo que a tabela padrao deixa vazio: desenho proprio do jogo.
         assert!(text.contains("\nAD00=[00AD]\n"), "desenho proprio");
         assert!(!text.contains("\n0000="), "zero e preenchimento");
+        assert!(is_glyph_token("[00AD]") && !is_glyph_token("[FF01]"));
+        assert!(!is_glyph_token("[FF08:0003]") && !is_glyph_token("[ITEM]"));
         assert!(!text.contains("FFFF="), "0xFFFF fecha a mensagem");
         let table = crate::tbl::TblTable::parse(&text).unwrap();
         assert_eq!(
@@ -584,6 +632,42 @@ mod tests {
         );
         // Sem espaco proprio, o espaco e o codigo 0.
         assert!(table_text(None, &BTreeSet::new()).contains("\n0000= \n"));
+    }
+
+    /// 120 mensagens "◆<kana>" + comando + `numbers` + "<kana>", uma atras da
+    /// outra, e como a mensagem do meio sai lida.
+    fn read_with(command: u16, numbers: &[u16]) -> Option<String> {
+        let kana = |text: &str| text.chars().map(|c| encode(c).unwrap()).collect::<Vec<_>>();
+        let mut codes = Vec::new();
+        for i in 0..120u16 {
+            codes.push(encode('◆').unwrap());
+            codes.extend(kana("むらの ひとは".replace(' ', "").as_str()));
+            codes.push(command);
+            codes.extend(numbers.iter().map(|n| n + i % 3));
+            codes.extend(kana(
+                "きょうも げんきに はたらいている".replace(' ', "").as_str(),
+            ));
+            codes.extend([0xFF03, 0xFF00, END]);
+        }
+        let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
+        let found = extract(&data, &HashSet::new())?;
+        Some(found.entries[60].source_text.clone())
+    }
+
+    #[test]
+    fn a_command_keeps_as_many_numbers_as_it_takes() {
+        // Sem numero depois: o comando nao leva parametro.
+        let text = read_with(0xFF01, &[]).unwrap();
+        assert!(text.contains("ひとは[FF01]きょうも"), "{text}");
+        // Um e dois numeros: ficam na peca do comando, fora da frase.
+        let text = read_with(0xFF23, &[2]).unwrap();
+        assert!(text.contains("ひとは[FF23:0002]きょうも"), "{text}");
+        let text = read_with(0xFF26, &[3, 1]).unwrap();
+        assert!(text.contains("ひとは[FF26:0003:0001]きょうも"), "{text}");
+        // Numero ate onde se olha: nao e parametro, e outro alfabeto. A
+        // leitura para no comando e nada do que vem depois dele vira frase.
+        let text = read_with(0xFF0B, &[0x3E, 5, 9, 7, 2, 8]).unwrap();
+        assert!(!text.contains('['), "{text}");
     }
 
     #[test]

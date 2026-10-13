@@ -1,5 +1,6 @@
 //! Loader de tabelas de caracteres `.tbl` (formato classico de romhacking):
-//! uma entrada por linha, `HEX=texto`, com chaves de 1 a 4 bytes.
+//! uma entrada por linha, `HEX=texto`, com chaves de 1 a 16 bytes (as longas
+//! sao comando de jogo com os parametros dele).
 //! Linhas vazias e comentarios (`#` ou `;`) sao ignorados.
 //!
 //! A tabela vale nos dois sentidos: `lookup` le bytes do jogo, `encode`
@@ -59,7 +60,7 @@ impl TblTable {
             };
             let key = decode_hex(hex).ok_or_else(|| {
                 CoreError::Tbl(format!(
-                    "linha {n}: chave hex invalida \"{hex}\" (esperado 2-8 digitos hex)"
+                    "linha {n}: chave hex invalida \"{hex}\" (esperado de 2 a 32 digitos hex, aos pares)"
                 ))
             })?;
             max_key_len = max_key_len.max(key.len());
@@ -457,7 +458,7 @@ fn base_letter(ch: char) -> Option<char> {
 
 fn decode_hex(hex: &str) -> Option<Vec<u8>> {
     let hex = hex.trim();
-    if hex.is_empty() || !hex.len().is_multiple_of(2) || hex.len() > 8 {
+    if hex.is_empty() || !hex.len().is_multiple_of(2) || hex.len() > 32 {
         return None;
     }
     (0..hex.len())

@@ -238,10 +238,15 @@ fn encode_table_entries(project_dir: &Path, entries: &mut [TextEntry]) -> Result
         else {
             continue;
         };
+        // Mensagem de banco com a caixa medida: as linhas sao quebradas aqui.
+        let text = match crate::adapters::bank::Layout::of(entry) {
+            Some(layout) => std::borrow::Cow::Owned(layout.wrap(text).0),
+            None => std::borrow::Cow::Borrowed(text.as_str()),
+        };
         let bytes = tables
             .get(id)?
             .encode_slot(
-                text,
+                &text,
                 entry.original_bytes.len(),
                 crate::adapters::inplace::terminated(entry),
             )

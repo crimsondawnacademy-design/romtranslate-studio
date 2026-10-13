@@ -635,6 +635,32 @@ mod jis16 {
             .find(|i| i.text == synth::jis16_message(0))
             .unwrap();
         assert_eq!(item.max_chars, Some(26 + 6));
+        // O nome com um kanji que a tabela nao leu vai com o aviso de que o
+        // codigo e texto, e a traducao sem ele nao e erro. Comando que some
+        // continua sendo.
+        let glyph = requests
+            .iter()
+            .flat_map(|r| r.items.iter())
+            .find(|i| i.text == synth::JIS16_GLYPH_NAME)
+            .expect("o nome com o desenho foi pedido");
+        assert!(glyph.context.as_deref().unwrap().contains("could not read"));
+        assert_eq!(
+            item.context
+                .as_deref()
+                .map(|c| c.contains("could not read")),
+            Some(false)
+        );
+        let entries = ProjectDb::open(&dir).unwrap().load_entries().unwrap();
+        let table = romtranslate_core::tbl::TblTable::parse(
+            &fs::read_to_string(dir.join("tables/jis16.tbl")).unwrap(),
+        )
+        .unwrap();
+        let name = by_text(&entries, synth::JIS16_GLYPH_NAME);
+        let issues = validate_entry(&translated(name, "Mel"), Some(&table));
+        assert!(issues.is_empty(), "{issues:?}");
+        let first = by_text(&entries, &synth::jis16_message(0));
+        let issues = validate_entry(&translated(first, "◆Oi."), Some(&table));
+        assert!(issues[0].message.contains("[FF01]"), "{issues:?}");
         // O texto de 8 bits do cartucho nao vai pra IA.
         assert!(!requests
             .iter()
@@ -887,5 +913,159 @@ mod bank {
         assert!(serde_json::to_string(item)
             .unwrap()
             .contains("\"maxLine\":18"));
+    }
+
+    // --- Caixa de texto que rola: o app quebra as linhas sozinho ---
+
+    fn scrolling_project(tmp: &TempDir) -> PathBuf {
+        let source = tmp.0.join("game.gba");
+        fs::write(&source, synth::make_gba_rom_jis16_bank_scrolling()).unwrap();
+        let dir = tmp.0.join("game.rtsproj");
+        create_project(CreateProjectArgs {
+            source_path: source,
+            platform: Platform::Gba,
+            adapter_id: GbaAdapter.id().to_string(),
+            source_language: Some("ja".to_string()),
+            target_language: "pt-BR".to_string(),
+            project_dir: dir.clone(),
+        })
+        .unwrap();
+        extract_project(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn a_box_that_scrolls_is_measured_and_one_that_does_not_is_left_alone() {
+        // Sem paragrafo mais alto que o comum nao ha prova de que a caixa
+        // rola: nada de quebra automatica.
+        let fixed = GbaAdapter
+            .extract(&synth::make_gba_rom_jis16_bank(true))
+            .unwrap();
+        let first = by_text(&fixed.entries, &synth::jis16_message(0));
+        assert!(first.metadata["bank"].get("break").is_none());
+
+        let rom = synth::make_gba_rom_jis16_bank_scrolling();
+        let out = GbaAdapter.extract(&rom).unwrap();
+        let first = by_text(&out.entries, &synth::jis16_scrolling_message(0));
+        let bank = &first.metadata["bank"];
+        assert_eq!(
+            (&bank["break"], &bank["indent"]),
+            (&"[FF01]".into(), &true.into())
+        );
+        // A caixa: a maior linha, que e a de baixo com o espaco na frente.
+        assert_eq!(bank["line"], 19);
+        assert_eq!(bank["wide"], serde_json::json!({}));
+        // O comando do meio da linha leva a folga que os autores deixaram: a
+        // caixa menos a linha mais cheia que o tem ("◆まちの パンやは", 9).
+        let named = by_text(&out.entries, &synth::jis16_scrolling_message(30));
+        assert_eq!(
+            named.metadata["bank"]["wide"],
+            serde_json::json!({"[FF23": 10})
+        );
+        assert!(first.context.as_deref().unwrap().contains("quebra"));
+
+        // A traducao nao precisa da quebra de linha do original, e a frase
+        // inteira nao e aviso: quem quebra e o app. Palavra maior que a
+        // caixa, sim.
+        let table = romtranslate_core::tbl::TblTable::parse(&out.tables[0].1).unwrap();
+        let whole = "◆O povo todo desta vila aqui trabalha bem contente.";
+        let issues = validate_entry(&translated(first, whole), Some(&table));
+        assert!(issues.is_empty(), "{issues:?}");
+        let word = "◆Inconstitucionalissimamente!";
+        let issues = validate_entry(&translated(first, word), Some(&table));
+        assert!(
+            issues.len() == 1 && issues[0].message.contains("vai passar da borda"),
+            "{issues:?}"
+        );
+        // Os outros codigos continuam contando.
+        let issues = validate_entry(&translated(named, whole), Some(&table));
+        assert!(issues[0].message.contains("[FF23:0001]"), "{issues:?}");
+    }
+
+    #[test]
+    fn the_translation_is_wrapped_to_the_box_with_the_break_of_the_game() {
+        let tmp = TempDir::new("bank-wrap");
+        let dir = scrolling_project(&tmp);
+        set_translations(
+            &dir,
+            &[
+                // Frase inteira, sem quebra nenhuma.
+                (
+                    &synth::jis16_scrolling_message(0),
+                    "◆O povo todo desta vila segue no trabalho, sempre contente.",
+                ),
+                // Com uma quebra posta por quem traduziu e o comando que
+                // escreve um nome: a quebra fica, o comando conta 10.
+                (
+                    &synth::jis16_scrolling_message(30),
+                    "◆Os velhos[FF01] daqui e [FF23:0001] seguem trabalhando.",
+                ),
+            ],
+        );
+        let outcome = reinsert_project_with(&dir, ErrorPolicy::Block).unwrap();
+        assert_eq!(outcome.apply.applied, 2);
+        let working = fs::read(&outcome.working_path).unwrap();
+        let lines = |room: usize, k: usize| -> Vec<String> {
+            message(&working, room, k)
+                .trim_end_matches("[FF03][FF00]")
+                .split("[FF01]")
+                .map(str::to_string)
+                .collect()
+        };
+        assert_eq!(
+            lines(0, 0),
+            [
+                "◆Ｏ ｐｏｖｏ ｔｏｄｏ ｄｅｓｔａ",
+                " ｖｉｌａ ｓｅｇｕｅ ｎｏ",
+                " ｔｒａｂａｌｈｏ， ｓｅｍｐｒｅ",
+                " ｃｏｎｔｅｎｔｅ．",
+            ]
+        );
+        assert!(lines(0, 0).iter().all(|line| line.chars().count() <= 19));
+        // " daqui e" (8) com o nome (10) cabe em 19; " seguem" ja nao.
+        assert_eq!(
+            lines(1, 10),
+            [
+                "◆Ｏｓ ｖｅｌｈｏｓ",
+                " ｄａｑｕｉ ｅ [FF23]、",
+                " ｓｅｇｕｅｍ",
+                " ｔｒａｂａｌｈａｎｄｏ．",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn the_ai_gets_the_whole_sentence_where_the_app_breaks_the_lines() {
+        let tmp = TempDir::new("bank-flow");
+        let dir = scrolling_project(&tmp);
+        let provider = FakeProvider {
+            answers: HashMap::new(),
+            requests: Mutex::new(Vec::new()),
+        };
+        let mut db = ProjectDb::open(&dir).unwrap();
+        run_translation(
+            &mut db,
+            None,
+            &provider,
+            "fake-model",
+            &TranslateOptions::new("pt-BR"),
+            &AtomicBool::new(false),
+            &|_| {},
+        )
+        .await
+        .unwrap();
+        let requests = provider.requests.lock().unwrap().clone();
+        let items: Vec<_> = requests.iter().flat_map(|r| r.items.iter()).collect();
+        // A quebra do meio da frase virou espaco, nas duas e nas tres linhas.
+        let flowed = synth::jis16_scrolling_message(9).replace("[FF01] ", " ");
+        let item = items
+            .iter()
+            .find(|i| i.text == flowed)
+            .expect("a mensagem de tres linhas foi pedida inteira");
+        assert!(!item.text.contains('['), "{}", item.text);
+        assert_eq!((item.max_chars, item.max_line), (None, None));
+        assert!(!items.iter().any(|i| i.text.contains("[FF01]")));
+        let prompt = romtranslate_core::provider::build_system_prompt(&requests[0]);
+        assert!(!prompt.contains("maxLine"), "{prompt}");
     }
 }
