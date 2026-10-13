@@ -15,10 +15,11 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --check
-      # Feedback rapido: so o core (sem deps de sistema). O crate desktop
+      # Feedback rapido: o core e a CLI (sem deps de sistema). O crate desktop
       # compila no job "desktop" abaixo.
-      - run: cargo clippy -p romtranslate-core --all-targets -- -D warnings
-      - run: cargo test -p romtranslate-core
+      - run: cargo clippy -p romtranslate-core -p romtranslate-cli --all-targets -- -D warnings
+      # O teste do keychain real e #[ignore] — nao roda em CI.
+      - run: cargo test -p romtranslate-core -p romtranslate-cli
 
   # Compila e testa o app Tauri de verdade — pega quebra no crate desktop
   # que o job rust nao ve (deps de sistema do Tauri 2 em Linux, lista da
@@ -37,7 +38,6 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy -p romtranslate-desktop --all-targets -- -D warnings
-      # O teste do keychain real e #[ignore] — nao roda em CI.
       - run: cargo test -p romtranslate-desktop
 
   frontend:

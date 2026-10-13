@@ -1,5 +1,3 @@
-mod settings;
-
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -7,48 +5,26 @@ use std::sync::{Arc, Mutex};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 
-use romtranslate_core::db::{GlobalTm, ProjectDb};
+use romtranslate_core::db::ProjectDb;
 use romtranslate_core::detect::{inspect, InspectionReport};
 use romtranslate_core::export;
 use romtranslate_core::pipeline::{run_translation, TranslateOptions, TranslateSummary};
 use romtranslate_core::project::{self, CreateProjectArgs, OpenProjectReport};
-use romtranslate_core::provider::{GlossaryTerm, TranslationProvider};
-use romtranslate_core::providers::anthropic::AnthropicProvider;
-use romtranslate_core::providers::codex_cli::CodexCliProvider;
-use romtranslate_core::providers::ollama::OllamaProvider;
-use romtranslate_core::providers::openai_compat::OpenAiCompatProvider;
+use romtranslate_core::provider::GlossaryTerm;
 use romtranslate_core::relative::{self, RelativeCandidate};
 use romtranslate_core::scan::{self, ScanConfig, ScanOutcome};
+use romtranslate_core::settings::{
+    self, anthropic, build_provider, codex_cli, open_global_tm, ApiKey, AppSettings,
+};
 use romtranslate_core::types::{GameProject, TextEntry};
 use romtranslate_core::validate;
 use romtranslate_core::xray::{self, XrayReport};
-
-use settings::{ApiKey, AppSettings};
 
 /// Flag de cancelamento da traducao em andamento (uma por vez).
 struct TranslationState(Mutex<Option<Arc<AtomicBool>>>);
 
 /// Flag de cancelamento do login do Codex em andamento (um por vez).
 struct CodexLoginState(Mutex<Option<Arc<AtomicBool>>>);
-
-/// O Codex CLI com a conta escolhida: a do computador, ou a do app (login
-/// numa pasta propria dentro da configuracao do app, que nunca toca no login
-/// do Codex do usuario).
-fn codex_cli(
-    cfg_dir: &Path,
-    command: &str,
-    model: &str,
-    own_account: bool,
-    timeout_secs: u64,
-) -> Result<CodexCliProvider, String> {
-    let provider =
-        CodexCliProvider::new(command, model, timeout_secs).map_err(|e| e.to_string())?;
-    Ok(if own_account {
-        provider.with_home(cfg_dir.join("codex-conta"))
-    } else {
-        provider
-    })
-}
 
 /// Todo comando de IO roda em spawn_blocking: nao trava a UI.
 async fn blocking<T: Send + 'static>(
@@ -62,91 +38,6 @@ async fn blocking<T: Send + 'static>(
 
 fn config_dir(app: &AppHandle) -> Result<PathBuf, String> {
     app.path().app_config_dir().map_err(|e| e.to_string())
-}
-
-fn is_localhost(url: &str) -> bool {
-    ["://localhost", "://127.", "://0.0.0.0", "://[::1]"]
-        .iter()
-        .any(|h| url.contains(h))
-}
-
-/// Claude pela API da Anthropic, com a chave guardada no cofre do sistema.
-fn anthropic(cfg: &AppSettings, cfg_dir: &Path) -> Result<AnthropicProvider, String> {
-    if !cfg.allow_remote_translation {
-        return Err(
-            "traducao remota desabilitada: a API do Claude recebe os textos do jogo — ative \
-             'permitir traducao remota' nas configuracoes"
-                .to_string(),
-        );
-    }
-    AnthropicProvider::new(
-        &cfg.anthropic.base_url,
-        &cfg.anthropic.model,
-        settings::load_api_key(cfg_dir, ApiKey::Anthropic),
-        cfg.timeout_secs,
-    )
-    .map_err(|e| e.to_string())
-}
-
-/// Monta o provider a partir dos settings, aplicando a guarda de privacidade
-/// (spec §18: traducao remota so com allow_remote_translation).
-fn build_provider(
-    cfg: &AppSettings,
-    cfg_dir: &Path,
-) -> Result<(Box<dyn TranslationProvider>, String), String> {
-    match cfg.provider.as_str() {
-        "ollama" => {
-            let p = OllamaProvider::new(&cfg.ollama.base_url, &cfg.ollama.model, cfg.timeout_secs)
-                .map_err(|e| e.to_string())?;
-            Ok((Box::new(p), cfg.ollama.model.clone()))
-        }
-        "openai_compatible" => {
-            let base = &cfg.openai_compatible.base_url;
-            if !cfg.allow_remote_translation && !is_localhost(base) {
-                return Err(
-                    "traducao remota desabilitada: ative 'permitir traducao remota' nas \
-                     configuracoes para usar um endpoint fora do localhost"
-                        .to_string(),
-                );
-            }
-            let p = OpenAiCompatProvider::new(
-                base,
-                &cfg.openai_compatible.model,
-                settings::load_api_key(cfg_dir, ApiKey::OpenAi),
-                cfg.timeout_secs,
-            )
-            .map_err(|e| e.to_string())?;
-            Ok((Box::new(p), cfg.openai_compatible.model.clone()))
-        }
-        "anthropic" => {
-            let p = anthropic(cfg, cfg_dir)?;
-            Ok((Box::new(p), cfg.anthropic.model.clone()))
-        }
-        "codex_cli" => {
-            // O Codex manda os textos pra OpenAI: mesma guarda do endpoint remoto.
-            if !cfg.allow_remote_translation {
-                return Err(
-                    "traducao remota desabilitada: o Codex CLI envia os textos para a OpenAI \
-                     — ative 'permitir traducao remota' nas configuracoes"
-                        .to_string(),
-                );
-            }
-            let codex = &cfg.codex_cli;
-            let p = codex_cli(
-                cfg_dir,
-                &codex.command,
-                &codex.model,
-                codex.own_account,
-                cfg.timeout_secs,
-            )?;
-            let label = match codex.model.trim() {
-                "" => "codex (modelo padrao)".to_string(),
-                model => format!("codex ({model})"),
-            };
-            Ok((Box::new(p), label))
-        }
-        other => Err(format!("provider desconhecido: {other}")),
-    }
 }
 
 // ---- Sprint 1-2 ----
@@ -288,17 +179,6 @@ async fn update_entry(
         )
     })
     .await
-}
-
-/// TM global no config dir; falha ao abrir nao bloqueia traducao (e cache).
-fn open_global_tm(cfg_dir: &std::path::Path) -> Option<GlobalTm> {
-    match GlobalTm::open(&cfg_dir.join("global_tm.sqlite")) {
-        Ok(g) => Some(g),
-        Err(e) => {
-            tracing::warn!(error = %e, "TM global indisponivel; seguindo sem ela");
-            None
-        }
-    }
 }
 
 #[tauri::command]

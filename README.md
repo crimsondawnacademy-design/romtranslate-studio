@@ -346,10 +346,63 @@ cargo test -p romtranslate-core --test table_translate -- --ignored --nocapture
 TABLE_TEST_PROVIDER=codex cargo test -p romtranslate-core --test table_translate -- --ignored --nocapture
 ```
 
+## Sem a janela (CLI)
+
+Os mesmos passos dos botões do app, pelo terminal: para automatizar, testar e
+medir sem abrir a janela. A CLI é uma casca sobre o `crates/core` — nenhuma
+lógica própria.
+
+*The same steps as the app's buttons, from the terminal: a thin shell over
+`crates/core`, for automation, tests and measurements without the window.*
+
+```bash
+cargo run -p romtranslate-cli -- <comando>   # binário: romtranslate
+```
+
+| comando | o que faz | what it does |
+|---|---|---|
+| `inspect <arquivo>` | formato, plataforma e SHA-256 | format, platform and SHA-256 |
+| `create <arquivo> <projeto> [--target pt-BR] [--source en-US]` | cria o projeto; o original não é copiado nem alterado | creates the project; the original is never copied or modified |
+| `extract <projeto>` | extração estruturada do adapter | the adapter's structured extraction |
+| `scan <projeto> [--encoding ascii\|utf8\|utf16_le\|utf16_be\|table] [--tbl arquivo] [--region início..fim] [--min-chars N] [--only-text]` | scanner genérico; `--region` restringe a busca a um trecho do arquivo (bytes, aceita `0x`) | generic scanner; `--region` limits the search to a byte range (`0x` accepted) |
+| `export <projeto> <arquivo> [--format json\|csv]` | as frases do projeto, com os ids | the project's entries, with their ids |
+| `estimate <projeto> [--batch N]` | tamanho da rodada de tradução, sem chamar o provider | size of the translation round, without calling the provider |
+| `translate <projeto> [--batch N]` | traduz as pendentes com o provider das configurações do app | translates pending entries with the provider from the app's settings |
+| `apply <projeto> <arquivo.tsv>` | grava traduções (`id<TAB>tradução` por linha) e valida | writes translations (`id<TAB>translation` per line) and validates |
+| `validate <projeto>` | valida, com a contagem por tipo de problema | validates, with a count per kind of issue |
+| `reinsert <projeto> [--policy block\|skip\|force]` | grava na cópia de trabalho e confere (padrão `skip`: frase com erro fica no original) | writes to the working copy and verifies (default `skip`: an entry with an error keeps the original) |
+| `patch <projeto> [--format ips\|bps]` | exporta patch, manifest e CSV | exports patch, manifest and CSV |
+
+- `--json` em qualquer comando: o resultado numa linha de JSON no stdout.
+  Erro vai para o stderr com saída `1` (`2` para argumento inválido).
+  *`--json` on any command prints the result as one line of JSON on stdout.
+  Errors go to stderr with exit code `1` (`2` for invalid arguments).*
+- `translate` lê as configurações do app (mesma pasta; `--config-dir` aponta
+  outra), mostra o progresso no stderr e, se o provider parar, diz o motivo e
+  sai com `1`. Ctrl-C para depois do lote em andamento.
+  *`translate` reads the app's settings (same folder; `--config-dir` points
+  elsewhere), prints progress on stderr and, when the provider stops, says why
+  and exits `1`. Ctrl-C stops after the current batch.*
+
+O ciclo inteiro numa fixture sintética / *the whole cycle on a synthetic fixture*:
+
+```bash
+cargo run -p romtranslate-core --example gen_fixtures
+alias rt='cargo run -q -p romtranslate-cli --'
+rt create fixtures/generated/synthetic_pointers.gba /tmp/demo.rtsproj
+rt extract /tmp/demo.rtsproj
+rt export /tmp/demo.rtsproj /tmp/frases.json   # os ids / the ids
+printf 'scan-00000120\tPOCAO\n' > /tmp/traducao.tsv
+rt apply /tmp/demo.rtsproj /tmp/traducao.tsv
+rt reinsert /tmp/demo.rtsproj
+rt patch /tmp/demo.rtsproj
+```
+
 ## Arquitetura
 
 ```
 apps/desktop/        # Tauri 2 + React + TS (shell fino; zero lógica de domínio)
+apps/cli/            # CLI `romtranslate` (outra casca fina sobre o core)
 crates/core/         # tudo testável sem UI
   src/adapter.rs     # trait GameAdapter (probe/extract/apply/verify)
   src/adapters/      # rtsf (referência completa), gba, nds, nes, snes, gamecube,
@@ -364,6 +417,7 @@ crates/core/         # tudo testável sem UI
   src/validate.rs    # placeholders/bytes/statuses
   src/reinsert.rs    # working copy + verify
   src/patch.rs       # IPS + BPS create/apply + manifest
+  src/settings.rs    # configurações do app + provider montado a partir delas
 ```
 
 ## Contribuindo

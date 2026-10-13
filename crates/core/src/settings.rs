@@ -3,11 +3,22 @@
 //! `secrets.json` 0600 vira fallback quando o keychain nao esta disponivel;
 //! chaves legadas no arquivo migram para o keychain na primeira leitura.
 //! A key NUNCA vai para settings.toml, logs, projeto ou repo.
+//!
+//! Mora no core pra a janela e a CLI lerem a MESMA configuracao e montarem o
+//! MESMO provider (`build_provider`), com a mesma guarda de privacidade. A
+//! pasta de configuracao vem de quem chama: o core nao sabe onde ela fica.
 
 use std::fs;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+
+use crate::db::GlobalTm;
+use crate::provider::TranslationProvider;
+use crate::providers::anthropic::AnthropicProvider;
+use crate::providers::codex_cli::CodexCliProvider;
+use crate::providers::ollama::OllamaProvider;
+use crate::providers::openai_compat::OpenAiCompatProvider;
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
@@ -32,7 +43,7 @@ pub struct CodexCliSettings {
 impl Default for CodexCliSettings {
     fn default() -> Self {
         CodexCliSettings {
-            command: romtranslate_core::providers::codex_cli::DEFAULT_COMMAND.to_string(),
+            command: crate::providers::codex_cli::DEFAULT_COMMAND.to_string(),
             model: String::new(),
             own_account: false,
         }
@@ -70,8 +81,8 @@ impl Default for AppSettings {
                 model: String::new(),
             },
             anthropic: EndpointSettings {
-                base_url: romtranslate_core::providers::anthropic::DEFAULT_BASE_URL.to_string(),
-                model: romtranslate_core::providers::anthropic::DEFAULT_MODEL.to_string(),
+                base_url: crate::providers::anthropic::DEFAULT_BASE_URL.to_string(),
+                model: crate::providers::anthropic::DEFAULT_MODEL.to_string(),
             },
             codex_cli: CodexCliSettings::default(),
             price_input: 0.0,
@@ -215,6 +226,124 @@ fn save_api_key_file(config_dir: &Path, which: ApiKey, key: &str) -> Result<(), 
     Ok(())
 }
 
+// ---- Provider a partir da configuracao ----
+
+/// O Codex CLI com a conta escolhida: a do computador, ou a do app (login
+/// numa pasta propria dentro da configuracao do app, que nunca toca no login
+/// do Codex do usuario).
+pub fn codex_cli(
+    cfg_dir: &Path,
+    command: &str,
+    model: &str,
+    own_account: bool,
+    timeout_secs: u64,
+) -> Result<CodexCliProvider, String> {
+    let provider =
+        CodexCliProvider::new(command, model, timeout_secs).map_err(|e| e.to_string())?;
+    Ok(if own_account {
+        provider.with_home(cfg_dir.join("codex-conta"))
+    } else {
+        provider
+    })
+}
+
+fn is_localhost(url: &str) -> bool {
+    ["://localhost", "://127.", "://0.0.0.0", "://[::1]"]
+        .iter()
+        .any(|h| url.contains(h))
+}
+
+/// Claude pela API da Anthropic, com a chave guardada no cofre do sistema.
+pub fn anthropic(cfg: &AppSettings, cfg_dir: &Path) -> Result<AnthropicProvider, String> {
+    if !cfg.allow_remote_translation {
+        return Err(
+            "traducao remota desabilitada: a API do Claude recebe os textos do jogo — ative \
+             'permitir traducao remota' nas configuracoes"
+                .to_string(),
+        );
+    }
+    AnthropicProvider::new(
+        &cfg.anthropic.base_url,
+        &cfg.anthropic.model,
+        load_api_key(cfg_dir, ApiKey::Anthropic),
+        cfg.timeout_secs,
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// Monta o provider a partir dos settings, aplicando a guarda de privacidade
+/// (spec §18: traducao remota so com allow_remote_translation). Devolve tambem
+/// o nome do modelo, como ele aparece no registro da rodada.
+pub fn build_provider(
+    cfg: &AppSettings,
+    cfg_dir: &Path,
+) -> Result<(Box<dyn TranslationProvider>, String), String> {
+    match cfg.provider.as_str() {
+        "ollama" => {
+            let p = OllamaProvider::new(&cfg.ollama.base_url, &cfg.ollama.model, cfg.timeout_secs)
+                .map_err(|e| e.to_string())?;
+            Ok((Box::new(p), cfg.ollama.model.clone()))
+        }
+        "openai_compatible" => {
+            let base = &cfg.openai_compatible.base_url;
+            if !cfg.allow_remote_translation && !is_localhost(base) {
+                return Err(
+                    "traducao remota desabilitada: ative 'permitir traducao remota' nas \
+                     configuracoes para usar um endpoint fora do localhost"
+                        .to_string(),
+                );
+            }
+            let p = OpenAiCompatProvider::new(
+                base,
+                &cfg.openai_compatible.model,
+                load_api_key(cfg_dir, ApiKey::OpenAi),
+                cfg.timeout_secs,
+            )
+            .map_err(|e| e.to_string())?;
+            Ok((Box::new(p), cfg.openai_compatible.model.clone()))
+        }
+        "anthropic" => {
+            let p = anthropic(cfg, cfg_dir)?;
+            Ok((Box::new(p), cfg.anthropic.model.clone()))
+        }
+        "codex_cli" => {
+            // O Codex manda os textos pra OpenAI: mesma guarda do endpoint remoto.
+            if !cfg.allow_remote_translation {
+                return Err(
+                    "traducao remota desabilitada: o Codex CLI envia os textos para a OpenAI \
+                     — ative 'permitir traducao remota' nas configuracoes"
+                        .to_string(),
+                );
+            }
+            let codex = &cfg.codex_cli;
+            let p = codex_cli(
+                cfg_dir,
+                &codex.command,
+                &codex.model,
+                codex.own_account,
+                cfg.timeout_secs,
+            )?;
+            let label = match codex.model.trim() {
+                "" => "codex (modelo padrao)".to_string(),
+                model => format!("codex ({model})"),
+            };
+            Ok((Box::new(p), label))
+        }
+        other => Err(format!("provider desconhecido: {other}")),
+    }
+}
+
+/// TM global no config dir; falha ao abrir nao bloqueia traducao (e cache).
+pub fn open_global_tm(cfg_dir: &Path) -> Option<GlobalTm> {
+    match GlobalTm::open(&cfg_dir.join("global_tm.sqlite")) {
+        Ok(g) => Some(g),
+        Err(e) => {
+            tracing::warn!(error = %e, "TM global indisponivel; seguindo sem ela");
+            None
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,7 +407,7 @@ mod tests {
     }
 
     /// Toca o keychain REAL do sistema (cria e apaga um item de teste).
-    /// Roda manual: cargo test -p romtranslate-desktop -- --ignored
+    /// Roda manual: cargo test -p romtranslate-core settings -- --ignored
     #[test]
     #[ignore]
     fn keychain_roundtrip_real() {

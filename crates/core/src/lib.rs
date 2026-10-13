@@ -21,6 +21,7 @@ pub mod providers;
 pub mod reinsert;
 pub mod relative;
 pub mod scan;
+pub mod settings;
 pub mod synth;
 pub mod tbl;
 pub mod types;

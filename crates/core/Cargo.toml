@@ -21,6 +21,10 @@ reqwest = { version = "0.13.5", default-features = false, features = ["json", "r
 memmap2 = "0.9"
 # Ja vem na arvore pelo reqwest (url -> idna); aqui decompoe letra acentuada.
 icu_normalizer = { version = "2", default-features = false, features = ["compiled_data"] }
+# Configuracao do app (`settings`): arquivo legivel e chave de API no cofre do
+# sistema. No Linux o cofre e o Secret Service por zbus, sem lib de sistema.
+toml = "1.1.6"
+keyring = { version = "4.2.0", features = ["apple-native-keyring-store"] }
 
 [dev-dependencies]
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }
