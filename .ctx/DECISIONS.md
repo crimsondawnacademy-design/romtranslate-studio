@@ -1362,3 +1362,27 @@ escreve sendo usada; desfazer que não desfaz; UTF-16 tratado como ASCII.
 backend simulado alimentado pelo JSON do core, em pt-BR); en-US na tela (só
 paridade das chaves); o projeto real do Rhuan (não foi aberto); outro jogo,
 outro idioma, outro modelo; o jogo rodando num emulador.
+
+## 2026-10-12 — Conta do ChatGPT: a do computador é só lida; a do app tem login próprio
+
+**Contexto:** o Rhuan quis escolher com que conta do ChatGPT o app traduz.
+
+**Decisão:** dois modos, escolhidos no painel de tradução.
+
+- **Conta do Codex do computador** (padrão): o app usa o login que já está no
+  `~/.codex` do usuário e só confere se ele existe. Não há botão de entrar,
+  trocar ou sair: trocar essa conta por dentro do app derrubaria o Codex CLI
+  do terminal (e qualquer outra ferramenta que divide o mesmo login).
+- **Conta só do app:** o app passa `CODEX_HOME=<config do app>/codex-conta`
+  em toda chamada. "Entrar com o ChatGPT" roda `codex login` nessa pasta: o
+  navegador abre e a pessoa escolhe a conta na página da OpenAI. O app
+  continua sem ver senha nem token — quem guarda é o Codex, na pasta do app.
+
+**Por que pasta própria e não um seletor de contas:** o Codex CLI guarda um
+login por `CODEX_HOME`. Uma pasta do app dá o isolamento sem o app ler ou
+escrever arquivo de credencial nenhum.
+
+**Limites:** o app não mostra QUAL e-mail está logado (o `codex login status`
+só diz "Logged in using ChatGPT", e ler o `auth.json` pra descobrir quebraria
+a regra de não tocar em token). Se o navegador não abrir sozinho, o endereço
+do login só aparece na mensagem de erro; falta mostrá-lo na tela.
