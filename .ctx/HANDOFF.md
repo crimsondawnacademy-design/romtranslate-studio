@@ -7,9 +7,29 @@ branch: main
 ultimo_commit: c2cec40 (2026-10-13)
 versao_publicada: v0.1.5
 numero: 4
-adendo: 2026-10-13 à noite (v0.1.6 e japonês) — ler antes do resto
+adendo: 2026-10-13 à noite (v0.1.6 e japonês; adendo 2 às 20h) — ler antes do resto
 ---
 
+> ## Adendo 2, de 13/10/2026 (20h) — onde o jogo japonês parou
+>
+> - **No `main` (`2e1df05`), sem binário:** quebra de linha automática na
+>   caixa de texto, comando com vários parâmetros, mensagem repetida guardada
+>   uma vez quando falta espaço, chamada ao Codex enxuta. 283 testes.
+> - **Fora do repo, só neste Mac:** `~/Desktop/mother3-teste-jp/` — o projeto
+>   (`projeto/Mother 3 (Japan).rtsproj`, com 3.265 das 7.335 falas do roteiro
+>   traduzidas e o glossário de 52 nomes), a cópia do jogo com isso gravado e
+>   um LEIA-ME com os comandos. Não vai pro Drive nem pro GitHub: é o jogo
+>   do Rhuan.
+> - **Parou por limite do plano ChatGPT** (volta 00h24 de 14/10). Retomar:
+>   passo 0e do `STATE.md`. Antes de gastar a cota, decidir o modelo com ele.
+> - **Emulador sem janela** (mGBA só a biblioteca + roteiro de teclas): mora
+>   no rascunho da sessão e some com ela. Refazer: clonar `mgba-emu/mgba` na
+>   tag `0.10.5`, `cmake` com Qt/SDL desligados, alvo `mgba`, e um `main` de
+>   60 linhas com `mCoreFind`/`runFrame`/`mCoreTakeScreenshotVF`; rodar
+>   dentro de `sandbox-exec` (sem rede, escrita só na pasta das fotos).
+>   Caminho até o primeiro diálogo: 1800 quadros, A a cada 200 até a tela de
+>   nomes; em cada uma das 7, baixo x6, A, START, A; depois baixo x2, A, A.
+>
 > ## Adendo de 13/10/2026 à noite — o que mudou depois deste handoff
 >
 > O corpo abaixo descreve a v0.1.5. Depois dele, no mesmo dia:
