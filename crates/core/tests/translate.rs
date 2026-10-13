@@ -112,6 +112,10 @@ fn opts() -> TranslateOptions {
     TranslateOptions {
         retry_delay_ms: 1, // testes nao esperam backoff real
         batch_size: 4,
+        // Estes testes contam as chamadas uma a uma: batches em paralelo e a
+        // repergunta do que nao coube tem teste proprio (`fast_translate.rs`).
+        parallel: 1,
+        shorten_rounds: 0,
         ..TranslateOptions::new("pt-BR")
     }
 }

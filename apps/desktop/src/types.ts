@@ -127,6 +127,10 @@ export interface TranslateSummary {
   cancelled: boolean;
   /** O provider parou de responder: o erro dele. A rodada foi interrompida. */
   stopped: string | null;
+  /** Não cabiam no espaço da frase e passaram a caber depois de repedidas. */
+  shortened: number;
+  /** Traduções desta rodada que continuam maiores que o espaço da frase. */
+  tooLong: number;
   /** Tokens que o provider declarou ter cobrado na rodada (0 = não informa). */
   inputTokens: number;
   outputTokens: number;

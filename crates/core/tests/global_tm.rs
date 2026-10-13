@@ -84,6 +84,9 @@ fn opts() -> TranslateOptions {
     TranslateOptions {
         retry_delay_ms: 1,
         source_language: Some("en-US".into()),
+        // O provider de mentira responde maior que o original e o teste conta
+        // as chamadas: a repergunta tem teste proprio (`fast_translate.rs`).
+        shorten_rounds: 0,
         ..TranslateOptions::new("pt-BR")
     }
 }

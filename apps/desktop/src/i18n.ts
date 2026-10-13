@@ -147,6 +147,9 @@ const messages = {
     "translate.cancel": "Cancelar",
     "translate.phase.tm": "memória de tradução",
     "translate.phase.translate": "traduzindo",
+    "translate.phase.shorten": "encurtando as que não couberam",
+    "translate.summaryShortened": " · {shortened} encurtadas pra caber",
+    "translate.summaryTooLong": " · {tooLong} ainda não cabem",
     "translate.summary":
       "{translated} traduzidas · {tmHits} da memória · {failed} falharam",
     "translate.summaryCancelled": " · cancelado",
@@ -390,6 +393,9 @@ const messages = {
     "translate.cancel": "Cancel",
     "translate.phase.tm": "translation memory",
     "translate.phase.translate": "translating",
+    "translate.phase.shorten": "shortening the ones that did not fit",
+    "translate.summaryShortened": " · {shortened} shortened to fit",
+    "translate.summaryTooLong": " · {tooLong} still too long",
     "translate.summary": "{translated} translated · {tmHits} from memory · {failed} failed",
     "translate.summaryCancelled": " · cancelled",
     "translate.internal":

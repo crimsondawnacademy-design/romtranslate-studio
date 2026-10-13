@@ -1249,6 +1249,9 @@ export default function ProjectView({
                 failed: summary.failed,
               })}
               {summary.cancelled && t("translate.summaryCancelled")}
+              {summary.shortened > 0 &&
+                t("translate.summaryShortened", { shortened: summary.shortened })}
+              {summary.tooLong > 0 && t("translate.summaryTooLong", { tooLong: summary.tooLong })}
               {summary.inputTokens + summary.outputTokens > 0 && (
                 <>
                   <br />
