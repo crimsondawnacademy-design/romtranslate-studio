@@ -48,7 +48,6 @@
   --sticker-edge: #ffffff;
 
   --icon-danger: #c22a4b;
-  --icon-warn: #9a5a00;
   --icon-ok: #1c7a50;
 
   --btn: #ffffff;
@@ -69,7 +68,6 @@
   --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
 
   --i-x: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill-rule='evenodd' d='M12 1a11 11 0 1 0 0 22 11 11 0 0 0 0-22zM8.8 7.2 12 10.4l3.2-3.2 1.6 1.6-3.2 3.2 3.2 3.2-1.6 1.6-3.2-3.2-3.2 3.2-1.6-1.6 3.2-3.2-3.2-3.2z'/%3E%3C/svg%3E");
-  --i-bang: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill-rule='evenodd' d='M12 2.2c.9 0 1.7.5 2.2 1.3l8.2 14.2c.9 1.6-.2 3.6-2.1 3.6H3.7c-1.9 0-3-2-2.1-3.6L9.8 3.5c.5-.8 1.3-1.3 2.2-1.3zM10.8 8.5h2.4v6h-2.4zM10.8 16.3h2.4v2.4h-2.4z'/%3E%3C/svg%3E");
   --i-check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill-rule='evenodd' d='M12 1a11 11 0 1 0 0 22 11 11 0 0 0 0-22zM10.4 16.9l-4.3-4.3 1.7-1.7 2.6 2.6 5.9-5.9 1.7 1.7z'/%3E%3C/svg%3E");
   /* visto: imagem com a cor de --on-candy escrita dentro (igual nos dois temas) */
   --art-tick: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%233b1f47' d='M9.6 18.6 3.4 12.4l2.4-2.4 3.8 3.8 8.6-8.6 2.4 2.4z'/%3E%3C/svg%3E");
@@ -105,7 +103,6 @@
     --sticker-edge: #fff1e4;
 
     --icon-danger: #ff8f8f;
-    --icon-warn: #ffd447;
     --icon-ok: #9ee6c0;
 
     --btn: #47305a;
@@ -405,11 +402,6 @@ code {
 .marks.no {
   --icon: var(--i-x);
   --icon-color: var(--icon-danger);
-}
-
-.marks.warn {
-  --icon: var(--i-bang);
-  --icon-color: var(--icon-warn);
 }
 
 /* ---------- Topo ---------- */
@@ -1599,17 +1591,6 @@ code {
   grid-template-columns: minmax(0, 1.7fr) minmax(0, 1fr);
   gap: clamp(2rem, 4vw, 4rem);
   align-items: start;
-}
-
-.note {
-  margin-top: 1.75rem;
-  background: var(--star-soft);
-  box-shadow: none;
-}
-
-.note .marks {
-  margin-top: 0.4rem;
-  gap: 0.6rem;
 }
 
 .limits h2 {
