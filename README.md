@@ -17,6 +17,7 @@
 </p>
 
 <p align="center">
+  <a href="https://romtranslate-studio.pages.dev/en/"><b>Try it in your browser</b></a> ·
   <a href="README.pt-BR.md">Leia em português</a>
 </p>
 

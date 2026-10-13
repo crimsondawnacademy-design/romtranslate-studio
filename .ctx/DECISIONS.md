@@ -1575,3 +1575,21 @@ MAPEADO e só é construído depois de o tradutor estar validado, "pra não faze
 grande mídia sem ter algo minimamente pronto". O mapa e a condição proposta
 estão no `.ctx/STATE.md`, próximo passo 0b. Nada de infraestrutura da empresa.
 
+
+
+## 2026-10-13 — O site vai ao ar agora (revoga "só depois da validação completa")
+
+**Decisão do Rhuan, à tarde:** construir e publicar o site já, "estilo landing
+page, mas menos persuasiva e mais vantagens e facilidades para quem é leigo",
+"premium 4k com bastante motion, realçar as cores". A condição da madrugada
+(esperar a validação completa do tradutor) foi dispensada por ele.
+
+**Como o site compensa a falta de validação:** não promete. Diz "versão de
+testes" na abertura, tem a seção do que foi medido e do que ainda não faz, e
+só afirma o que está no README. A demonstração é o app de verdade com um jogo
+inventado — nunca tela de jogo comercial.
+
+**Hospedagem:** Cloudflare Pages na conta Crimson Dawn (projeto
+`romtranslate-studio`), como os outros sites pessoais dele. Fonte em `site/`
+neste repositório; publicar é `site/publicar.sh`, rodado à mão.
+\n
