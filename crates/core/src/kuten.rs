@@ -44,6 +44,17 @@ const MIN_SENTENCES: usize = 100;
 /// O codigo fora da tabela que aparece entre dois kana ao menos isto e o
 /// espaco do jogo.
 const MIN_SPACES: u32 = 100;
+/// Texto de jogo vem em fila: `MIN_GROUP` sequencias ou mais, cada uma a no
+/// maximo `NEIGHBOR_GAP` bytes da anterior — o roteiro, a tabela de nomes de
+/// itens, a de titulos de musica. Valor pequeno que por acaso cai nos kana
+/// aparece sozinho, e sozinha so fica a sequencia longa (`ALONE_CHARS`
+/// caracteres, metade deles hiragana). No jogo medido, a tabela de titulos
+/// (240 sequencias curtas) ficava fora das regioes de texto de
+/// `scan::stray_ids`, bloco sem frase nenhuma; e 118 sequencias avulsas de 6
+/// a 12 caracteres, em regioes de dado, passavam por frase.
+const NEIGHBOR_GAP: usize = 128;
+const MIN_GROUP: usize = 3;
+const ALONE_CHARS: usize = 16;
 
 /// Codigo -> caractere, 0 onde a tabela nao tem nada. Montada uma vez.
 fn chars() -> &'static [u16] {
@@ -144,6 +155,15 @@ fn find_space(data: &[u8]) -> Option<u16> {
         .map(|(code, _)| code)
 }
 
+/// Texto longo o bastante pra valer fora de uma fila de textos.
+fn stands_alone(text: &str) -> bool {
+    let hiragana = text
+        .chars()
+        .filter(|c| crate::sjis::is_hiragana(*c))
+        .count();
+    text.chars().count() >= ALONE_CHARS && hiragana * 2 >= ALONE_CHARS
+}
+
 /// Uma unidade lida: caractere, codigo de controle ou nada disso.
 enum Unit {
     Char(char),
@@ -170,8 +190,7 @@ pub fn extract(data: &[u8]) -> Option<Kuten16> {
     let space = find_space(data);
     let codes: Vec<u16> = units(data).collect();
     let mut entries = Vec::new();
-    let mut spans = Vec::new();
-    let mut sentences = 0;
+    let mut spans: Vec<(usize, usize)> = Vec::new();
     let mut i = 0;
     while i < codes.len() {
         if !matches!(read(codes[i], space), Unit::Char(c) if c != ' ') {
@@ -220,7 +239,6 @@ pub fn extract(data: &[u8]) -> Option<Kuten16> {
         if !anchored || script.verdict() != Some(true) {
             continue;
         }
-        sentences += usize::from(is_sentence(&text));
         let (offset, len) = (begin * 2, (end - begin) * 2);
         spans.push((offset, len));
         entries.push(TextEntry {
@@ -244,6 +262,30 @@ pub fn extract(data: &[u8]) -> Option<Kuten16> {
             }),
         });
     }
+    // Fora de fila so fica a sequencia longa.
+    let mut keep = vec![false; entries.len()];
+    let mut group = 0;
+    for i in 0..entries.len() {
+        let last = spans
+            .get(i + 1)
+            .is_none_or(|next| next.0 - (spans[i].0 + spans[i].1) > NEIGHBOR_GAP);
+        if last {
+            let grouped = i + 1 - group >= MIN_GROUP;
+            for j in group..=i {
+                keep[j] = grouped || stands_alone(&entries[j].source_text);
+            }
+            group = i + 1;
+        }
+    }
+    let mut kept = keep.iter();
+    entries.retain(|_| *kept.next().unwrap_or(&false));
+    let mut kept = keep.iter();
+    spans.retain(|_| *kept.next().unwrap_or(&false));
+    let sentences = entries
+        .iter()
+        .filter(|e| is_sentence(&e.source_text))
+        .count();
+
     (sentences >= MIN_SENTENCES).then(|| Kuten16 {
         entries,
         spans,

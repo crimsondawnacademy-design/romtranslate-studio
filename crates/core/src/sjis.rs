@@ -114,6 +114,9 @@ fn is_wide_sign(c: char) -> bool {
     )
 }
 
+/// Ate que periodo `Script` mede repeticao.
+const PERIODS: usize = 8;
+
 /// O que uma sequencia tem de cada tipo de caractere, contado sem guardar o
 /// texto: o scanner julga milhoes de sequencias e so monta a string das que
 /// passam.
@@ -133,6 +136,14 @@ pub struct Script {
     /// Caracteres vizinhos do anterior na tabela (o codigo seguinte ou o
     /// de antes).
     steps: usize,
+    /// Caracteres a mesma distancia do anterior que o anterior estava do
+    /// que veio antes dele: progressao de passo fixo.
+    strides: usize,
+    last_gap: Option<i64>,
+    /// Os ultimos `PERIODS` caracteres e, pra cada periodo de 1 a `PERIODS`,
+    /// quantos caracteres repetiram o que veio esse tanto antes.
+    recent: [char; PERIODS],
+    echoes: [usize; PERIODS],
     /// Kanji do nivel 2 do JIS, quando quem conta leu os bytes.
     rare: usize,
     last: Option<char>,
@@ -143,12 +154,17 @@ pub struct Script {
 
 impl Script {
     pub fn push(&mut self, c: char) {
+        for period in 1..=PERIODS.min(self.chars) {
+            let before = self.recent[(self.chars - period) % PERIODS];
+            self.echoes[period - 1] += usize::from(before == c);
+        }
+        self.recent[self.chars % PERIODS] = c;
         self.chars += 1;
         self.repeats += usize::from(self.last == Some(c));
-        self.steps += usize::from(
-            self.last
-                .is_some_and(|last| (last as u32).abs_diff(c as u32) == 1),
-        );
+        let gap = self.last.map(|last| c as i64 - last as i64);
+        self.steps += usize::from(gap.is_some_and(|gap| gap.abs() == 1));
+        self.strides += usize::from(gap.is_some() && gap == self.last_gap);
+        self.last_gap = gap;
         self.last = Some(c);
         if is_kana(c) {
             self.kana += 1;
@@ -209,6 +225,9 @@ impl Script {
                 && script * 3 >= n
                 && self.repeats * 2 <= n
                 && self.steps * 2 <= n
+                && self.strides * 2 <= n
+                && self.wide * 2 <= n
+                && (n < 12 || self.echoes.iter().all(|echo| echo * 5 <= n * 3))
                 && self.rare * 4 <= self.kanji
                 && odd * 10 <= n
                 && (odd == 0 || n >= 10)
@@ -234,8 +253,12 @@ impl Script {
 ///   por milhares de caracteres), e no maximo metade sendo o vizinho do
 ///   anterior na tabela (uma tabela de valores em sequencia vira
 ///   "ァアィイゥウェエ": num RPG japones de GBA de 32 MiB eram quase todas as
-///   303 sequencias que passavam, contra 5 frases de verdade); no maximo um
-///   quarto dos kanji no nivel 2
+///   303 sequencias que passavam, contra 5 frases de verdade), o mesmo pra
+///   progressao de passo fixo ("ぉこそでぱほゅわ" anda de 10 em 10) e pra
+///   pontuacao ("，ぃ，ぇ，か，く"); de 12 caracteres pra cima, no maximo 6
+///   em cada 10 repetindo o que veio 1 a 8 posicoes antes (mapa de tiles
+///   repete em periodo curto: "ぜそせぞぜそせぞ"); no maximo um quarto dos
+///   kanji no nivel 2
 ///   do JIS (os raros, metade da tabela: so quem le os bytes confere isto);
 ///   e quase nada do que a tabela tem e jogo
 ///   nao usa (katakana de meia largura, grego, cirilico, simbolo ASCII
@@ -316,6 +339,8 @@ mod tests {
             "最大HP回復薬を手に入れた",
             "薬草を使う",
             "はい    ",
+            "わくわく どきどき してきた",
+            "はい はい はい はい",
         ] {
             assert_eq!(looks_japanese(text), Some(true), "{text}");
         }
@@ -337,6 +362,10 @@ mod tests {
             "ァアィイゥウェエォオカガキクグケゲコゴ",
             "ミマポボホペベヘプブフピビヒパバハノネヌ",
             "、セ゛",
+            "ぉこそでぱほゅわ",
+            "，ぃ，ぇ，か，く，こ，ゃ，",
+            "ぜそせぞぜそせぞぜそせぞぜそせぞ",
+            "きぎｅくきぎｅくきぎｅくおかｅがおかｅがおかｅが",
         ] {
             assert_eq!(looks_japanese(text), Some(false), "{text}");
         }

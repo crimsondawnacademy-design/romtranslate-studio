@@ -431,8 +431,10 @@ pub fn keep_text(entries: &mut Vec<TextEntry>) -> usize {
 /// entries tem cara de frase (12+ caracteres, com espaco). Bloco com pelo
 /// menos 1/8 do bloco mais cheio e regiao de texto; os vizinhos dela tambem
 /// valem, porque um banco comeca e termina no meio de um bloco. Fica de fora:
-/// entry com arquivo proprio (disco, sistema de arquivos), nome interno e
-/// entry com ponteiro em tabela — ponteiro e evidencia mais forte que posicao.
+/// entry com arquivo proprio (disco, sistema de arquivos), nome interno,
+/// entry com ponteiro em tabela — ponteiro e evidencia mais forte que posicao
+/// — e texto lido por tabela de caracteres, que ja foi escolhido por quem
+/// apontou a tabela (ou pelo leitor que a montou, com a regra dele).
 ///
 /// So age quando o arquivo tem um banco nitido (100+ frases e 70% de todas as
 /// frases dentro das regioes). Sem isso devolve vazio: jogo pequeno ou com o
@@ -443,6 +445,7 @@ pub fn stray_ids(entries: &[TextEntry]) -> Vec<String> {
     let candidates: Vec<(&TextEntry, u64)> = entries
         .iter()
         .filter(|e| e.resource_path.is_none() && e.status != TranslationStatus::Internal)
+        .filter(|e| !matches!(e.encoding, TextEncoding::Table(_)))
         .filter_map(|e| e.offset.map(|offset| (e, offset)))
         .collect();
     let Some(top) = candidates.iter().map(|(_, offset)| *offset).max() else {
@@ -839,7 +842,7 @@ mod tests {
             "Yes",
             "No",
             "HP",
-            "あいうえお",
+            "むらへ ようこそ",
         ] {
             assert!(looks_like_text(text), "{text}");
         }
@@ -853,6 +856,7 @@ mod tests {
             "DDDD",             // curta sem variedade
             "Hi!",              // curta com pontuacao
             "MAPA_07_A1",       // identificador: so fica se tiver ponteiro
+            "あいうえお",       // letras em ordem: tabela de fonte, nao fala
             "A",
             "",
         ] {

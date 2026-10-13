@@ -246,11 +246,16 @@ inteiras (os comandos do meio viram `[FFxx]` no texto, e a tradução tem que
 mantê-los), descobre o código do espaço (o código fora da tabela que mais
 aparece entre dois kana) e grava no projeto a tabela `tables/jis16.tbl`,
 por onde a validação, a tradução e a reinserção passam como em qualquer
-texto de tabela. No jogo medido: 11.483 mensagens na fila (862 KiB de
-texto), 878 sequências fora das regiões de texto e 6.593 strings de 8 bits
-(ASCII e Shift-JIS) tiradas da fila, porque num jogo assim o que o scanner
-de 8 bits lê é quase tudo dado. No jogo ocidental de GBA e em ruído, nada é
-reconhecido. **Gravar de volta** é onde aperta: a tabela japonesa não tem a
+texto de tabela. Texto de jogo vem em fila (o roteiro, a tabela de nomes, a
+de títulos de música): só vale a sequência que tem pelo menos duas vizinhas
+a até 128 bytes, ou a que é longa sozinha. No jogo medido: 11.676 mensagens
+na fila (865 KiB de texto, 7.620 delas com comando no meio), todas nas seis
+regiões de texto do cartucho menos 48 (0,4%), que são dado com cara de kana;
+e 6.575 strings de 8 bits (ASCII e Shift-JIS) tiradas da fila, porque num
+jogo assim o que o scanner de 8 bits lê é quase tudo dado. No jogo ocidental
+de GBA e em ruído, nada é reconhecido. Os kanji desse jogo saem trocados: ele
+tem uma lista própria de kanji, fora da ordem da tabela (são 0,13% dos
+caracteres, em 207 mensagens); o `jis16.tbl` pode ser corrigido à mão. **Gravar de volta** é onde aperta: a tabela japonesa não tem a
 letra "a", tem a de largura inteira "ａ", então cada letra da tradução
 ocupa 2 bytes e é gravada nessa forma (`TblTable::encode`), sem acento; e
 como a frase não muda de lugar, a tradução pode ter no máximo o mesmo número
