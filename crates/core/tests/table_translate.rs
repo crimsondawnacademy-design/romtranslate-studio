@@ -257,7 +257,7 @@ async fn table_batch_lists_the_characters_and_plain_batch_is_untouched() {
         assert!(prompt.contains("Length limit (STRICT)"), "{prompt}");
     }
     // E o numero chega no pedido: "START GAME" tem 10 bytes.
-    assert!(build_user_prompt(&requests[1]).contains("\"maxChars\": 10"));
+    assert!(build_user_prompt(&requests[1]).contains("\"maxChars\":10"));
 }
 
 #[tokio::test]

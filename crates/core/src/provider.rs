@@ -11,7 +11,9 @@ use crate::error::{CoreError, Result};
 pub struct BatchItem {
     pub id: String,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_bytes: Option<usize>,
     /// So em texto de tabela de caracteres gravado no lugar: quantos
     /// caracteres a traducao pode ter pra caber, com certeza, no espaco da
@@ -162,8 +164,9 @@ pub fn build_system_prompt(req: &TranslationRequest) -> String {
 }
 
 pub fn build_user_prompt(req: &TranslationRequest) -> String {
-    // So id/text/context/maxBytes — serializacao direta dos items.
-    serde_json::to_string_pretty(&req.items).unwrap_or_else(|_| "[]".to_string())
+    // Serializacao direta dos items, sem espaco nem campo vazio: sao milhares
+    // de frases por rodada, e cada caractere a mais conta em todas.
+    serde_json::to_string(&req.items).unwrap_or_else(|_| "[]".to_string())
 }
 
 /// Parse tolerante: aceita `{"translations":[...]}` ou `[...]` direto, com ou
@@ -326,7 +329,7 @@ mod tests {
         let block = &p[p.find("Length limit").unwrap()..p.find("Respond with").unwrap()];
         assert_eq!(p.replace(block, ""), unlimited);
         assert!(p.find("Character set").unwrap() < p.find("Length limit").unwrap());
-        assert!(build_user_prompt(&limited).contains("\"maxChars\": 18"));
+        assert!(build_user_prompt(&limited).contains("\"maxChars\":18"));
     }
 
     #[test]
@@ -335,8 +338,7 @@ mod tests {
         // letra.
         assert_eq!(
             build_user_prompt(&req_with_glossary()),
-            "[\n  {\n    \"id\": \"a\",\n    \"text\": \"Use the POTION, {0}!\",\n    \
-             \"context\": null,\n    \"maxBytes\": 24\n  }\n]"
+            r#"[{"id":"a","text":"Use the POTION, {0}!","maxBytes":24}]"#
         );
     }
 

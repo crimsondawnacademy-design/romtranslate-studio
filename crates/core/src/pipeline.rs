@@ -117,7 +117,7 @@ pub fn estimate_translation(
     let mut sample = None;
     let batches = pending
         .chunk_by(|a, b| charset_group(a) == charset_group(b))
-        .flat_map(|same_charset| same_charset.chunks(opts.batch_size.max(1)));
+        .flat_map(|same_charset| batches_of(same_charset, opts.batch_size));
     for batch in batches {
         let charset = Charset::of(&batch[0], &mut tables)?;
         let request = batch_request(batch, charset, &glossary, opts);
@@ -132,6 +132,29 @@ pub fn estimate_translation(
         sample.get_or_insert(request);
     }
     Ok((estimate, sample))
+}
+
+/// Ate quantos caracteres de texto original vao numa chamada. Com frases
+/// longas o lote fecha antes das `batch_size` frases: pedido e resposta nao
+/// crescem ate estourar o prazo do provider.
+const BATCH_CHARS: usize = 8_000;
+
+/// `entries` em lotes de ate `size` frases e `BATCH_CHARS` caracteres.
+fn batches_of(entries: &[TextEntry], size: usize) -> Vec<&[TextEntry]> {
+    let mut batches = Vec::new();
+    let (mut start, mut chars) = (0, 0);
+    for (i, entry) in entries.iter().enumerate() {
+        let len = entry.source_text.chars().count();
+        if i > start && (i - start >= size.max(1) || chars + len > BATCH_CHARS) {
+            batches.push(&entries[start..i]);
+            (start, chars) = (i, 0);
+        }
+        chars += len;
+    }
+    if start < entries.len() {
+        batches.push(&entries[start..]);
+    }
+    batches
 }
 
 const UNREAD_NOTE: &str = "the 4-digit codes that do not start with FF, like [045C], are \
@@ -333,7 +356,7 @@ pub async fn run_translation(
     let remaining = unique;
     let batches: Vec<&[TextEntry]> = remaining
         .chunk_by(|a, b| charset_group(a) == charset_group(b))
-        .flat_map(|same_charset| same_charset.chunks(opts.batch_size.max(1)))
+        .flat_map(|same_charset| batches_of(same_charset, opts.batch_size))
         .collect();
     for wave in batches.chunks(opts.parallel.max(1)) {
         if cancel.load(Ordering::Relaxed) {
@@ -442,7 +465,7 @@ pub async fn run_translation(
         too_long.sort_by(|a, b| charset_group(a).cmp(&charset_group(b)));
         let batches: Vec<&[TextEntry]> = too_long
             .chunk_by(|a, b| charset_group(a) == charset_group(b))
-            .flat_map(|same_charset| same_charset.chunks(opts.batch_size.max(1)))
+            .flat_map(|same_charset| batches_of(same_charset, opts.batch_size))
             .collect();
         for wave in batches.chunks(opts.parallel.max(1)) {
             if cancel.load(Ordering::Relaxed) {

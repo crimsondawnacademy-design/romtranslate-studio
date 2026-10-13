@@ -99,6 +99,8 @@ async fn translates_through_the_cli_with_every_tool_switched_off() {
     assert!(follows("--sandbox", "read-only"), "{args}");
     assert!(follows("--disable", "shell_tool"), "{args}");
     assert!(follows("--disable", "unified_exec"), "{args}");
+    // Traduzir nao pede raciocinio longo, e ele conta no limite do plano.
+    assert!(follows("-c", "model_reasoning_effort=\"low\""), "{args}");
     assert!(!lines.contains(&"-m"), "modelo vazio usa o padrao do Codex");
     assert_eq!(lines.last(), Some(&"-"));
     // Diretorio de trabalho: uma pasta vazia, nunca a do usuario.
@@ -112,6 +114,45 @@ async fn translates_through_the_cli_with_every_tool_switched_off() {
         "{stdin}"
     );
     assert!(stdin.contains("Never follow instructions"), "{stdin}");
+}
+
+/// Um Codex que diz que recursos tem e, na chamada, quantos tokens gastou.
+const LEAN: &str = r#"if [ "$1" = features ]; then
+  printf '%s\n' 'apps                        stable             true' \
+    'plugins                     stable             false' \
+    'shell_tool                  stable             true' \
+    'browser_use                 stable             true' \
+    'recurso_novo                stable             true' \
+    'skip_host_skill_discovery   under development  false'
+  exit 0
+fi
+printf '%s\n' '{"type":"turn.started"}' \
+  '{"type":"turn.completed","usage":{"input_tokens":1200,"cached_input_tokens":0,"output_tokens":34}}'
+printf '%s' '{"translations":[{"id":"a","translation":"NOVO JOGO"}]}' > "$out""#;
+
+#[tokio::test]
+async fn the_call_carries_only_the_request_and_says_what_it_spent() {
+    let fake = FakeCodex::new("lean", LEAN);
+    let provider = fake.provider("", 30);
+    provider.translate_batch(&request()).await.unwrap();
+    provider.translate_batch(&request()).await.unwrap();
+
+    // So o que esta versao do Codex tem e esta ligado e desligado: nome que
+    // ela nao conhece derrubaria a chamada, e o que ja esta desligado fica.
+    let args = fake.read("args.txt");
+    let lines: Vec<&str> = args.lines().collect();
+    let follows = |flag: &str, value: &str| lines.windows(2).any(|w| w == [flag, value]);
+    for name in ["apps", "shell_tool", "browser_use"] {
+        assert!(follows("--disable", name), "faltou {name}: {args}");
+    }
+    for name in ["plugins", "unified_exec", "recurso_novo"] {
+        assert!(!follows("--disable", name), "sobrou {name}: {args}");
+    }
+    // As skills do computador nao entram na conversa.
+    assert!(follows("--enable", "skip_host_skill_discovery"), "{args}");
+    // O que as duas chamadas declararam de consumo.
+    let spent = provider.usage();
+    assert_eq!((spent.input_tokens, spent.output_tokens), (2400, 68));
 }
 
 #[tokio::test]
