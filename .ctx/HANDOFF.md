@@ -1,31 +1,23 @@
 ---
 projeto: romtranslate-studio
-handoff_gerado: 2026-10-12
+handoff_gerado: 2026-10-13
 gerado_por: claude / opus-5.5
-motivo: fim-de-sessao-longa
+motivo: fim-de-sessao-longa (janela de contexto fechando)
 branch: main
-ultimo_commit_de_codigo: bb58981 (2026-10-12)
-versao_publicada: v0.1.4 (este texto descreve a v0.1.3; ver o adendo)
-numero: 3
+ultimo_commit: c2cec40 (2026-10-13)
+versao_publicada: v0.1.5
+numero: 4
 ---
 
-# HANDOFF 3 — RomTranslate Studio
-
-> **Adendo de 13/10/2026.** Este handoff descreve a v0.1.3. Depois dele: o
-> primeiro jogo inteiro saiu traduzido e rodou num emulador; a tradução passou
-> a ir em paralelo e a repedir o que não cabe; o core ganhou CLI
-> (`romtranslate`, em `apps/cli`); a interface ganhou identidade nova; o README
-> virou apresentação e o texto técnico foi pra `docs/DETALHES.md`. As seções 2,
-> 3 e 5 abaixo estão desatualizadas nesses pontos: o que vale é o
-> `.ctx/STATE.md` (entradas de 13/10 e próximos passos 0a e 0b).
+# HANDOFF 4 — RomTranslate Studio
 
 Pra quem pega o projeto frio: leia as seções **1 a 3**. O resto é consulta.
 O estado vivo fica em `.ctx/STATE.md`; o porquê de cada decisão, em
 `.ctx/DECISIONS.md`; a especificação do produto, em `docs/SPEC.md`.
 
-Este é o terceiro handoff. O segundo (12/10 de manhã) descrevia a v0.1.1; num
-dia só o projeto ganhou duas versões e passou pelo primeiro teste em jogo
-real. O documento foi refeito a partir do repositório, não de memória.
+Este é o quarto handoff. O terceiro (12/10 à noite) descrevia a v0.1.3. Em
+13/10 o projeto ganhou o primeiro jogo inteiro traduzido, duas versões, uma
+linha de comando, identidade visual nova, página nova no GitHub e um site.
 
 ---
 
@@ -44,25 +36,18 @@ de trabalho do mantenedor.
 | | |
 |---|---|
 | Repositório (público) | https://github.com/crimsondawnacademy-design/romtranslate-studio |
-| Versão publicada | https://github.com/crimsondawnacademy-design/romtranslate-studio/releases/tag/v0.1.3 (12/10/2026, tag no commit `e2c7543`) |
-| Stack | Tauri 2, React 19, Vite 8, TypeScript (pnpm); Rust em workspace |
-| Tamanho | 11.908 linhas no core, 6.816 de testes, 933 na ponte Tauri, 2.842 de frontend |
-| Testes | 221 em Rust (215 rodam; 6 são manuais) e 9 no frontend |
-| CI | jobs `rust`, `desktop` e `frontend`, verdes no `e2c7543` |
+| Site | https://romtranslate-studio.pages.dev (inglês em `/en/`) |
+| Versão publicada | https://github.com/crimsondawnacademy-design/romtranslate-studio/releases/tag/v0.1.5 (13/10/2026, tag no commit `005dc16`, pré-lançamento) |
+| Stack | Tauri 2, React 19, Vite, TypeScript (pnpm); Rust em workspace: `crates/core`, `apps/desktop/src-tauri`, `apps/cli` |
+| Testes | `cargo test --workspace`: 34 conjuntos, todos verdes; 9 testes no frontend |
+| CI | jobs `rust`, `desktop` e `frontend`; release por tag nas 4 plataformas |
 
-A versão publicada é marcada como pré-lançamento (alpha). Por isso o endereço
-`/releases/latest` **não** leva a ela: para divulgar, use o link da tag.
-
-```bash
-git clone https://github.com/crimsondawnacademy-design/romtranslate-studio.git
-```
+Toda versão sai como pré-lançamento (alpha): `/releases/latest` **não** leva a
+ela. Para divulgar, use o link da tag ou o site.
 
 ---
 
-## 2. Estado atual (12 de outubro de 2026, fim do dia)
-
-O ciclo completo funciona de ponta a ponta, e em 12/10 foi exercitado pela
-primeira vez num jogo real (seção 2.2).
+## 2. Estado atual (13 de outubro de 2026, tarde)
 
 | Plataforma | Extração | Reinserção | Tradução maior que o original |
 |---|---|---|---|
@@ -82,116 +67,122 @@ as plataformas reais são declaradas como **experimentais**. Tradução maior
 que o original só vale para frase apontada por uma **tabela** de ponteiros
 que o app reconhece.
 
-### 2.1 O caminho que a pessoa faz no app
+### 2.1 O que entrou em 13/10
 
-1. Arrasta o jogo para a janela (ou escolhe o arquivo). Se já existe projeto
-   para aquele arquivo, o app entra nele.
-2. **Extração estruturada** (botão principal): guarda o espaço de cada frase,
-   descarta o que não parece texto, tira do projeto o lixo antigo sem
-   tradução e marca os nomes internos do jogo, que ficam fora da tradução.
-3. Escolhe o provedor e clica em **Traduzir pendentes**. Provedores:
-   - Ollama (local);
-   - qualquer endpoint compatível com a API da OpenAI, com chave;
-   - Claude pela API da Anthropic, com chave;
-   - ChatGPT pelo Codex CLI (assinatura, sem chave), usando a conta do Codex
-     do computador ou um login só do app.
-   Provedor externo exige a permissão de tradução remota; a tela pergunta na
-   hora. Se o provedor para de responder, a rodada para e mostra o motivo.
-   Com chave paga, "Calcular gasto" mostra chamadas, tokens e valor antes, e
-   a tela mostra o que foi cobrado depois.
-4. **Reinserir na cópia de trabalho**: a tradução com erro fica de fora (a
-   frase segue no original) e o resto entra. A tela mostra o caminho do jogo
-   traduzido e um botão que abre a pasta.
-5. **Exportar patch** para compartilhar.
+- **Primeiro jogo inteiro.** Um jogo comercial de GBA de 16 MiB (do mantenedor,
+  fora do repo) saiu traduzido e ligou num emulador: abertura e primeiro
+  diálogo vistos em português, com acento. Ninguém jogou além disso.
+- **Tradução em paralelo com repergunta** (`pipeline.rs`): 4 lotes por vez
+  (`TranslateOptions.parallel`); o que volta maior que o espaço da frase é
+  repedido ao provider com o teto em caracteres (`shorten_rounds`, 2 rodadas);
+  25 frases por chamada por padrão.
+- **Cancelar na hora**: as chamadas em andamento são largadas em menos de um
+  segundo; a tela mostra "Cancelando…".
+- **Frase repetida vai uma vez só** ao provider; as cópias recebem a mesma
+  tradução.
+- **Fila sem lixo**: `scan::stray_ids` acha as entries fora das regiões de
+  texto do arquivo e a extração estruturada as tira da tradução
+  (`ProjectDb::mark_stray`: viram `Internal` e perdem a tradução automática).
+- **CLI** `romtranslate` (`apps/cli`): `inspect`, `create`, `extract`, `scan`
+  (com `--tbl`, `--region`, `--min-chars`), `export`, `estimate`, `translate`
+  (com `--parallel`, `--shorten-rounds`), `apply`, `validate`, `reinsert`,
+  `patch`. Roda do código; não vem no instalador.
+- **Identidade visual nova**: cores em tokens no `:root` de `App.css`, tema
+  claro como principal e escuro pelo sistema, `logo.svg` como fonte única do
+  logo e dos ícones. Simulador do backend em `apps/desktop/.preview/`.
+- **Página do GitHub**: `README.md` em inglês e `README.pt-BR.md`; o texto
+  técnico foi para `docs/DETALHES.md`; apoio por Pix; `.github/FUNDING.yml`.
+- **Site** em `site/`, publicado no Cloudflare Pages (conta Crimson Dawn): a
+  demonstração é o app de verdade rodando na página com um jogo inventado.
+- **Versões** v0.1.4 (madrugada) e v0.1.5 (tarde), as duas conferidas sem login.
 
-Para jogo com tabela de caracteres própria (NES, SNES, Game Boy), a **busca
-relativa** descobre a tabela a partir de uma palavra do jogo e o texto volta
-pelo mesmo `.tbl`. O **Raio-X** mostra o que o app não lê: blocos LZ77 e as
-frases dentro deles, quanto do arquivo é denso, quantas frases podem crescer.
-
-### 2.2 O que o teste em jogo real mostrou
-
-Dump do mantenedor de um jogo de GBA de 16 MiB em inglês, fora do
-repositório, pelas funções do core que os botões chamam. Só números:
+### 2.2 Números medidos (mesmo jogo real, só contagens)
 
 | Medida | Resultado |
 |---|---|
-| Entradas extraídas | 17.936 (169.226 sequências descartadas como não texto) |
-| Nomes internos fora da fila | 2.326; ficam 15.610 para traduzir |
-| Frases com ponteiro em tabela | 1.590, quase todas nomes internos; nenhuma fala |
-| Blocos LZ77 | 1.599, 279 com texto, cerca de 10 mil frases dentro |
-| Tradução de 30 falas pelo ChatGPT (lote de 10) | 30 de 30, em 40 s |
-| Passam na validação sem intervenção | 26 a 27 de 30 depois do aviso de ASCII (eram 16) |
-| Reinserção das válidas | arquivo do mesmo tamanho, nenhum byte alterado fora das frases, checksum válido |
+| Entries da extração estruturada | 17.936; 2.326 nomes internos; 15.610 pendentes |
+| Texto de verdade (banco de mensagens contíguo de 308 KiB) | 11.195 entries, 8.717 textos distintos |
+| Fora do banco (gráfico, som, tabela que parece texto) | 4.415; a regra nova tira 4.363 e não marca nenhuma fala |
+| Trechos traduzidos e reinseridos (scan com `.tbl` + região) | 10.705, 1 pulado; pelo caminho ASCII da tela, 10.370 |
+| Estrutura depois da reinserção | mesmo tamanho; 0 bytes alterados fora de texto; códigos de controle das 3.699 mensagens idênticos |
+| Codex CLI, um lote por vez | lote de 25: 250 linhas em 254 s, 93% válidas; lote de 50: 200 em 161 s, 92,5% |
+| Codex CLI, 4 em paralelo + repergunta | 200 linhas em 86 s, 199 de 200 válidas |
+| Ritmo visto no app do mantenedor (4 x 50) | ~200 linhas por leva, cerca de 5 frases por segundo |
 
-O que isso diz: a mecânica funciona em jogo real. O diálogo é ASCII legível,
-mas cada entrada é **uma linha** da caixa de texto, e todo o diálogo é gravado
-no lugar. **Ninguém viu o jogo rodando com a tradução.**
+**O volume do jogo inteiro NÃO foi traduzido pelo provider do app:** foram 18
+agentes em paralelo fora dele, cada um num laço traduz, confere o tamanho,
+corrige. O app fez extração, validação, reinserção e patch.
+
+### 2.3 O caminho que a pessoa faz no app hoje
+
+1. Arrasta o jogo (ou abre o projeto que já existe).
+2. **Extração estruturada**: guarda o espaço de cada frase, descarta o que não
+   parece texto, marca nomes internos e tira da fila o que está fora das
+   regiões de texto. Texto sai como ASCII: sem acento.
+3. Escolhe o provider e **Traduzir pendentes**. Dá para cancelar a qualquer
+   momento; o que foi traduzido fica.
+4. **Reinserir na cópia de trabalho**: frase com erro fica no original.
+5. **Exportar patch**.
+
+Acento e as palavras curtas ("No", "The", "to") só entram pelo caminho de
+tabela de caracteres com região, que hoje existe **só na CLI**
+(`scan --encoding table --tbl <arquivo> --region inicio..fim --min-chars 1`).
 
 ---
 
 ## 3. Pendências — por prioridade
 
-### 3.1 O que impede traduzir um jogo inteiro hoje
+### 3.1 O que falta para um leigo traduzir um jogo inteiro só pelo app
 
-1. **Volume contra o limite da assinatura.** 15.610 linhas são 1.561 chamadas
-   com 10 frases cada. A assinatura do ChatGPT não cobre isso numa janela de
-   limite: a rodada para no meio e a pessoa retoma quando a conta volta (o
-   que foi traduzido fica salvo). Falta medir quantas frases por chamada o
-   modelo aguenta sem perder qualidade nem estourar o espaço; só o lote de 10
-   foi medido. Ver armadilha 7.18 antes de medir.
-2. **Ver o resultado num emulador.** Nunca foi feito. Sem isso não se sabe se
-   o jogo aceita a sobra preenchida, se o texto cabe na caixa, se trava.
-3. **Acento.** O texto ASCII sai sem acento. Acento de verdade depende de o
-   jogo ter as letras na fonte e de um `.tbl` com os códigos delas.
-4. **Linha por linha.** A IA traduz pedaço de frase sem ver o resto, e o
-   texto não passa de uma linha para a outra.
-5. **Texto comprimido.** O Raio-X conta; o app não extrai nem regrava.
+1. **Traduzir um jogo inteiro com o provider do app.** Nunca foi feito do
+   começo ao fim. Com a assinatura do ChatGPT são uns 30 minutos para ~8,9 mil
+   textos, se a cota do plano aguentar.
+2. **Região e tabela de caracteres na tela.** Sem isso a tradução pela tela
+   sai sem acento e com palavras curtas em inglês. O core já faz; falta a
+   interface (campo de região, escolher `.tbl`, mínimo de caracteres).
+3. **Códigos de controle do jogo declarados junto da tabela.** Hoje um
+   parâmetro de código de controle que cai na tabela entra colado no começo do
+   texto (101 trechos no jogo medido), e `%` + letra é lido como marcador
+   (`PlaceholderMismatch` falso).
+4. **Tabela de ponteiros de offset relativo declarada pelo usuário.** É o que
+   tira o campo fixo: "Não" não cabe em "No" (39 menus), "mapa" em "map".
+5. **Sobra de espaço no meio da linha** (254 casos no jogo medido) e **largura
+   em pixels** (49 linhas passaram da caixa e foram encurtadas à mão).
+6. **Alguém jogar o jogo traduzido até o fim.**
 
 ### 3.2 O que foi construído e ainda não foi visto funcionando de verdade
 
-- **Claude por chave de API**: nenhuma chamada real foi feita (não havia
-  chave). O formato veio da referência da API e tem teste sem rede. O
-  primeiro teste real é colar uma chave e clicar em "Testar conexão", que não
-  gasta token; há dois testes manuais em `crates/core/tests/anthropic.rs`.
-- **Cálculo de gasto**: conferido com backend simulado. A calibragem pela
-  contagem de tokens do Claude depende do item acima.
-- **Tradução longa pelo app**: a rodada mais longa feita de verdade tinha 80
-  linhas, pelo core. Pelo app, só se viu a parada por limite de conta.
-- **Telas**: o mantenedor usou no app a detecção, a criação de projeto, a
-  extração com filtro, a permissão remota, o login do ChatGPT só do app e a
-  parada com motivo. Arrastar e soltar, "Mostrar o arquivo", a busca
-  relativa, o Raio-X e a reinserção pelo app só foram conferidos com backend
-  simulado.
+- **As correções da v0.1.5 no app compilado**: cancelar, "Configuração salva",
+  a contagem das strings fora das regiões de texto. Vistas por teste
+  automático e por medição numa cópia do projeto real; não clicadas.
+- **A regra das regiões de texto fora daquele jogo**: calibrada num GBA só.
+  Só age com banco nítido (100+ frases, 70% delas nas regiões). Desfazer é
+  entry por entry; a marca é refeita a cada extração.
+- **Paralelismo com outros providers**: só o Codex CLI foi medido, e só com 4.
+  Ollama local não ganha nada; API com limite de taxa pode recusar.
+- **`estimate_translation` não conta a repergunta** (deixou de ser teto).
 - **Windows e Linux**: os instaladores compilam no CI; ninguém abriu.
+- **Claude por chave de API**: nenhuma chamada real (não havia chave).
+- **Site**: visto em Chrome sem janela e no navegador interno; não em Safari,
+  Firefox, celular de verdade nem monitor 4K real.
+- **CLI**: testes verdes; `--parallel` e `--shorten-rounds` vistos no código.
 
 ### 3.3 Decisões que são do mantenedor
 
-- **Claude Code pela assinatura.** Não foi construído. Os termos do Claude
-  Code permitem a pessoa usar o próprio binário, sem modificação, com a
-  própria assinatura; rodar o Claude Code dentro de um produto exige aceitar
-  os Termos Comerciais da Anthropic. Sem esse aceite, o código não entra.
-  Detalhe em `.ctx/DECISIONS.md` (12/10).
-- **Login do OpenRouter.** É o único login por navegador feito para app de
-  terceiros, com modelos grátis e pagos. Foi pesquisado e proposto; falta a
-  decisão de construir.
-- **Ghidra + Java** (uns 2 GB) para usar o REA como bancada de engenharia
-  reversa num jogo específico.
-- **Divulgação** (r/romhacking, ROMhacking.net). Vale só depois de ver uma
-  tradução rodando num emulador.
+- **Claude Code pela assinatura** e **login do OpenRouter**: seguem como no
+  handoff 3 (ver `.ctx/DECISIONS.md`, 12/10).
+- **Assinatura dos binários** (certificados pagos) e **domínio próprio** do
+  site: não decididos.
+- **Divulgação** (r/romhacking, ROMhacking.net): o site e a página existem; a
+  decisão de quando anunciar é dele.
 
-### 3.4 Prioridade 2 e 3
+### 3.4 Lista de trabalho
 
-- Tabela de ponteiros indicada pelo usuário (estilo Atlas): o caminho para
-  NES e SNES e para tabelas que a detecção recusa.
-- Extrair e regravar texto de dentro de bloco LZ77; reconhecer o LZ11.
-- Lotes de tradução em paralelo.
-- Shift-JIS; edição de fonte; Wii e Wii U (cifrados, sem chaves por decisão).
-- Mostrar na tela o endereço do login quando o navegador não abre.
-- `apps/desktop/README.md` ainda é o do template; a versão do Rust não é
-  fixada (um lint novo pode quebrar o CI sem ninguém mexer no código).
-
-A lista completa, com o histórico de cada item, está em `.ctx/STATE.md`.
+`.ctx/STATE.md`, "Próximos passos": **0c** (do primeiro uso pela tela: campo
+de chamadas ao mesmo tempo e medir 8 no Codex; desfazer em lote das strings
+soltas; calibrar a regra num segundo jogo) e **0a** (região na tela, lista de
+caracteres vinda do jogo, ponteiro relativo declarado, códigos de controle
+declarados, sobra de espaço).
 
 ---
 
@@ -254,6 +245,18 @@ o LZ77 tipo 0x10 do BIOS do GBA e do DS, só para leitura.
 global e o `settings.toml` ficam na pasta de configuração do app; as chaves
 de API vão para o cofre do sistema (uma entrada por provedor).
 
+**Acrescentado em 13/10:**
+
+- `pipeline::run_translation` tem três fases: memória de tradução; provider em
+  levas de `parallel` lotes (`call_together`, um `join_all` feito à mão, com um
+  relógio de 150 ms que faz o cancelamento valer na hora); repergunta do que
+  não coube. Frase repetida vai uma vez (`first_of` / `copies`).
+- `scan::stray_ids` + `ProjectDb::mark_stray`, chamados por
+  `adapters::extract_project`.
+- `crates/core/src/settings.rs`: as configurações saíram do crate do Tauri
+  para o core, para a CLI ler as mesmas.
+- `apps/cli`: casca fina sobre o core, um comando por função.
+
 ---
 
 ## 5. Estrutura de arquivos
@@ -304,24 +307,44 @@ docs/               SPEC.md (produto), ADAPTERS.md (guia), assets/
 .ctx/               STATE.md, DECISIONS.md, HANDOFF.md, TOOL-LOG.md
 ```
 
+**Acrescentado em 13/10:**
+
+```
+apps/cli/                 CLI `romtranslate` (src/main.rs, tests/cli.rs)
+apps/desktop/.preview/    simulador do backend Tauri com jogo inventado
+apps/desktop/src/assets/logo.svg   fonte única do logo e dos ícones
+crates/core/src/settings.rs        configurações (antes no crate do Tauri)
+crates/core/tests/fast_translate.rs  paralelo, repergunta, repetida, cancelar
+crates/core/tests/stray.rs           marcação das strings soltas no banco
+site/                     site: index.html, en/, estilo.css, site.js,
+                          versao.js, build-demo.sh, conferir.mjs, publicar.sh
+docs/DETALHES.md          o texto técnico que era o README
+README.md / README.pt-BR.md   apresentação em inglês e em português
+.github/FUNDING.yml       botão de apoio
+```
+
 ---
 
 ## 6. Como rodar, validar e publicar
 
 ### 6.1 Rodar
 
-Pré-requisitos: Rust estável, Node 20 ou mais novo (o CI usa 24), pnpm (o CI
-usa 12) e as dependências de sistema do Tauri 2. Para traduzir localmente,
-Ollama com um modelo baixado (por exemplo `ollama pull llama3.2:3b`); o campo
-de modelo começa vazio e precisa ser preenchido na tela.
+Pré-requisitos: Rust estável, Node 20 ou mais novo, pnpm e as dependências de
+sistema do Tauri 2.
 
 ```bash
 pnpm install
-pnpm dev                                              # abre o app
-cargo run -p romtranslate-core --example gen_fixtures # arquivos de teste em fixtures/generated/
+pnpm dev                                    # abre o app
+cargo run -p romtranslate-cli -- --help     # a linha de comando
+cargo run -p romtranslate-core --example gen_fixtures   # arquivos de teste
 ```
 
-A primeira compilação cria `target/`, que já chegou a 13 GB.
+Ver a interface sem o backend Rust, com um jogo inventado:
+
+```bash
+pnpm --dir apps/desktop exec vite --port 1437
+# abrir http://localhost:1437/.preview/index.html?auto=1
+```
 
 ### 6.2 Validar (tudo precisa passar antes de qualquer commit)
 
@@ -330,39 +353,37 @@ cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test --w
 pnpm lint && pnpm test && pnpm web:build
 ```
 
-Seis testes são manuais e ficam fora do CI:
-
-```bash
-cargo test -p romtranslate-core --test translate -- --ignored --nocapture  # exige Ollama rodando
-cargo test -p romtranslate-desktop -- --ignored                            # grava no cofre do sistema
-cargo test -p romtranslate-core --test codex_cli -- --ignored --nocapture  # exige Codex CLI logado; gasta cota
-ANTHROPIC_API_KEY=... cargo test -p romtranslate-core --test anthropic -- --ignored --nocapture  # 1 teste não cobra, 1 cobra
-```
+Os testes manuais (Ollama, cofre do sistema, Codex CLI, API da Anthropic)
+seguem como no `docs/DETALHES.md`. Teste com o Codex gasta a cota do
+mantenedor: diga antes quantas chamadas vai fazer.
 
 ### 6.3 Publicar uma versão
 
-1. Suba o número em três arquivos: `Cargo.toml`, `apps/desktop/package.json` e
-   `apps/desktop/src-tauri/tauri.conf.json`. Rode `cargo build` para atualizar
-   o `Cargo.lock`.
+1. Suba o número em `Cargo.toml`, `apps/desktop/package.json` e
+   `apps/desktop/src-tauri/tauri.conf.json`. Rode `cargo check --workspace`
+   para atualizar o `Cargo.lock`.
 2. Valide (6.2), faça o commit e envie.
-3. Crie e envie a tag: `git tag vX.Y.Z && git push origin vX.Y.Z`. O primeiro
-   passo do workflow barra a tag se ela não bater com o `tauri.conf.json`.
+3. Tag no SHA explícito: `git tag vX.Y.Z <sha> && git push origin vX.Y.Z`.
 4. O workflow compila as quatro plataformas e abre um release em **rascunho**
-   com 9 arquivos. É rascunho de propósito: se uma plataforma falhar, nada
-   incompleto vai ao ar.
-5. Acrescente as novidades no topo das notas (`gh release edit vX.Y.Z --notes-file ...`).
-   O corpo padrão, com as instruções de instalação, vem do próprio workflow.
+   com 9 arquivos.
+5. Acrescente as novidades no topo das notas, com o que NÃO foi conferido
+   (`gh release edit vX.Y.Z --notes-file ...`).
 6. Publique: `gh release edit vX.Y.Z --draft=false`.
 7. Confira sem login que a página abre e que um instalador baixa.
+8. **Site:** troque o número em `site/versao.js` e rode `site/publicar.sh`.
 
-Para testar o workflow sem criar tag nem release: `gh workflow run release.yml`.
-Ele só compila e deixa os binários na página da execução.
+Publicar versão só com pedido escrito do mantenedor.
 
-Os binários não são assinados (certificado é pago). No macOS o sistema diz que
-o app "está danificado"; a saída é `xattr -cr "/Applications/RomTranslate Studio.app"`.
-Isso está no README e no corpo de todo release.
+### 6.4 Publicar o site
 
----
+```bash
+./site/publicar.sh
+```
+
+Compila a demonstração para `site/demo/`, confere os links
+(`node site/conferir.mjs`) e roda `wrangler pages deploy site --project-name
+romtranslate-studio --branch main`. O `wrangler` precisa estar logado na conta
+Crimson Dawn.
 
 **Refazer uma versão que ainda não foi publicada.** Se a tag já existe mas o
 release está em rascunho e ficou velho: apague o rascunho
@@ -479,6 +500,31 @@ recusa `node_modules` raiz em symlink: rode os binários de
 **7.20 O Codex ecoa o prompt no stderr.** O motivo de uma falha é a última
 linha que começa com `ERROR`, não o fim da saída.
 
+**7.21 A fonte do jogo não é o ASCII.** No jogo medido, `# $ % & * + / ; < = >
+@ [ \ ] ^ _` são desenhados como letras japonesas, e o lote ASCII do app
+libera todos. A lista de caracteres do pedido tem que sair do que o jogo usa.
+
+**7.22 Mesmo número de caracteres não é a mesma largura.** Letra acentuada e
+"a" têm 7 px, "i" tem 3. Só dá para medir lendo os glifos da fonte na ROM.
+
+**7.23 Entry de tabela pode começar com um parâmetro de código de controle.**
+Traduzir sem preservar esse prefixo troca o parâmetro. Conferir, mensagem a
+mensagem, que a sequência de códigos de controle é igual antes e depois pega
+isso; checksum e re-extração não pegam.
+
+**7.24 Traduzir tudo o que a extração devolve corrompe o jogo.** Um quarto das
+entries pendentes do jogo medido era dado que parece texto. Projeto traduzido
+antes da v0.1.5 precisa de "Extração estruturada" de novo antes de reinserir.
+
+**7.25 Cancelar sem retorno parece botão quebrado.** Toda ação que demora
+precisa mostrar que foi pedida.
+
+**7.26 Dois checkouts no mesmo `target/`** deixam em `target/debug/` o binário
+do que compilou por último: `cargo run` de um pode rodar o código do outro.
+
+**7.27 A pasta de rascunho da sessão some quando ela reinicia.** O que vale
+guardar vai para o repo ou para uma pasta do mantenedor antes.
+
 ---
 
 ## 8. Regras que valem para qualquer sessão
@@ -495,8 +541,10 @@ linha que começa com `ERROR`, não o fim da saída.
 - Projeto pessoal: nada vai para a infraestrutura de trabalho do mantenedor.
 - Ao terminar: atualize `.ctx/STATE.md` e `.ctx/TOOL-LOG.md`, registre decisão
   nova em `.ctx/DECISIONS.md` (só acrescentando), faça commit e envie.
-
----
+- Publicar versão, mover tag ou anunciar o projeto: só com pedido escrito do
+  mantenedor.
+- Nenhum nome, imagem, personagem ou texto de jogo comercial no repositório,
+  no site ou em captura de tela. Demonstração é sempre com jogo inventado.
 
 ---
 
@@ -514,26 +562,37 @@ linha que começa com `ERROR`, não o fim da saída.
 - API da Anthropic: referência oficial das Messages, da contagem de tokens e
   da lista de modelos; página "Legal and compliance" da documentação do
   Claude Code para o que é permitido com a assinatura.
+- Formato do banco de mensagens do jogo medido: decompilação pública do jogo
+  (ferramenta de strings e `charmap`), usada só como referência de formato.
+- `docs/DETALHES.md`: o que cada parte faz, a matriz completa e a CLI.
 
 ## Commits mais recentes (o mais novo primeiro)
 
 ```
-e2c7543 ctx: Claude por chave de API, calculo de gasto e a decisao sobre o Claude Code
-bb58981 feat(traducao): Claude por chave de API e calculo de gasto em tokens
-7291159 ctx: auditoria do caminho IA -> jogo no estado, nas decisoes e no log
-61a4a1b fix(fluxo): da traducao ao jogo sem beco sem saida — permissao, limite da conta e frases com erro
-7596d98 ctx: escolha da conta do ChatGPT no estado, nas decisoes e no log
-4270211 feat(traducao): escolher a conta do ChatGPT — a do computador ou uma so do app
-c270499 ctx: texto ASCII sem barreira de acento e nomes internos fora da fila, com a medicao em jogo real
-b0da48f feat(traducao): texto ASCII leva a lista de caracteres e troca acento com aviso; nome interno fica fora da fila
-d06fb04 ctx: primeiro teste de ponta a ponta em jogo real
-c83cc80 chore: v0.1.3
-5540aa2 fix(ui): Testar conexao e Traduzir usam o provider da tela; erro aparece junto dos botoes
-173558f ctx: criar projeto segue no projeto existente
-9c29365 fix(ui): "Criar projeto" segue no projeto que ja existe pro mesmo arquivo
-3529822 ctx: v0.1.2 publicada e conferida sem login
+c2cec40 ctx: site no log e fim de linha das decisoes
+3736a78 docs: link do site na pagina do projeto; ctx: site no ar
+2cd0f17 feat(site): site de divulgacao com a demonstracao ao vivo, em portugues e ingles
+34a2dda ctx: v0.1.5 publicada e conferida sem login
+005dc16 ctx: correcoes do primeiro uso da v0.1.4 pela tela e a v0.1.5 a publicar
+bca2e31 chore: v0.1.5
+be565d2 fix(traducao): cancelar na hora, frase repetida uma vez so e o que esta fora das regioes de texto sai da fila
+2c3893a ctx: v0.1.4 publicada, conferida sem login e instalada
+f33b191 chore: v0.1.4
+8d2a70a ctx: traducao em paralelo com repergunta, visual novo, pagina do projeto e o mapa do site
+70d62f0 docs: captura do visual novo na pagina e simulador do backend pra ver a interface sem Rust
+ef34b1c feat(ui): identidade nova de adesivo — paleta de doce, logo do cartucho e icones do app
+2a6cbd0 docs: pagina do projeto em ingles e portugues, com o que foi medido e apoio por Pix
+4807835 ctx: flags do translate na CLI
+ad3493a feat(cli): translate com --parallel e --shorten-rounds
+7c209be feat(traducao): 25 frases por chamada por padrao
+52807c4 ctx: CLI do core — CI verde no Linux
+6a857f4 ctx: CLI do core no estado, nas decisoes e no log
+aed3448 feat(cli): CLI do core — o pipeline inteiro sem a janela
+1d6863a feat(traducao): lotes em paralelo e repergunta do que nao coube no espaco da frase
+0aae7b5 ctx: primeiro jogo inteiro pelo processo do app — resultado, 11 achados e a ordem de trabalho
+c9c3335 ctx: v0.1.3 publicada e handoff 3
 ```
 
 ---
-*Gerado por claude (opus-5.5) em 12/10/2026. Próxima ferramenta: leia
+*Gerado por claude (opus-5.5) em 13/10/2026. Próxima ferramenta: leia
 `.ctx/STATE.md` antes de editar e `.ctx/TOOL-LOG.md` para o histórico.*
