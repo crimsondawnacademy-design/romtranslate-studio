@@ -5,7 +5,7 @@ gerado_por: claude / opus-5.5
 motivo: fim-de-sessao-longa
 branch: main
 ultimo_commit_de_codigo: bb58981 (2026-10-12)
-versao_publicada: v0.1.3
+versao_publicada: v0.1.4 (este texto descreve a v0.1.3; ver o adendo)
 numero: 3
 ---
 
