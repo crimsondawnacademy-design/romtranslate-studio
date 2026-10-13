@@ -54,6 +54,7 @@ pub(crate) fn extract(data: &[u8]) -> PackedText {
     let truncated = lz77::each_block(data, &mut budget, |at, block| {
         blocks.push((at, block.packed_len));
         let config = ScanConfig {
+            japanese: true,
             only_text: true,
             max_entries: usize::MAX,
             ..ScanConfig::default()

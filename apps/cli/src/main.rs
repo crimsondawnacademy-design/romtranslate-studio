@@ -89,7 +89,7 @@ enum Command {
     Scan {
         #[arg(value_name = "PROJETO")]
         project: PathBuf,
-        /// ascii, utf8, utf16_le, utf16_be ou table [padrao: ascii, ou table com --tbl]
+        /// ascii, utf8, utf16_le, utf16_be, shift_jis ou table [padrao: ascii, ou table com --tbl]
         #[arg(long, value_parser = named::<ScanEncoding>)]
         encoding: Option<ScanEncoding>,
         /// Tabela de caracteres (.tbl) do jogo

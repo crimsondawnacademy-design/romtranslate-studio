@@ -54,7 +54,14 @@ const STATUS_FILTERS: StatusFilter[] = [
   "placeholder_mismatch",
 ];
 
-const SCAN_ENCODINGS: ScanEncoding[] = ["ascii", "utf8", "utf16_le", "utf16_be", "table"];
+const SCAN_ENCODINGS: ScanEncoding[] = [
+  "ascii",
+  "utf8",
+  "utf16_le",
+  "utf16_be",
+  "shift_jis",
+  "table",
+];
 const RENDER_CAP = 500;
 
 interface ProjectViewProps {
@@ -673,6 +680,7 @@ export default function ProjectView({
   const internal = entries.filter((e) => e.status === "internal").length;
   const pending = entries.filter((e) => !e.translatedText && e.status !== "internal").length;
   const hasAscii = entries.some((e) => e.encoding === "ascii");
+  const hasJapanese = entries.some((e) => e.encoding === "shift_jis");
 
   return (
     <section className="card">
@@ -1215,6 +1223,7 @@ export default function ProjectView({
             </>
           )}
           {hasAscii && <p className="hint left">{t("translate.ascii")}</p>}
+          {hasJapanese && <p className="hint left">{t("translate.japanese")}</p>}
           {internal > 0 && <p className="hint left">{t("translate.internal", { n: internal })}</p>}
           {settings.provider !== "ollama" && (
             <label className="checkline">

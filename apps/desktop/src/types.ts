@@ -73,7 +73,7 @@ export interface TextEntry {
   metadata: unknown;
 }
 
-export type ScanEncoding = "ascii" | "utf8" | "utf16_le" | "utf16_be" | "table";
+export type ScanEncoding = "ascii" | "utf8" | "utf16_le" | "utf16_be" | "shift_jis" | "table";
 
 export interface ScanConfig {
   encoding: ScanEncoding;

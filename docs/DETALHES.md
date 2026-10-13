@@ -38,7 +38,8 @@ Prefere compilar do código? Veja [Rodando](#rodando).
 - **Detecção** de plataforma com confiança e evidências em 11 formatos (GBA,
   NES, SNES, NDS, GameCube, Wii, Wii U, PS1, PS2, PSP e a fixture sintética
   RTSF);
-- **Extração**: scanner genérico (ASCII, UTF-8, UTF-16 LE/BE, tabelas `.tbl`)
+- **Extração**: scanner genérico (ASCII, UTF-8, UTF-16 LE/BE, Shift-JIS,
+  tabelas `.tbl`)
   para descoberta + extração estruturada com limites reais nos adapters que a
   suportam. Sequência de bytes imprimíveis que não parece texto (gráfico,
   código, tabela) é descartada antes do teto de 100 mil strings, e a tela diz
@@ -200,6 +201,24 @@ pedido só diz o máximo. E a sobra de
 uma tradução mais curta vira `0x00` quando o byte depois da string original
 é `0x00` (senão é preenchida com o espaço da tabela) — jogo com outro
 terminador pede conferência no emulador.
+
+**Jogo em japonês (Shift-JIS)**: a extração estruturada do Game Boy Advance,
+do DS, do GameCube e do PS1, PS2 e PSP lê, além do ASCII, o texto japonês em
+Shift-JIS, e cada faixa de bytes sai numa leitura só. Dado binário lido como
+Shift-JIS vira kanji o tempo todo e quase nunca vira kana, então a regra pede
+kana: dois diferentes, em pelo menos um quarto da escrita japonesa da frase.
+Palavra só de kanji ("装備") fica de fora. Medido em 13/10/2026, só em
+contagens: 16 MiB de ruído não dão nenhum falso positivo (davam 40 com a
+regra frouxa), e num jogo ocidental de GBA de 16 MiB passam 51 sequências,
+22 delas nomes de recurso deixados pelos desenvolvedores; todas caem fora das
+regiões de texto e nenhuma frase do jogo se perde. A tradução volta em
+Shift-JIS: letras comuns num byte cada, sem acento (a tabela japonesa não tem
+letra acentuada; a IA é avisada e o app troca o que vier acentuado, com
+aviso). A frase sem ponteiro em tabela precisa caber no espaço da original e
+a IA recebe esse teto já no primeiro pedido. O scanner da tela também tem a
+opção `shift_jis`, que lê tudo sem filtrar. **Nenhum jogo japonês real passou
+por isto.** Jogo de cartucho que usa tabela de caracteres própria (quase todo
+NES e SNES) continua pedindo a tabela.
 
 **Texto ASCII traduzido para idioma com acento**: num jogo que guarda o
 texto em ASCII (é o que a extração estruturada lê; no DS, também UTF-16),

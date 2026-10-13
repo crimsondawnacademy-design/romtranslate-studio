@@ -431,6 +431,7 @@ impl GameAdapter for NdsAdapter {
                     data,
                     &ScanConfig {
                         encoding,
+                        japanese: true,
                         region_start: Some(start),
                         region_end: Some(end),
                         max_entries: remaining,

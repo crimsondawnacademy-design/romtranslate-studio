@@ -32,6 +32,10 @@ pub enum ScanEncoding {
     Utf8,
     Utf16Le,
     Utf16Be,
+    /// Shift-JIS (`crate::sjis`): ASCII, katakana de meia largura e os
+    /// caracteres de dois bytes do japones. Aqui `min_chars` conta BYTES:
+    /// "はい" tem 2 caracteres e 4 bytes, e e uma resposta de menu inteira.
+    ShiftJis,
     Table,
 }
 
@@ -52,6 +56,12 @@ pub struct ScanConfig {
     /// `max_entries`; o total descartado sai em `ScanOutcome::discarded`.
     /// Desligado por padrao: o scanner cru e a ferramenta de descoberta.
     pub only_text: bool,
+    /// So com `encoding == Ascii`: le tambem o texto japones em Shift-JIS, e
+    /// cada faixa de bytes sai numa leitura so. Entra a sequencia com
+    /// caractere de dois bytes que passa em `sjis::looks_japanese`; a string
+    /// ASCII que cai dentro dela deixa de sair. E o modo dos adapters: jogo
+    /// ocidental continua com as mesmas entries, jogo japones ganha as dele.
+    pub japanese: bool,
 }
 
 impl Default for ScanConfig {
@@ -64,6 +74,7 @@ impl Default for ScanConfig {
             region_end: None,
             max_entries: MAX_ENTRIES,
             only_text: false,
+            japanese: false,
         }
     }
 }
@@ -136,7 +147,9 @@ pub fn scan_bytes(data: &[u8], config: &ScanConfig) -> Result<ScanOutcome> {
 
     let table;
     let runs = match config.encoding {
+        ScanEncoding::Ascii if config.japanese => ascii_and_japanese_runs(window, config.min_chars),
         ScanEncoding::Ascii => ascii_runs(window),
+        ScanEncoding::ShiftJis => sjis_runs(window),
         ScanEncoding::Utf8 => utf8_runs(window),
         ScanEncoding::Utf16Le => utf16_runs(window, true),
         ScanEncoding::Utf16Be => utf16_runs(window, false),
@@ -154,6 +167,7 @@ pub fn scan_bytes(data: &[u8], config: &ScanConfig) -> Result<ScanOutcome> {
         ScanEncoding::Utf8 => TextEncoding::Utf8,
         ScanEncoding::Utf16Le => TextEncoding::Utf16Le,
         ScanEncoding::Utf16Be => TextEncoding::Utf16Be,
+        ScanEncoding::ShiftJis => TextEncoding::ShiftJis,
         ScanEncoding::Table => TextEncoding::Table(
             cfg.tbl_path
                 .as_deref()
@@ -167,11 +181,15 @@ pub fn scan_bytes(data: &[u8], config: &ScanConfig) -> Result<ScanOutcome> {
     let mut truncated = false;
     let mut discarded = 0;
     for run in runs {
-        if run.chars < config.min_chars {
+        // Em Shift-JIS o minimo conta bytes (ver `ScanEncoding::ShiftJis`).
+        let size = if run.sjis { run.byte_len } else { run.chars };
+        if size < config.min_chars {
             continue;
         }
-        // Antes do teto: ele conta so o que sobra do filtro.
-        if config.only_text && !looks_like_text(&run.text) {
+        // Antes do teto: ele conta so o que sobra do filtro. A sequencia
+        // japonesa do modo `japanese` ja chegou aqui filtrada.
+        let filtered = config.only_text && !(run.sjis && config.japanese);
+        if filtered && !looks_like_text(&run.text) {
             discarded += 1;
             continue;
         }
@@ -199,10 +217,14 @@ pub fn scan_bytes(data: &[u8], config: &ScanConfig) -> Result<ScanOutcome> {
             context: None,
             // Scanner generico nao garante limite de reinsercao (Camada B decide).
             max_bytes: None,
-            encoding: text_encoding(config),
+            encoding: if run.sjis {
+                TextEncoding::ShiftJis
+            } else {
+                text_encoding(config)
+            },
             status,
             metadata: serde_json::json!({
-                "scanner": config.encoding,
+                "scanner": if run.sjis { ScanEncoding::ShiftJis } else { config.encoding },
                 "chars": run.chars,
                 "terminated": run.terminated,
             }),
@@ -242,13 +264,21 @@ pub fn scan_bytes(data: &[u8], config: &ScanConfig) -> Result<ScanOutcome> {
 /// E heuristica e erra: "McCoy" quebra a caixa, "Lv.99" e "HP: 12/30" tem
 /// simbolo demais, "Nooooo!" repete demais. Por isso quem descarta com ela
 /// diz quantas descartou, e string com ponteiro em tabela nem passa por ela
-/// (`keep_text`): ponteiro e evidencia mais forte que aparencia. Letra aqui e
-/// a do Unicode (kana e kanji contam); caixa e vogal so pesam no alfabeto
-/// latino.
+/// (`keep_text`): ponteiro e evidencia mais forte que aparencia. Texto com
+/// kana ou kanji e julgado por `sjis::looks_japanese`, que pede kana; o resto
+/// segue a regra abaixo, onde letra e a do Unicode e caixa e vogal so pesam
+/// no alfabeto latino. Katakana de meia largura nao conta como letra: e um
+/// byte so (0xA1-0xDF), e dado binario forma sequencias dele o tempo todo.
 pub fn looks_like_text(text: &str) -> bool {
+    if let Some(japanese) = crate::sjis::looks_japanese(text) {
+        return japanese;
+    }
     let chars: Vec<char> = text.chars().collect();
     let n = chars.len();
-    let letters = chars.iter().filter(|c| c.is_alphabetic()).count();
+    let letters = chars
+        .iter()
+        .filter(|c| c.is_alphabetic() && !('\u{FF61}'..='\u{FF9F}').contains(*c))
+        .count();
     let spaces = chars.iter().filter(|c| **c == ' ').count();
     if n < 2 || (letters + spaces) * 10 < n * 7 || (n <= 4 && letters != n) {
         return false;
@@ -393,9 +423,16 @@ pub fn stray_ids(entries: &[TextEntry]) -> Vec<String> {
 
 const SENTENCE_CHARS: usize = 12;
 
-/// Tem cara de frase: 12+ caracteres, com espaco no meio.
+/// Tem cara de frase: 12+ caracteres, com espaco no meio. Japones nao separa
+/// palavra com espaco e diz mais por caractere: 6+ caracteres, 3 deles
+/// hiragana (as particulas e as terminacoes de verbo, que menu nao tem).
 pub(crate) fn is_sentence(text: &str) -> bool {
-    text.chars().count() >= SENTENCE_CHARS && text.trim().contains(' ')
+    let chars = text.chars().count();
+    let hiragana = text
+        .chars()
+        .filter(|c| crate::sjis::is_hiragana(*c))
+        .count();
+    (chars >= SENTENCE_CHARS && text.trim().contains(' ')) || (chars >= 6 && hiragana >= 3)
 }
 
 /// Run bruto achado por um scanner, relativo ao inicio da janela.
@@ -406,6 +443,8 @@ struct Run {
     text: String,
     /// true se o byte seguinte ao run e 0x00 (terminador classico).
     terminated: bool,
+    /// Lido como Shift-JIS, qualquer que seja o encoding pedido.
+    sjis: bool,
 }
 
 fn is_ascii_printable(b: u8) -> bool {
@@ -449,8 +488,102 @@ fn ascii_runs(data: &[u8]) -> Vec<Run> {
             chars: bytes.len(),
             text: String::from_utf8_lossy(bytes).into_owned(),
             terminated: data.get(i) == Some(&0),
+            sjis: false,
         });
     }
+    runs
+}
+
+/// Cada sequencia maxima de caracteres Shift-JIS de `data`, ASCII incluso:
+/// (inicio, fim, numero de caracteres, o que ela tem de cada tipo).
+fn each_sjis_span(data: &[u8], mut visit: impl FnMut(usize, usize, usize, &crate::sjis::Script)) {
+    let decode = |i: usize| crate::sjis::decode_char(data, i).filter(|(c, _)| is_text_char(*c));
+    let mut i = 0;
+    while i < data.len() {
+        let Some(mut cur) = decode(i) else {
+            i += 1;
+            continue;
+        };
+        let begin = i;
+        let mut chars = 0;
+        let mut script = crate::sjis::Script::default();
+        loop {
+            script.push(cur.0);
+            if cur.1 == 2
+                && crate::sjis::is_kanji(cur.0)
+                && crate::sjis::is_rare_kanji(data[i], data[i + 1])
+            {
+                script.note_rare_kanji();
+            }
+            chars += 1;
+            i += cur.1;
+            match decode(i) {
+                Some(next) => cur = next,
+                None => break,
+            }
+        }
+        visit(begin, i, chars, &script);
+    }
+}
+
+fn sjis_run(data: &[u8], begin: usize, end: usize, chars: usize) -> Run {
+    let mut text = String::with_capacity(end - begin);
+    let mut i = begin;
+    while let Some((c, len)) = crate::sjis::decode_char(data, i).filter(|_| i < end) {
+        text.push(c);
+        i += len;
+    }
+    Run {
+        offset: begin,
+        byte_len: end - begin,
+        chars,
+        text,
+        terminated: data.get(end) == Some(&0),
+        sjis: true,
+    }
+}
+
+/// Sequencias maximas de caracteres Shift-JIS, ASCII incluso.
+fn sjis_runs(data: &[u8]) -> Vec<Run> {
+    let mut runs = Vec::new();
+    each_sjis_span(data, |begin, end, chars, _| {
+        runs.push(sjis_run(data, begin, end, chars))
+    });
+    runs
+}
+
+/// As sequencias ASCII e, no lugar das que caem dentro dela, cada sequencia
+/// Shift-JIS que e texto japones (`sjis::looks_japanese`) — uma leitura so
+/// por faixa de bytes, em ordem de posicao. `min_bytes` vale pra japonesa, e
+/// a de ate 3 caracteres ainda precisa do terminador 0x00.
+/// So a sequencia que passa vira string: num disco de gigabytes quase
+/// nenhuma passa.
+fn ascii_and_japanese_runs(data: &[u8], min_bytes: usize) -> Vec<Run> {
+    let mut japanese = Vec::new();
+    each_sjis_span(data, |begin, end, chars, script| {
+        let two_byte = end - begin > chars;
+        // Ate 3 caracteres so com o terminador logo depois: "ぉく" solto
+        // aparece em ruido, seguido de 0x00 quase nunca.
+        let anchored = chars > 3 || data.get(end) == Some(&0);
+        if two_byte && anchored && end - begin >= min_bytes && script.verdict() == Some(true) {
+            japanese.push(sjis_run(data, begin, end, chars));
+        }
+    });
+    if japanese.is_empty() {
+        return ascii_runs(data);
+    }
+    // Toda sequencia ASCII esta inteira dentro de uma Shift-JIS ou fora de
+    // todas: o ASCII e parte do Shift-JIS.
+    let inside = |run: &Run| {
+        let i = japanese.partition_point(|j| j.offset <= run.offset);
+        i > 0 && run.offset < japanese[i - 1].offset + japanese[i - 1].byte_len
+    };
+    let mut runs: Vec<Run> = ascii_runs(data)
+        .into_iter()
+        .filter(|run| !inside(run))
+        .collect();
+    runs.extend(japanese);
+    runs.sort_by_key(|run| run.offset);
     runs
 }
 
@@ -497,6 +630,7 @@ fn utf8_runs(data: &[u8]) -> Vec<Run> {
             chars,
             text,
             terminated: data.get(i) == Some(&0),
+            sjis: false,
         });
     }
     runs
@@ -560,6 +694,7 @@ fn utf16_runs(data: &[u8], le: bool) -> Vec<Run> {
             chars,
             text,
             terminated: unit(i) == Some(0),
+            sjis: false,
         });
     }
     runs
@@ -590,6 +725,7 @@ fn table_runs(data: &[u8], table: &TblTable) -> Vec<Run> {
             chars: text.chars().count(),
             text,
             terminated: data.get(i) == Some(&0),
+            sjis: false,
         });
     }
     runs

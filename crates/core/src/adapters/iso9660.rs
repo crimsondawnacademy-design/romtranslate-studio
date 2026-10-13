@@ -279,6 +279,7 @@ pub fn extract_ascii_by_file(
                 data,
                 &ScanConfig {
                     encoding: ScanEncoding::Ascii,
+                    japanese: true,
                     region_start: Some(start),
                     region_end: Some(end),
                     max_entries: MAX_ENTRIES - out.entries.len(),

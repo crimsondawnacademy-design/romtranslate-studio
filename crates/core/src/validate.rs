@@ -66,8 +66,6 @@ pub enum EncodedLen {
     Bytes(usize),
     /// O texto nao vira bytes neste encoding; a mensagem diz por que.
     Unencodable(String),
-    /// Sem encoder implementado (Shift-JIS) — check pulado.
-    Unsupported,
 }
 
 /// `table` = a tabela do projeto pra entry de encoding `Table`
@@ -95,7 +93,13 @@ pub fn encoded_len(text: &str, encoding: &TextEncoding, table: Option<&TblTable>
                 "sem a tabela \"{id}\" nao da pra conferir a traducao"
             )),
         },
-        TextEncoding::ShiftJis => EncodedLen::Unsupported,
+        TextEncoding::ShiftJis => match crate::sjis::encode(text) {
+            Ok(bytes) => EncodedLen::Bytes(bytes.len()),
+            Err(ch) => EncodedLen::Unencodable(format!(
+                "o caractere {ch:?} nao existe em Shift-JIS, que e como o texto desta string \
+                 esta gravado — troque o caractere (letra acentuada vira a letra simples)"
+            )),
+        },
     }
 }
 
@@ -259,7 +263,6 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
                 _ => {}
             }
         }
-        EncodedLen::Unsupported => {}
     }
 
     // Anomalia de comprimento (em chars, so para textos nao-minusculos).
@@ -525,9 +528,13 @@ mod tests {
             EncodedLen::Unencodable(_)
         ));
         assert_eq!(
-            encoded_len("ABC", &TextEncoding::ShiftJis, None),
-            EncodedLen::Unsupported
+            encoded_len("ABCあ", &TextEncoding::ShiftJis, None),
+            EncodedLen::Bytes(5)
         );
+        assert!(matches!(
+            encoded_len("Olá", &TextEncoding::ShiftJis, None),
+            EncodedLen::Unencodable(why) if why.contains("'á'")
+        ));
     }
 
     #[test]

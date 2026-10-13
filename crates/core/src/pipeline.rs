@@ -166,6 +166,13 @@ fn batch_request(
                             e.original_bytes.len(),
                             &extract_tokens(&e.source_text),
                         )
+                    })
+                    // Japones diz em 2 bytes o que o portugues diz em 5 ou
+                    // 6 letras: sem o teto ja no primeiro pedido, quase toda
+                    // frase presa ao espaco dela voltaria grande demais.
+                    .or_else(|| {
+                        (e.encoding == TextEncoding::ShiftJis && e.pointer_offsets().is_empty())
+                            .then(|| e.max_bytes.unwrap_or(e.original_bytes.len()))
                     }),
             })
             .collect(),
@@ -512,11 +519,15 @@ pub async fn run_translation(
 /// batch (um batch, um conjunto), vai pro prompt e e a rede por onde a
 /// traducao automatica passa antes de ser gravada. UTF-8 e UTF-16 escrevem
 /// tudo: nao tem conjunto, e nada e trocado neles.
-// ponytail: Shift-JIS fica sem conjunto — nao ha encoder nem extrator dele
-// aqui, e o conjunto nao cabe numa linha de prompt.
+// ponytail: Shift-JIS entra como ASCII. O conjunto dele (quase 7 mil
+// caracteres) nao cabe numa linha de prompt, e a traducao pra um idioma de
+// alfabeto latino so usa mesmo o ASCII: o JIS X 0208 nao tem letra acentuada.
+// Traducao manual com o que o Shift-JIS escreve (kana, pontuacao japonesa)
+// passa na validacao, que usa o encoder de verdade. Rever se o idioma de
+// destino for japones.
 #[derive(Clone, Copy)]
 enum Charset<'a> {
-    /// `TextEncoding::Ascii`: o ASCII imprimivel.
+    /// `TextEncoding::Ascii` e `TextEncoding::ShiftJis`: o ASCII imprimivel.
     Ascii,
     /// `TextEncoding::Table`: o que a tabela do projeto escreve.
     Table(&'a TblTable),
@@ -525,7 +536,7 @@ enum Charset<'a> {
 impl<'a> Charset<'a> {
     fn of(entry: &TextEntry, tables: &'a mut ProjectTables) -> Result<Option<Self>> {
         Ok(match &entry.encoding {
-            TextEncoding::Ascii => Some(Charset::Ascii),
+            TextEncoding::Ascii | TextEncoding::ShiftJis => Some(Charset::Ascii),
             TextEncoding::Table(id) => Some(Charset::Table(tables.get(id)?)),
             _ => None,
         })
@@ -578,7 +589,7 @@ impl<'a> Charset<'a> {
 /// tabela. Os mesmos casos de `Charset::of`.
 fn charset_group(entry: &TextEntry) -> (u8, &str) {
     match &entry.encoding {
-        TextEncoding::Ascii => (1, ""),
+        TextEncoding::Ascii | TextEncoding::ShiftJis => (1, ""),
         TextEncoding::Table(id) => (2, id),
         _ => (0, ""),
     }

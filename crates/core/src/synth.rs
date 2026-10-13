@@ -777,6 +777,64 @@ pub fn make_gba_rom_with_lz77_table() -> Vec<u8> {
     rom
 }
 
+/// Falas em japones (inventadas) de `make_gba_rom_japanese`, gravadas em
+/// Shift-JIS. A saudacao nao tem ponteiro; "sim", "nao" e o aviso do item
+/// estao numa tabela de ponteiros de ROM.
+pub const JP_GREETING: &str = "むらへ ようこそ、たびびとさん。";
+pub const JP_YES: &str = "はい";
+pub const JP_NO: &str = "いいえ";
+pub const JP_FOUND: &str = "やくそうを てにいれた！";
+/// Japones com ASCII no meio, como um aviso de batalha.
+pub const JP_MIXED: &str = "HPが 30 かいふくした！";
+/// Palavra so de kanji: sem kana, a regra nao a separa de dado binario.
+pub const JP_KANJI_ONLY: &str = "装備";
+
+fn plant_sjis(rom: &mut [u8], offset: usize, text: &str) {
+    let mut bytes = crate::sjis::encode(text).expect("texto da fixture cabe em Shift-JIS");
+    bytes.push(0);
+    plant(rom, offset, &bytes);
+}
+
+/// GBA de 4 KiB com texto em Shift-JIS (alem do ASCII de `make_gba_rom`):
+/// `JP_GREETING` em 0x400, `JP_YES` em 0x440, `JP_NO` em 0x448, `JP_FOUND` em
+/// 0x460, `JP_KANJI_ONLY` em 0x4A0, "NEW GAME" em 0x4C0, `JP_MIXED` em 0x4E0 e
+/// a tabela de 3 ponteiros de ROM em 0x800 (sim, nao, aviso do item).
+pub fn make_gba_rom_japanese() -> Vec<u8> {
+    let mut rom = make_gba_rom("JPTEST");
+    rom.resize(4096, 0);
+    plant_sjis(&mut rom, 0x400, JP_GREETING);
+    plant_sjis(&mut rom, 0x440, JP_YES);
+    plant_sjis(&mut rom, 0x448, JP_NO);
+    plant_sjis(&mut rom, 0x460, JP_FOUND);
+    plant_sjis(&mut rom, 0x4A0, JP_KANJI_ONLY);
+    plant(&mut rom, 0x4C0, b"NEW GAME\0");
+    plant_sjis(&mut rom, 0x4E0, JP_MIXED);
+    for (i, target) in [0x440u32, 0x448, 0x460].into_iter().enumerate() {
+        rom[0x800 + i * 4..0x804 + i * 4].copy_from_slice(&(0x0800_0000 + target).to_le_bytes());
+    }
+    rom
+}
+
+/// PS2 com um arquivo de mensagens em Shift-JIS (`DATA/MSG.BIN`:
+/// `JP_GREETING` em 0x10, `JP_YES` em 0x40, "CONTINUE" em 0x60).
+pub fn make_ps2_iso_japanese() -> Vec<u8> {
+    let mut msg = vec![0u8; 512];
+    plant_sjis(&mut msg, 0x10, JP_GREETING);
+    plant_sjis(&mut msg, 0x40, JP_YES);
+    plant(&mut msg, 0x60, b"CONTINUE\0");
+    build_iso9660(
+        "PLAYSTATION",
+        "SYNTH_PS2_JP",
+        &[
+            (
+                "SYSTEM.CNF",
+                b"BOOT2 = cdrom0:\\SLPS_250.01;1\r\nVER = 1.00\r\nVMODE = NTSC\r\n".to_vec(),
+            ),
+            ("DATA/MSG.BIN", msg),
+        ],
+    )
+}
+
 /// Texto de verdade do `make_gba_rom_with_junk`, na ordem em que aparece.
 pub const JUNK_ROM_PHRASES: [&str; 3] = [
     "The old bridge is out. Take the forest road.",

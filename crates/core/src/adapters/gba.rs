@@ -72,6 +72,7 @@ fn extract_capped(data: &[u8], cap: usize) -> Result<Extraction> {
         data,
         &ScanConfig {
             encoding: ScanEncoding::Ascii,
+            japanese: true,
             max_entries: usize::MAX,
             ..ScanConfig::default()
         },

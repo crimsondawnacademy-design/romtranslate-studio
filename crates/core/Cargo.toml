@@ -19,6 +19,8 @@ tokio = { version = "1.53.1", features = ["time", "process", "io-util"] }
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls", "http2"] }
 memmap2 = "0.9"
+# Shift-JIS: a tabela do JIS X 0208 (quase 7 mil caracteres) nao se escreve a mao.
+encoding_rs = "0.8"
 # Ja vem na arvore pelo reqwest (url -> idna); aqui decompoe letra acentuada.
 icu_normalizer = { version = "2", default-features = false, features = ["compiled_data"] }
 # Configuracao do app (`settings`): arquivo legivel e chave de API no cofre do

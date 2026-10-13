@@ -20,8 +20,7 @@ pub(crate) fn terminated(entry: &TextEntry) -> bool {
         .unwrap_or(true)
 }
 
-/// Serializa a traducao no encoding da entry. `None` = encoding sem encoder
-/// in-place (Shift-JIS) — o caller decide errar ou ignorar.
+/// Serializa a traducao no encoding da entry.
 fn encode(entry: &TextEntry, text: &str) -> Result<Option<Vec<u8>>> {
     let entry_id = &entry.id;
     match &entry.encoding {
@@ -53,7 +52,11 @@ fn encode(entry: &TextEntry, text: &str) -> Result<Option<Vec<u8>>> {
         TextEncoding::Utf16Be => Ok(Some(
             text.encode_utf16().flat_map(|u| u.to_be_bytes()).collect(),
         )),
-        TextEncoding::ShiftJis => Ok(None),
+        TextEncoding::ShiftJis => crate::sjis::encode(text).map(Some).map_err(|ch| {
+            CoreError::Project(format!(
+                "entry {entry_id}: a traducao tem o caractere {ch:?}, que nao existe em Shift-JIS"
+            ))
+        }),
     }
 }
 

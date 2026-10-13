@@ -167,6 +167,8 @@ const messages = {
       "{n} frases estavam dentro de blocos comprimidos (LZ77). A tradução de cada uma precisa caber no espaço da original; na reinserção o bloco é recomprimido.",
     "translate.ascii":
       "Texto ASCII não tem letra acentuada: a IA é avisada disso e, se mesmo assim responder com acento ou com aspas e travessão tipográficos, o app grava a letra sem acento e o sinal simples, com um aviso na frase. O que não tem equivalente bloqueia a reinserção e a frase diz qual caractere é.",
+    "translate.japanese":
+      "Texto em japonês (Shift-JIS): a tradução é gravada com as letras comuns, sem acento, porque a tabela japonesa não tem letra acentuada. Japonês diz muito em poucos bytes, então a frase que não pode mudar de lugar precisa caber no espaço da original, e a IA já recebe esse limite. Palavra escrita só em kanji, sem kana, ainda não é lida.",
     "glossary.title": "Glossário",
     "glossary.term": "Termo",
     "glossary.translation": "Tradução",
@@ -424,6 +426,8 @@ const messages = {
       "{n} lines were inside compressed blocks (LZ77). Each translation must fit the space of its original; on reinsertion the block is compressed again.",
     "translate.ascii":
       "ASCII text has no accented letters: the AI is told so and, if it still answers with an accent or with typographic quotes and dashes, the app writes the plain letter and the plain sign, with a warning on the string. Anything with no equivalent blocks reinsertion and the string says which character it is.",
+    "translate.japanese":
+      "Japanese text (Shift-JIS): the translation is written with plain letters, no accents, because the Japanese table has no accented letters. Japanese says a lot in few bytes, so a line that cannot move must fit the space of its original, and the AI is told that limit up front. A word written only in kanji, with no kana, is not read yet.",
     "glossary.title": "Glossary",
     "glossary.term": "Term",
     "glossary.translation": "Translation",

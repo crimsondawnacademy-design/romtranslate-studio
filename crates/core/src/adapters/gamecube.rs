@@ -214,6 +214,7 @@ impl GameAdapter for GameCubeAdapter {
                 data,
                 &ScanConfig {
                     encoding: ScanEncoding::Ascii,
+                    japanese: true,
                     region_start: Some(start),
                     region_end: Some(end),
                     max_entries: MAX_TEXT_ENTRIES - out.entries.len(),
