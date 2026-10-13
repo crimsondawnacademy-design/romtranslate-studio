@@ -156,27 +156,10 @@ impl ProjectDb {
     }
 
     pub fn load_entries(&self) -> Result<Vec<TextEntry>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, resource_path, offset, original_bytes, source_text, translated_text,
-                    context, max_bytes, encoding, status, metadata
-             FROM entries ORDER BY offset IS NULL, offset, id",
-        )?;
-        let rows = stmt.query_map([], |row| {
-            Ok(TextEntry {
-                id: row.get(0)?,
-                resource_path: row.get(1)?,
-                offset: row.get::<_, Option<i64>>(2)?.map(|o| o as u64),
-                original_bytes: row.get(3)?,
-                source_text: row.get(4)?,
-                translated_text: row.get(5)?,
-                context: row.get(6)?,
-                max_bytes: row.get::<_, Option<i64>>(7)?.map(|m| m as usize),
-                encoding: json_val(&row.get::<_, String>(8)?),
-                status: json_val(&row.get::<_, String>(9)?),
-                metadata: serde_json::from_str(&row.get::<_, String>(10)?)
-                    .unwrap_or(serde_json::Value::Null),
-            })
-        })?;
+        let mut stmt = self.conn.prepare(&format!(
+            "SELECT {ENTRY_COLUMNS} FROM entries ORDER BY offset IS NULL, offset, id"
+        ))?;
+        let rows = stmt.query_map([], entry_from_row)?;
         let mut out = Vec::new();
         for row in rows {
             out.push(row?);
@@ -253,10 +236,15 @@ impl ProjectDb {
         Ok(out)
     }
 
+    /// A entry de id `id`. Busca so a linha dela: carregar o banco inteiro
+    /// pra achar uma frase custou 10 minutos ao gravar 11 mil traducoes de
+    /// uma vez pela CLI (13/10/2026).
     pub fn get_entry(&self, id: &str) -> Result<Option<TextEntry>> {
-        Ok(self.load_entries()?.into_iter().find(|e| e.id == id))
-        // ponytail: filtra em memoria (poucos milhares de rows); query dedicada
-        // se o load completo aparecer em profile.
+        let mut stmt = self
+            .conn
+            .prepare(&format!("SELECT {ENTRY_COLUMNS} FROM entries WHERE id=?1"))?;
+        let mut rows = stmt.query_map([id], entry_from_row)?;
+        Ok(rows.next().transpose()?)
     }
 
     // ---- Translation memory ----
@@ -462,6 +450,27 @@ impl GlobalTm {
             translation,
         )
     }
+}
+
+/// As colunas de uma entry, na ordem que `entry_from_row` le.
+const ENTRY_COLUMNS: &str = "id, resource_path, offset, original_bytes, source_text, \
+     translated_text, context, max_bytes, encoding, status, metadata";
+
+fn entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<TextEntry> {
+    Ok(TextEntry {
+        id: row.get(0)?,
+        resource_path: row.get(1)?,
+        offset: row.get::<_, Option<i64>>(2)?.map(|o| o as u64),
+        original_bytes: row.get(3)?,
+        source_text: row.get(4)?,
+        translated_text: row.get(5)?,
+        context: row.get(6)?,
+        max_bytes: row.get::<_, Option<i64>>(7)?.map(|m| m as usize),
+        encoding: json_val(&row.get::<_, String>(8)?),
+        status: json_val(&row.get::<_, String>(9)?),
+        metadata: serde_json::from_str(&row.get::<_, String>(10)?)
+            .unwrap_or(serde_json::Value::Null),
+    })
 }
 
 /// Chave da TM (spec §13): texto normalizado (trim + espacos colapsados),
