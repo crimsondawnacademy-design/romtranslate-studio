@@ -282,6 +282,56 @@ async fn retry_recovers_and_exhaustion_counts_failed() {
     assert!(db2.load_entries().unwrap()[0].translated_text.is_none());
 }
 
+/// Conta sem limite, sem login ou sem rede: o provider nao volta mais. A
+/// rodada para em vez de falhar a fila inteira lote por lote, e diz por que.
+#[tokio::test]
+async fn a_provider_that_stopped_answering_ends_the_run_with_its_reason() {
+    let lines: Vec<TextEntry> = (0..20)
+        .map(|i| entry(&format!("e{i:02}"), &format!("LINE NUMBER {i}")))
+        .collect();
+    let cancel = AtomicBool::new(false);
+
+    let tmp = TempDir::new("stopped");
+    let mut db = ProjectDb::open(&tmp.0).unwrap();
+    db.upsert_entries(&lines).unwrap();
+    let dead = MockProvider::new(999);
+    let summary = run_translation(&mut db, None, &dead, "m", &opts(), &cancel, &no_progress())
+        .await
+        .unwrap();
+    let reason = summary.stopped.expect("a rodada devia ter parado");
+    assert!(reason.contains("falha simulada"), "{reason}");
+    // 5 lotes de 4: so os 2 primeiros foram tentados, 3 vezes cada.
+    assert_eq!(dead.calls.load(Ordering::SeqCst), 6);
+    assert_eq!(summary.failed, 8);
+    assert_eq!(summary.translated, 0);
+    assert!(db
+        .load_entries()
+        .unwrap()
+        .iter()
+        .all(|e| e.translated_text.is_none()));
+
+    // Um lote que falha sozinho nao para nada: o seguinte responde e a
+    // contagem zera.
+    let tmp = TempDir::new("stumble");
+    let mut db = ProjectDb::open(&tmp.0).unwrap();
+    db.upsert_entries(&lines).unwrap();
+    let stumbling = MockProvider::new(3);
+    let summary = run_translation(
+        &mut db,
+        None,
+        &stumbling,
+        "m",
+        &opts(),
+        &cancel,
+        &no_progress(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(summary.stopped, None);
+    assert_eq!(summary.failed, 4);
+    assert_eq!(summary.translated, 16);
+}
+
 #[tokio::test]
 async fn glossary_reaches_prompt_only_when_relevant() {
     let tmp = TempDir::new("glossflow");

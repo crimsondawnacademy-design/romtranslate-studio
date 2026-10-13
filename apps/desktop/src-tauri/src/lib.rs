@@ -224,10 +224,10 @@ async fn extract_structured(
 #[tauri::command]
 async fn reinsert_project(
     project_dir: String,
-    allow_errors: bool,
+    policy: romtranslate_core::reinsert::ErrorPolicy,
 ) -> Result<romtranslate_core::reinsert::ReinsertOutcome, String> {
     blocking(move || {
-        romtranslate_core::reinsert::reinsert_project(&PathBuf::from(project_dir), allow_errors)
+        romtranslate_core::reinsert::reinsert_project_with(&PathBuf::from(project_dir), policy)
     })
     .await
 }

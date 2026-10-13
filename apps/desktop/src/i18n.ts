@@ -46,7 +46,7 @@ const messages = {
       "Atenção: o arquivo de origem mudou desde a criação do projeto (SHA-256 diferente).",
     "extract.title": "Extração de strings",
     "extract.hint":
-      "Scanner genérico: serve para descoberta e debug — não garante reinserção segura.",
+      "Para traduzir e regravar o jogo, use a Extração estruturada: ela guarda o espaço de cada frase e limpa o que não é texto. O Escanear é o scanner genérico, para descoberta.",
     "extract.encoding": "Codificação",
     "extract.minChars": "Mín. caracteres",
     "extract.chooseTbl": "Escolher .tbl",
@@ -109,6 +109,14 @@ const messages = {
     "translate.codexNotLoggedSystem":
       "O Codex deste computador não está logado. Rode `codex login` no terminal, ou escolha \"Uma conta só deste app\".",
     "translate.saveSettings": "Salvar configuração",
+    "translate.remoteAsk":
+      "Para usar este provider, os textos do jogo são enviados para fora do seu computador (à OpenAI, no caso do ChatGPT). O arquivo do jogo não é enviado. Permitir?",
+    "translate.remoteAllow": "Permitir e continuar",
+    "translate.batchSize": "Frases por chamada",
+    "translate.batchSizeHint":
+      "Quantas frases vão em cada chamada à IA (1 a 50). Mais frases por chamada são menos chamadas, o que pesa menos no limite de uma assinatura; se as respostas começarem a falhar, diminua.",
+    "translate.stopped":
+      "A tradução parou porque o provider deixou de responder: {error} — o que já foi traduzido está salvo e o resto continua pendente.",
     "translate.test": "Testar conexão",
     "translate.testing": "Testando...",
     "translate.testOk": "Conexão OK — modelo: {model}",
@@ -190,7 +198,9 @@ const messages = {
       "A tabela usada no scan fica em tables/ dentro do projeto, e é por ela que a tradução é regravada no jogo. A IA recebe a lista de caracteres da tabela e o espaço de cada frase. Acento que a tabela não tem é gravado como a letra sem acento, com um aviso na frase. O resto que a tabela não tem (pontuação, por exemplo) bloqueia a reinserção: acrescente a linha dele nesse .tbl ou troque o caractere. Tradução maior que o espaço da original também bloqueia e fica marcada com erro: encurte o texto — nada é cortado sozinho.",
     "reinsert.title": "Reinserção",
     "reinsert.hint":
-      "Aplica as traduções numa cópia em working/ do projeto — o arquivo original nunca é modificado. Entries com erro de validação bloqueiam a reinserção.",
+      "Aplica as traduções numa cópia em working/ do projeto — o arquivo original nunca é modificado. Tradução com erro de validação fica de fora: a frase continua como no original e o resto entra.",
+    "reinsert.skipped":
+      "{n} frases ficaram com o texto original porque a tradução tem erro (não cabe no espaço ou usa caractere que o jogo não tem). Filtre por erro para corrigir e reinserir de novo.",
     "reinsert.run": "Reinserir na cópia de trabalho",
     "reinsert.running": "Reinserindo...",
     "reinsert.done": "Jogo traduzido pronto e verificado. Abra este arquivo no emulador:",
@@ -257,7 +267,7 @@ const messages = {
       "Warning: the source file changed since the project was created (different SHA-256).",
     "extract.title": "String extraction",
     "extract.hint":
-      "Generic scanner: discovery and debugging — it does not guarantee safe reinsertion.",
+      "To translate and write the game back, use Structured extraction: it records the space of each line and drops what is not text. Scan is the generic scanner, for discovery.",
     "extract.encoding": "Encoding",
     "extract.minChars": "Min. characters",
     "extract.chooseTbl": "Choose .tbl",
@@ -320,6 +330,14 @@ const messages = {
     "translate.codexNotLoggedSystem":
       "This computer's Codex is not signed in. Run `codex login` in a terminal, or choose \"An account just for this app\".",
     "translate.saveSettings": "Save settings",
+    "translate.remoteAsk":
+      "To use this provider, the game text is sent off your computer (to OpenAI, in the case of ChatGPT). The game file itself is not sent. Allow?",
+    "translate.remoteAllow": "Allow and continue",
+    "translate.batchSize": "Lines per call",
+    "translate.batchSizeHint":
+      "How many lines go in each call to the AI (1 to 50). More lines per call means fewer calls, which weighs less on a subscription limit; if answers start failing, lower it.",
+    "translate.stopped":
+      "Translation stopped because the provider stopped answering: {error} — what was translated is saved and the rest is still pending.",
     "translate.test": "Test connection",
     "translate.testing": "Testing...",
     "translate.testOk": "Connection OK — model: {model}",
@@ -400,7 +418,9 @@ const messages = {
       "The table used for the scan is kept in tables/ inside the project, and the translation is written back into the game through it. The AI is given the table's list of characters and the room each string has. An accent the table lacks is written as the plain letter, with a warning on the string. Anything else the table lacks (punctuation, for example) blocks reinsertion: add its line to that .tbl or change the character. A translation larger than the original's space also blocks it and is flagged as an error: shorten the text — nothing is cut automatically.",
     "reinsert.title": "Reinsertion",
     "reinsert.hint":
-      "Applies translations to a copy under the project's working/ folder — the original file is never modified. Entries with validation errors block reinsertion.",
+      "Applies translations to a copy under the project's working/ folder — the original file is never modified. A translation with a validation error is left out: that line stays as in the original and the rest goes in.",
+    "reinsert.skipped":
+      "{n} lines kept the original text because their translation has an error (it does not fit, or uses a character the game lacks). Filter by error to fix them and reinsert again.",
     "reinsert.run": "Reinsert into working copy",
     "reinsert.running": "Reinserting...",
     "reinsert.done": "Translated game ready and verified. Open this file in your emulator:",

@@ -106,6 +106,10 @@ export default function ProjectView({
   // Conta do ChatGPT em uso pelo Codex: null = ainda nao conferido.
   const [codexLogged, setCodexLogged] = useState<boolean | null>(null);
   const [loggingIn, setLoggingIn] = useState(false);
+  // O backend recusou por falta da permissao de traducao remota: em vez de
+  // um erro sem saida, a tela pergunta e segue com a acao que foi pedida.
+  const [remoteAsk, setRemoteAsk] = useState<"test" | "translate" | null>(null);
+  const [reinsertError, setReinsertError] = useState<string | null>(null);
   // Erro de configurar, testar ou traduzir aparece junto dos botoes: o aviso
   // geral fica no topo da pagina, fora de vista de quem esta neste painel.
   const [translateError, setTranslateError] = useState<string | null>(null);
@@ -294,18 +298,19 @@ export default function ProjectView({
   }
 
   async function runReinsert() {
-    setError(null);
+    setReinsertError(null);
     setReinsertOutcome(null);
     setReinserting(true);
     try {
+      // Padrao: a traducao com erro fica de fora e a frase segue no original.
       const outcome = await invoke<ReinsertOutcome>("reinsert_project", {
         projectDir,
-        allowErrors,
+        policy: allowErrors ? "force" : "skip",
       });
       setReinsertOutcome(outcome);
       await reloadEntries();
     } catch (e) {
-      setError(String(e));
+      setReinsertError(String(e));
     } finally {
       setReinserting(false);
     }
@@ -345,14 +350,30 @@ export default function ProjectView({
     }
   }
 
+  /** O erro e a trava de privacidade, e nao uma falha? */
+  function needsRemoteConsent(e: unknown): boolean {
+    return String(e).includes("traducao remota desabilitada");
+  }
+
+  /** A pessoa autorizou: marca a permissao e refaz a acao que tinha pedido. */
+  async function allowRemoteAndContinue() {
+    if (!settings || !remoteAsk) return;
+    const action = remoteAsk;
+    const allowed = { ...settings, allowRemoteTranslation: true };
+    setRemoteAsk(null);
+    setSettings(allowed);
+    if (action === "test") await testProvider(allowed);
+    else await runTranslation(allowed);
+  }
+
   /** Grava o que esta na tela. `false` = falhou, com o erro ja exibido. */
-  async function saveSettings(): Promise<boolean> {
-    if (!settings) return false;
+  async function saveSettings(current: AppSettings | null = settings): Promise<boolean> {
+    if (!current) return false;
     setTranslateError(null);
     setTestResult(null);
     try {
       const report = await invoke<SettingsReport>("save_settings", {
-        newSettings: settings,
+        newSettings: current,
         apiKey: apiKeyInput ? apiKeyInput : null,
       });
       setSettings(report.settings);
@@ -417,16 +438,18 @@ export default function ProjectView({
     await refreshCodexAccount();
   }
 
-  async function testProvider() {
+  async function testProvider(current: AppSettings | null = settings) {
     setTesting(true);
+    setRemoteAsk(null);
     try {
       // O backend testa a configuracao GRAVADA. Sem gravar antes, escolher um
       // provider e clicar em Testar ainda testava o anterior.
-      if (!(await saveSettings())) return;
+      if (!(await saveSettings(current))) return;
       const model = await invoke<string>("test_provider");
       setTestResult(t("translate.testOk", { model }));
     } catch (e) {
-      setTranslateError(String(e));
+      if (needsRemoteConsent(e)) setRemoteAsk("test");
+      else setTranslateError(String(e));
     } finally {
       setTesting(false);
     }
@@ -447,18 +470,21 @@ export default function ProjectView({
     }
   }, [projectDir, reloadEntries]);
 
-  async function runTranslation() {
+  async function runTranslation(current: AppSettings | null = settings) {
     setSummary(null);
     setProgress(null);
+    setRemoteAsk(null);
     setTranslating(true);
     try {
       // Traduz com o provider que esta na tela, nao com o ultimo gravado.
-      if (!(await saveSettings())) return;
+      if (!(await saveSettings(current))) return;
       const result = await invoke<TranslateSummary>("translate_project", { projectDir });
       setSummary(result);
+      if (result.stopped) setTranslateError(t("translate.stopped", { error: result.stopped }));
       await runValidation(); // erros aparecem antes de qualquer reinsercao
     } catch (e) {
-      setTranslateError(String(e));
+      if (needsRemoteConsent(e)) setRemoteAsk("translate");
+      else setTranslateError(String(e));
     } finally {
       setTranslating(false);
       setProgress(null);
@@ -663,11 +689,15 @@ export default function ProjectView({
           <button onClick={runXray} disabled={busy || sourceBroken}>
             {t("extract.xray")}
           </button>
-          <button onClick={runStructuredExtract} disabled={busy || sourceBroken}>
-            {t("extract.structured")}
-          </button>
-          <button className="primary" onClick={runScan} disabled={busy || sourceBroken}>
+          <button onClick={runScan} disabled={busy || sourceBroken}>
             {busy ? t("extract.scanning") : t("extract.scan")}
+          </button>
+          <button
+            className="primary"
+            onClick={runStructuredExtract}
+            disabled={busy || sourceBroken}
+          >
+            {t("extract.structured")}
           </button>
         </div>
       </div>
@@ -956,6 +986,21 @@ export default function ProjectView({
                 </label>
               </>
             )}
+            <label title={t("translate.batchSizeHint")}>
+              {t("translate.batchSize")}
+              <input
+                type="number"
+                min={1}
+                max={50}
+                value={settings.batchSize}
+                onChange={(e) =>
+                  setSettings({
+                    ...settings,
+                    batchSize: Math.min(50, Math.max(1, Number(e.target.value) || 1)),
+                  })
+                }
+              />
+            </label>
             {settings.provider === "openai_compatible" && (
               <label>
                 {t("translate.apiKey")} {apiKeySet && <em>{t("translate.apiKeySet")}</em>}
@@ -1030,8 +1075,8 @@ export default function ProjectView({
             </label>
           )}
           <div className="actions">
-            <button onClick={saveSettings}>{t("translate.saveSettings")}</button>
-            <button onClick={testProvider} disabled={testing || translating}>
+            <button onClick={() => saveSettings()}>{t("translate.saveSettings")}</button>
+            <button onClick={() => testProvider()} disabled={testing || translating}>
               {testing ? t("translate.testing") : t("translate.test")}
             </button>
             {translating ? (
@@ -1039,13 +1084,24 @@ export default function ProjectView({
             ) : (
               <button
                 className="primary"
-                onClick={runTranslation}
+                onClick={() => runTranslation()}
                 disabled={pending === 0 || sourceBroken}
               >
                 {t("translate.run")} ({pending})
               </button>
             )}
           </div>
+          {remoteAsk && (
+            <div className="warn" role="alert">
+              {t("translate.remoteAsk")}
+              <div className="actions">
+                <button onClick={() => setRemoteAsk(null)}>{t("translate.cancel")}</button>
+                <button className="primary" onClick={allowRemoteAndContinue}>
+                  {t("translate.remoteAllow")}
+                </button>
+              </div>
+            </div>
+          )}
           {translateError && (
             <div className="error" role="alert">
               <strong>{t("common.error")}:</strong> {translateError}
@@ -1115,6 +1171,11 @@ export default function ProjectView({
               {reinserting ? t("reinsert.running") : t("reinsert.run")}
             </button>
           </div>
+          {reinsertError && (
+            <div className="error" role="alert">
+              <strong>{t("common.error")}:</strong> {reinsertError}
+            </div>
+          )}
           {reinsertOutcome && (
             <>
               <div className="ok">
@@ -1147,6 +1208,11 @@ export default function ProjectView({
                   <li key={c}>{c}</li>
                 ))}
               </ul>
+              {reinsertOutcome.skippedErrors > 0 && (
+                <div className="warn">
+                  {t("reinsert.skipped", { n: reinsertOutcome.skippedErrors })}
+                </div>
+              )}
               {reinsertOutcome.forcedErrors > 0 && (
                 <div className="warn">
                   {t("reinsert.forced", { n: reinsertOutcome.forcedErrors })}

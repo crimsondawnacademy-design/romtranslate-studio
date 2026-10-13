@@ -254,8 +254,18 @@ impl Drop for WorkDir {
     }
 }
 
+/// O motivo de uma falha: a ultima linha `ERROR` do Codex, quando ha (ele
+/// ecoa o prompt inteiro no stderr antes dela — limite da conta, por exemplo,
+/// vem assim); senao, o fim da saida.
 fn tail(bytes: &[u8]) -> String {
     let text = String::from_utf8_lossy(bytes);
+    if let Some(error) = text
+        .lines()
+        .rev()
+        .find(|l| l.trim_start().starts_with("ERROR"))
+    {
+        return error.trim().chars().take(400).collect();
+    }
     let text = text.trim();
     let skip = text.chars().count().saturating_sub(400);
     text.chars().skip(skip).collect()

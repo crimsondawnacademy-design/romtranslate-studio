@@ -47,7 +47,16 @@ pub struct TranslateSummary {
     pub tm_hits: usize,
     pub failed: usize,
     pub cancelled: bool,
+    /// O provider parou de responder (limite da conta, sem login, sem rede):
+    /// a rodada foi interrompida, e este e o erro que ele deu. O que nao foi
+    /// tentado continua pendente.
+    pub stopped: Option<String>,
 }
+
+/// Lotes seguidos que podem falhar (cada um ja com as suas tentativas) antes
+/// de a rodada parar. Sem isto, uma conta que bateu no limite levava a fila
+/// inteira a falhar em silencio, lote por lote, por horas.
+const STOP_AFTER_FAILED_BATCHES: usize = 2;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -83,6 +92,7 @@ pub async fn run_translation(
         tm_hits: 0,
         failed: 0,
         cancelled: false,
+        stopped: None,
     };
     if total == 0 {
         return Ok(summary);
@@ -128,6 +138,7 @@ pub async fn run_translation(
     // ordem de sempre.
     let glossary = db.glossary_list()?;
     let mut done = summary.tm_hits;
+    let mut failed_in_a_row = 0;
     remaining.sort_by(|a, b| charset_group(a).cmp(&charset_group(b)));
     let batches = remaining
         .chunk_by(|a, b| charset_group(a) == charset_group(b))
@@ -210,10 +221,16 @@ pub async fn run_translation(
                         .filter(|t| batch.iter().any(|e| e.id == t.id))
                         .count();
                 summary.failed += missing;
+                failed_in_a_row = 0;
             }
             Err(e) => {
                 warn!(batch = batch.len(), error = %e, "batch falhou apos retries");
                 summary.failed += batch.len();
+                failed_in_a_row += 1;
+                if failed_in_a_row >= STOP_AFTER_FAILED_BATCHES {
+                    summary.stopped = Some(e.to_string());
+                    break;
+                }
             }
         }
         done += batch.len();

@@ -5,7 +5,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tracing::info;
 
 use crate::adapter::{ApplyReport, VerificationReport, IN_MEMORY_MAX};
@@ -17,7 +17,7 @@ use crate::hash::sha256_file;
 use crate::project::load_project;
 use crate::tbl::ProjectTables;
 use crate::types::{TextEncoding, TextEntry, TranslationStatus};
-use crate::validate::{validate_project_db, Severity};
+use crate::validate::{encoded_len, validate_project_db, EncodedLen, Severity};
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,6 +27,22 @@ pub struct ReinsertOutcome {
     pub verification: VerificationReport,
     /// Entries com status Error que entraram mesmo assim (so no modo avancado).
     pub forced_errors: usize,
+    /// Entries traduzidas que ficaram com o texto ORIGINAL porque a traducao
+    /// tem erro ou nao cabe (so na politica `Skip`).
+    pub skipped_errors: usize,
+}
+
+/// O que fazer com a traducao que a validacao reprovou.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorPolicy {
+    /// Qualquer erro bloqueia tudo (spec §14).
+    Block,
+    /// A frase com erro fica com o texto original e o resto entra: nada
+    /// invalido e gravado, e o jogo sai traduzido ate onde a traducao serve.
+    Skip,
+    /// Modo avancado: tenta gravar mesmo com erro.
+    Force,
 }
 
 /// Reinsercao completa. `allow_errors` e o "modo avancado" da spec §14:
@@ -35,12 +51,44 @@ pub fn reinsert_project(project_dir: &Path, allow_errors: bool) -> Result<Reinse
     reinsert_project_with_limit(project_dir, allow_errors, IN_MEMORY_MAX)
 }
 
+/// Reinsercao com a politica de erro escolhida.
+pub fn reinsert_project_with(project_dir: &Path, policy: ErrorPolicy) -> Result<ReinsertOutcome> {
+    reinsert(project_dir, policy, IN_MEMORY_MAX)
+}
+
+/// Traducao que nao tem pra onde ir: maior que o espaco da original, numa
+/// string sem ponteiro em tabela. A validacao so AVISA disso quando a entry
+/// nao tem `max_bytes` (scanner generico), e a gravacao recusaria tudo.
+fn overflows_in_place(entry: &TextEntry) -> bool {
+    let Some(text) = &entry.translated_text else {
+        return false;
+    };
+    entry.pointers().is_empty()
+        && matches!(
+            encoded_len(text, &entry.encoding, None),
+            EncodedLen::Bytes(len) if len > entry.original_bytes.len()
+        )
+}
+
 /// Igual a `reinsert_project`, com o teto em memoria injetavel — acima dele
 /// a aplicacao vira streaming (copia + escrita pontual). Exposto pra testar
 /// o caminho streaming sem precisar de um DVD real de 4.7 GiB.
 pub fn reinsert_project_with_limit(
     project_dir: &Path,
     allow_errors: bool,
+    in_memory_max: u64,
+) -> Result<ReinsertOutcome> {
+    let policy = if allow_errors {
+        ErrorPolicy::Force
+    } else {
+        ErrorPolicy::Block
+    };
+    reinsert(project_dir, policy, in_memory_max)
+}
+
+fn reinsert(
+    project_dir: &Path,
+    policy: ErrorPolicy,
     in_memory_max: u64,
 ) -> Result<ReinsertOutcome> {
     let project = load_project(project_dir)?;
@@ -68,7 +116,7 @@ pub fn reinsert_project_with_limit(
         .iter()
         .filter(|e| e.status == TranslationStatus::Error)
         .count();
-    if error_count > 0 && !allow_errors {
+    if error_count > 0 && policy == ErrorPolicy::Block {
         let first = validation
             .issues
             .iter()
@@ -89,6 +137,21 @@ pub fn reinsert_project_with_limit(
             "adapter {} nao suporta reinsercao automatica ainda",
             adapter.id()
         )));
+    }
+
+    // Politica Skip: a traducao reprovada (ou que nao cabe e nao tem pra onde
+    // ir) sai da lista do que sera gravado; a string fica como no original.
+    // O status no banco nao muda — a frase continua marcada pra correcao.
+    let mut skipped_errors = 0;
+    if policy == ErrorPolicy::Skip {
+        for entry in &mut entries {
+            if entry.translated_text.is_some()
+                && (entry.status == TranslationStatus::Error || overflows_in_place(entry))
+            {
+                entry.translated_text = None;
+                skipped_errors += 1;
+            }
+        }
     }
 
     encode_table_entries(project_dir, &mut entries)?;
@@ -139,7 +202,12 @@ pub fn reinsert_project_with_limit(
         working_path,
         apply: apply_report,
         verification,
-        forced_errors: if allow_errors { error_count } else { 0 },
+        forced_errors: if policy == ErrorPolicy::Force {
+            error_count
+        } else {
+            0
+        },
+        skipped_errors,
     })
 }
 

@@ -125,6 +125,8 @@ export interface TranslateSummary {
   tmHits: number;
   failed: number;
   cancelled: boolean;
+  /** O provider parou de responder: o erro dele. A rodada foi interrompida. */
+  stopped: string | null;
 }
 
 export interface ProgressEvent {
@@ -219,6 +221,8 @@ export interface ReinsertOutcome {
   apply: ApplyReport;
   verification: VerificationReport;
   forcedErrors: number;
+  /** Traduções com erro que ficaram de fora: a frase segue como no original. */
+  skippedErrors: number;
 }
 
 export interface PatchExportOutcome {

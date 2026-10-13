@@ -136,6 +136,24 @@ async fn failures_come_back_as_readable_errors() {
         .to_string();
     assert!(err.contains("quota exceeded"), "{err}");
 
+    // O Codex ecoa o prompt no stderr antes do erro: o motivo e a linha ERROR.
+    let limited = FakeCodex::new(
+        "limit",
+        "echo 'eco do prompt com o texto do jogo' >&2; \
+         echo \"ERROR: You've hit your usage limit. Try again at 12:16 AM.\" >&2; exit 1",
+    );
+    let err = limited
+        .provider("", 30)
+        .translate_batch(&request())
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("usage limit") && err.contains("12:16"),
+        "{err}"
+    );
+    assert!(!err.contains("eco do prompt"), "{err}");
+
     let silent = FakeCodex::new("silent", "exit 0");
     let err = silent
         .provider("", 30)
