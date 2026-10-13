@@ -762,12 +762,11 @@ impl BankPlan {
     }
 }
 
-/// Um bloco remontado, a espera de lugar.
-struct Rebuilt<'a> {
-    bank: usize,
+/// Um bloco com traducao: as mensagens dele ja remontadas, um trecho por
+/// comeco de `room.starts`, na ordem.
+struct Part<'a> {
     room: &'a Room,
-    /// Tabela nova seguida do texto novo.
-    bytes: Vec<u8>,
+    segments: Vec<Vec<u8>>,
     applied: usize,
 }
 
@@ -838,9 +837,369 @@ fn drifted(what: &str) -> CoreError {
     ))
 }
 
+/// As mensagens de um bloco com as traducoes de `group` (em ordem de posicao)
+/// no lugar das originais.
+fn rebuild<'a>(
+    data: &[u8],
+    room: &'a Room,
+    pair: usize,
+    group: &[&TextEntry],
+    report: &mut ApplyReport,
+) -> Result<Part<'a>> {
+    let mut segments = Vec::with_capacity(room.starts.len());
+    let mut pending = group.iter().peekable();
+    let mut applied = 0;
+    for i in 0..room.starts.len() {
+        let (begin, end) = room.segment(i);
+        let mut text = Vec::with_capacity(end - begin);
+        let mut cursor = begin;
+        while let Some(entry) = pending.peek() {
+            let from = entry.offset.unwrap_or(0) as usize;
+            let len = entry.original_bytes.len();
+            let Some(rel) = from.checked_sub(room.text).filter(|rel| rel + len <= end) else {
+                break;
+            };
+            if rel < cursor || data[from..from + len] != entry.original_bytes[..] {
+                return Err(drifted(&format!(
+                    "os bytes em 0x{from:X} nao batem com a entry {}",
+                    entry.id
+                )));
+            }
+            text.extend_from_slice(&data[room.text + cursor..from]);
+            match (&entry.translated_text, entry.encoded()) {
+                (Some(_), Some(bytes)) => {
+                    text.extend_from_slice(&bytes);
+                    applied += 1;
+                }
+                (Some(_), None) => {
+                    return Err(CoreError::Project(format!(
+                        "entry {}: a traducao chegou sem codificar — a reinsercao de \
+                         mensagem de banco passa por reinsert_project, que le a tabela do \
+                         projeto",
+                        entry.id
+                    )))
+                }
+                (None, _) => {
+                    text.extend_from_slice(&entry.original_bytes);
+                    report.kept_original += 1;
+                }
+            }
+            cursor = rel + len;
+            pending.next();
+        }
+        text.extend_from_slice(&data[room.text + cursor..room.text + end]);
+        segments.push(text);
+    }
+    if pending.next().is_some() {
+        return Err(drifted(&format!(
+            "uma entry do bloco de mensagens {pair} nao cabe em mensagem nenhuma dele"
+        )));
+    }
+    Ok(Part {
+        room,
+        segments,
+        applied,
+    })
+}
+
+/// O que um arranjo do banco escreve e quantas traducoes ele pos, quantas
+/// mudaram de lugar e quantas ficaram sem lugar.
+#[derive(Default)]
+struct Placed {
+    writes: Vec<(usize, Vec<u8>)>,
+    applied: usize,
+    relocated: usize,
+    no_room: usize,
+}
+
+/// Bloco a bloco: cada um vira tabela + mensagens em fila. Quem cabe onde
+/// estava fica; o resto disputa o espaco livre, os maiores primeiro, e o
+/// lugar de quem sai vira espaco livre pros outros.
+fn by_block(data: &[u8], bank: usize, parts: &[Part], free: &mut Vec<(usize, usize)>) -> Placed {
+    let mut placed = Placed::default();
+    let mut leave: Vec<(&Part, Vec<u8>)> = Vec::new();
+    for part in parts {
+        let room = part.room;
+        // Onde cada mensagem comeca no texto novo.
+        let mut moved: HashMap<usize, usize> = HashMap::new();
+        let mut text_len = 0;
+        for (start, segment) in room.starts.iter().zip(&part.segments) {
+            moved.insert(*start, text_len);
+            text_len += segment.len();
+        }
+        // A tabela, com cada offset levado pro comeco novo da mensagem dele.
+        let mut bytes = Vec::with_capacity(2 * room.slots + text_len + 2);
+        let mut fits = text_len <= MAX_TEXT;
+        for k in 0..room.slots {
+            let old = u16_at(data, room.table + 2 * k).unwrap_or(END);
+            let new = match moved.get(&(old as usize)) {
+                _ if old == END => END,
+                Some(&new) if new < END as usize => new as u16,
+                _ => {
+                    fits = false;
+                    END
+                }
+            };
+            bytes.extend_from_slice(&new.to_le_bytes());
+        }
+        if !fits {
+            // Passou do que um offset de 16 bits alcanca: o bloco fica como
+            // no original.
+            placed.no_room += part.applied;
+            continue;
+        }
+        bytes.extend(part.segments.iter().flatten());
+        bytes.resize(bytes.len().next_multiple_of(4), 0xFF);
+        if bytes.len() <= room.size() {
+            bytes.resize(room.size(), 0xFF);
+            placed.writes.push((room.table, bytes));
+            placed.applied += part.applied;
+        } else {
+            leave.push((part, bytes));
+        }
+    }
+    leave.sort_by_key(|(_, bytes)| std::cmp::Reverse(bytes.len()));
+    let mut moved = true;
+    while moved && !leave.is_empty() {
+        moved = false;
+        let mut waiting = Vec::new();
+        for (part, bytes) in leave {
+            let Some(at) = allocate(free, bytes.len(), bank) else {
+                waiting.push((part, bytes));
+                continue;
+            };
+            moved = true;
+            let room = part.room;
+            // O lugar antigo e limpo agora e pode ser de outro bloco depois:
+            // a ordem das escritas garante que o bloco novo fica por cima.
+            placed.writes.push((room.table, vec![0xFF; room.size()]));
+            point(&mut placed.writes, bank, room, at);
+            placed.writes.push((at, bytes));
+            release(free, room.table, room.size() & !3);
+            placed.applied += part.applied;
+            placed.relocated += part.applied;
+        }
+        leave = waiting;
+    }
+    placed.no_room += leave.iter().map(|(part, _)| part.applied).sum::<usize>();
+    placed
+}
+
+/// Reaponta os pares do diretorio de `room` pra tabela que agora esta em
+/// `table`, com o texto logo depois dela.
+fn point(writes: &mut Vec<(usize, Vec<u8>)>, bank: usize, room: &Room, table: usize) {
+    let (table, text) = (table - bank, table + 2 * room.slots - bank);
+    for &pair in &room.pairs {
+        let mut entry = (table as u32).to_le_bytes().to_vec();
+        entry.extend_from_slice(&(text as u32).to_le_bytes());
+        writes.push((bank + 4 + 8 * pair, entry));
+    }
+}
+
+/// O banco inteiro arrumado de novo, com cada mensagem repetida guardada uma
+/// vez so: o que faz caber a traducao que, bloco a bloco, nao coube. `None`
+/// = nem assim.
+///
+/// O jogo acha uma mensagem somando o offset da tabela ao comeco do texto do
+/// bloco, entao mensagens de blocos diferentes podem morar juntas. Os blocos
+/// que tem mensagens em comum vao pra um mesmo trecho de ate 64 KiB (o que um
+/// offset de 16 bits alcanca): na frente, a tabela de cada bloco seguida do
+/// comeco do texto dele (o cabecalho: o que vem antes da primeira mensagem),
+/// como no original; depois, as mensagens, uma vez cada. Pra quem le pelo
+/// diretorio nada muda: mesma tabela logo antes do texto, mesmo cabecalho,
+/// mesma mensagem em cada posicao da tabela.
+///
+/// Medido no jogo real (so contagens): 481 blocos, 40% do texto em mensagens
+/// que outro bloco tambem tem (a mesma sala em capitulos diferentes). A
+/// traducao fica 1,76 vez maior que o original: bloco a bloco faltam 222 KiB
+/// no cartucho; assim sobram 193.
+fn pooled(
+    data: &[u8],
+    bank: &Bank,
+    parts: &[Part],
+    free: &mut Vec<(usize, usize)>,
+) -> Option<Placed> {
+    /// Quanto cabe num trecho: os offsets sao u16, e 0xFFFF e "sem mensagem".
+    const REACH: usize = 0xFFF0;
+    let rebuilt: HashMap<usize, &Part> = parts.iter().map(|part| (part.room.table, part)).collect();
+    // Todo bloco inteiro do banco entra, os sem traducao como estao.
+    let rooms: Vec<&Room> = bank
+        .rooms
+        .iter()
+        .filter(|room| !room.starts.is_empty())
+        .collect();
+    let mut placed = Placed::default();
+    let segments: Vec<Vec<&[u8]>> = rooms
+        .iter()
+        .map(|room| {
+            let part = rebuilt.get(&room.table).filter(|part| {
+                // Bloco que sozinho ja passa do alcance fica como no original.
+                let size: usize = part.segments.iter().map(Vec::len).sum();
+                let fits = 2 * room.slots + size + 3 <= REACH;
+                placed.applied += if fits { part.applied } else { 0 };
+                placed.no_room += if fits { 0 } else { part.applied };
+                fits
+            });
+            match part {
+                Some(part) => part.segments.iter().map(Vec::as_slice).collect(),
+                None => (0..room.starts.len())
+                    .map(|i| {
+                        let (begin, end) = room.segment(i);
+                        &data[room.text + begin..room.text + end]
+                    })
+                    .collect(),
+            }
+        })
+        .collect();
+    // Offset de 16 bits em endereco impar nao e coisa que o jogo faca.
+    if segments.iter().flatten().any(|bytes| bytes.len() % 2 == 1) {
+        return None;
+    }
+    // Cada mensagem distinta ganha um numero; a primeira parte do texto de
+    // cada bloco (o cabecalho) fica so dele.
+    let mut ids: HashMap<&[u8], usize> = HashMap::new();
+    let mut sizes: Vec<usize> = Vec::new();
+    let own: Vec<Vec<usize>> = segments
+        .iter()
+        .map(|parts| {
+            parts[1..]
+                .iter()
+                .map(|bytes| {
+                    *ids.entry(bytes).or_insert_with(|| {
+                        sizes.push(bytes.len());
+                        sizes.len() - 1
+                    })
+                })
+                .collect()
+        })
+        .collect();
+    let mut texts: Vec<&[u8]> = vec![&[]; sizes.len()];
+    for (bytes, id) in &ids {
+        texts[*id] = bytes;
+    }
+    // Tabela + cabecalho, com a folga do alinhamento.
+    let fixed = |r: usize| 2 * rooms[r].slots + segments[r][0].len() + 3;
+
+    // O lugar de todos os blocos vira espaco livre. Ele fica em faixas (ha
+    // sobras entre um bloco e outro), entao cada trecho e montado do tamanho
+    // da maior faixa que ainda ha: comeca pelo maior bloco que cabe nela e
+    // vai chamando quem mais aproveita o que ja esta la, enquanto couber.
+    for room in &rooms {
+        placed.writes.push((room.table, vec![0xFF; room.size()]));
+        release(free, room.table, room.size() & !3);
+    }
+    let alone: Vec<usize> = (0..rooms.len())
+        .map(|r| {
+            let distinct: HashSet<usize> = own[r].iter().copied().collect();
+            fixed(r) + distinct.iter().map(|id| sizes[*id]).sum::<usize>()
+        })
+        .collect();
+    let mut order: Vec<usize> = (0..rooms.len()).collect();
+    order.sort_by_key(|&r| std::cmp::Reverse(alone[r]));
+    let mut taken = vec![false; rooms.len()];
+    for _ in 0..rooms.len() {
+        if taken.iter().all(|done| *done) {
+            break;
+        }
+        let reach = free
+            .iter()
+            .map(|range| range.1)
+            .max()
+            .unwrap_or(0)
+            .min(REACH);
+        let seed = order
+            .iter()
+            .copied()
+            .find(|&r| !taken[r] && alone[r] <= reach)?;
+        taken[seed] = true;
+        let mut members = vec![seed];
+        let mut have: HashSet<usize> = HashSet::new();
+        let mut held: Vec<usize> = Vec::new();
+        for &id in &own[seed] {
+            if have.insert(id) {
+                held.push(id);
+            }
+        }
+        let mut size = alone[seed];
+        loop {
+            // (bloco, bytes que ele ja acha la, bytes que ele traz)
+            let mut best: Option<(usize, usize, usize)> = None;
+            for &r in order.iter().filter(|&&r| !taken[r]) {
+                let mut new: HashSet<usize> = HashSet::new();
+                let (mut shared, mut extra) = (0, fixed(r));
+                for &id in &own[r] {
+                    if have.contains(&id) {
+                        shared += sizes[id];
+                    } else if new.insert(id) {
+                        extra += sizes[id];
+                    }
+                }
+                let better = best.is_none_or(|(_, s, e)| shared * e > s * extra);
+                if shared > 0 && size + extra <= reach && better {
+                    best = Some((r, shared, extra));
+                }
+            }
+            let Some((r, _, extra)) = best else { break };
+            taken[r] = true;
+            members.push(r);
+            size += extra;
+            for &id in &own[r] {
+                if have.insert(id) {
+                    held.push(id);
+                }
+            }
+        }
+
+        // Os bytes do trecho: a tabela e o cabecalho de cada bloco, depois as
+        // mensagens, e as tabelas preenchidas com onde cada uma ficou.
+        let mut bytes: Vec<u8> = Vec::with_capacity(size);
+        let mut tables = Vec::new();
+        for &r in &members {
+            bytes.resize(bytes.len().next_multiple_of(4), 0xFF);
+            tables.push((r, bytes.len()));
+            bytes.resize(bytes.len() + 2 * rooms[r].slots, 0);
+            bytes.extend_from_slice(segments[r][0]);
+        }
+        let mut at: HashMap<usize, usize> = HashMap::new();
+        for &id in &held {
+            at.insert(id, bytes.len());
+            bytes.extend_from_slice(texts[id]);
+        }
+        for &(r, table) in &tables {
+            let room = rooms[r];
+            let text = table + 2 * room.slots;
+            for k in 0..room.slots {
+                let old = u16_at(data, room.table + 2 * k)?;
+                let new = match room.starts.binary_search(&(old as usize)) {
+                    _ if old == END => END as usize,
+                    Ok(0) => 0,
+                    Ok(i) => at[&own[r][i - 1]] - text,
+                    Err(_) => return None,
+                };
+                let new = u16::try_from(new)
+                    .ok()
+                    .filter(|new| old == END || *new != END)?;
+                bytes[table + 2 * k..table + 2 * k + 2].copy_from_slice(&new.to_le_bytes());
+            }
+        }
+        bytes.resize(bytes.len().next_multiple_of(4), 0xFF);
+        let place = allocate(free, bytes.len(), bank.at)?;
+        for (r, table) in tables {
+            point(&mut placed.writes, bank.at, rooms[r], place + table);
+        }
+        placed.writes.push((place, bytes));
+    }
+    placed.relocated = placed.applied;
+    Some(placed)
+}
+
 /// Remonta os blocos de banco que tem traducao. `data` e a imagem ORIGINAL;
 /// entry que nao e de banco e ignorada. As traducoes chegam codificadas na
 /// propria entry (`TextEntry::encoded`, posto por `reinsert`).
+///
+/// Primeiro bloco a bloco (`by_block`), que mexe so no que foi traduzido. Se
+/// algum bloco fica sem lugar, o banco inteiro e arrumado de novo com as
+/// mensagens repetidas guardadas uma vez so (`pooled`).
 pub(crate) fn plan(data: &[u8], entries: &[TextEntry]) -> Result<BankPlan> {
     let mut plan = BankPlan {
         writes: Vec::new(),
@@ -866,7 +1225,7 @@ pub(crate) fn plan(data: &[u8], entries: &[TextEntry]) -> Result<BankPlan> {
     }
     let banks: HashMap<usize, Bank> = find(data).into_iter().map(|b| (b.at, b)).collect();
 
-    let mut rebuilt: Vec<Rebuilt> = Vec::new();
+    let mut parts: BTreeMap<usize, Vec<Part>> = BTreeMap::new();
     for ((at, pair), mut group) in groups {
         let room = banks
             .get(&at)
@@ -883,131 +1242,37 @@ pub(crate) fn plan(data: &[u8], entries: &[TextEntry]) -> Result<BankPlan> {
             continue;
         }
         group.sort_by_key(|e| e.offset);
-
-        // O texto novo, mensagem por mensagem, e onde cada uma comeca.
-        let mut text = Vec::with_capacity(room.text_len);
-        let mut moved: HashMap<usize, usize> = HashMap::new();
-        let mut pending = group.iter().peekable();
-        let mut applied = 0;
-        for i in 0..room.starts.len() {
-            let (begin, end) = room.segment(i);
-            moved.insert(begin, text.len());
-            let mut cursor = begin;
-            while let Some(entry) = pending.peek() {
-                let from = entry.offset.unwrap_or(0) as usize;
-                let len = entry.original_bytes.len();
-                let Some(rel) = from.checked_sub(room.text).filter(|rel| rel + len <= end) else {
-                    break;
-                };
-                if rel < cursor || data[from..from + len] != entry.original_bytes[..] {
-                    return Err(drifted(&format!(
-                        "os bytes em 0x{from:X} nao batem com a entry {}",
-                        entry.id
-                    )));
-                }
-                text.extend_from_slice(&data[room.text + cursor..from]);
-                match (&entry.translated_text, entry.encoded()) {
-                    (Some(_), Some(bytes)) => {
-                        text.extend_from_slice(&bytes);
-                        applied += 1;
-                    }
-                    (Some(_), None) => {
-                        return Err(CoreError::Project(format!(
-                            "entry {}: a traducao chegou sem codificar — a reinsercao de \
-                             mensagem de banco passa por reinsert_project, que le a tabela do \
-                             projeto",
-                            entry.id
-                        )))
-                    }
-                    (None, _) => {
-                        text.extend_from_slice(&entry.original_bytes);
-                        plan.report.kept_original += 1;
-                    }
-                }
-                cursor = rel + len;
-                pending.next();
-            }
-            text.extend_from_slice(&data[room.text + cursor..room.text + end]);
-        }
-        if pending.next().is_some() {
-            return Err(drifted(&format!(
-                "uma entry do bloco de mensagens {pair} nao cabe em mensagem nenhuma dele"
-            )));
-        }
-
-        // A tabela, com cada offset levado pro comeco novo da mensagem dele.
-        let mut bytes = Vec::with_capacity(2 * room.slots + text.len() + 2);
-        let mut fits = text.len() <= MAX_TEXT;
-        for k in 0..room.slots {
-            let old = u16_at(data, room.table + 2 * k).unwrap_or(END);
-            let new = match moved.get(&(old as usize)) {
-                _ if old == END => END,
-                Some(&new) if new < END as usize => new as u16,
-                _ => {
-                    fits = false;
-                    END
-                }
-            };
-            bytes.extend_from_slice(&new.to_le_bytes());
-        }
-        if !fits {
-            // Passou do que um offset de 16 bits alcanca: o bloco fica como
-            // no original.
-            plan.report.no_room += applied;
-            continue;
-        }
-        bytes.extend_from_slice(&text);
-        bytes.resize(bytes.len().next_multiple_of(4), 0xFF);
-        rebuilt.push(Rebuilt {
-            bank: at,
-            room,
-            bytes,
-            applied,
-        });
+        let part = rebuild(data, room, pair, &group, &mut plan.report)?;
+        parts.entry(at).or_default().push(part);
     }
 
-    // Quem cabe onde estava fica; o resto disputa o espaco livre, os maiores
-    // primeiro, e o lugar de quem sai vira espaco livre pros outros.
     let mut free = padding(data);
-    let (stay, mut leave): (Vec<Rebuilt>, Vec<Rebuilt>) = rebuilt
-        .into_iter()
-        .partition(|block| block.bytes.len() <= block.room.size());
-    for block in stay {
-        let mut bytes = block.bytes;
-        bytes.resize(block.room.size(), 0xFF);
-        plan.writes.push((block.room.table, bytes));
-        plan.report.applied += block.applied;
-    }
-    leave.sort_by_key(|block| std::cmp::Reverse(block.bytes.len()));
-    let mut placed = true;
-    while placed && !leave.is_empty() {
-        placed = false;
-        let mut waiting = Vec::new();
-        for block in leave {
-            let Some(at) = allocate(&mut free, block.bytes.len(), block.bank) else {
-                waiting.push(block);
-                continue;
-            };
-            placed = true;
-            let room = block.room;
-            let (table, text) = (at - block.bank, at + 2 * room.slots - block.bank);
-            for &pair in &room.pairs {
-                let mut entry = (table as u32).to_le_bytes().to_vec();
-                entry.extend_from_slice(&(text as u32).to_le_bytes());
-                plan.writes.push((block.bank + 4 + 8 * pair, entry));
+    for (at, parts) in parts {
+        let mut attempt = free.clone();
+        let mut placed = by_block(data, at, &parts, &mut attempt);
+        if placed.no_room > 0 {
+            let mut again = free.clone();
+            let whole = pooled(data, &banks[&at], &parts, &mut again);
+            if let Some(whole) = whole.filter(|whole| whole.no_room < placed.no_room) {
+                // O banco inteiro mudou: nenhuma outra escrita pode cair
+                // em bloco nenhum dele.
+                plan.rooms.extend(
+                    banks[&at]
+                        .rooms
+                        .iter()
+                        .map(|room| (room.text, room.text_len)),
+                );
+                (placed, attempt) = (whole, again);
             }
-            // O lugar antigo e limpo agora e pode ser de outro bloco depois:
-            // a ordem das escritas garante que o bloco novo fica por cima.
-            plan.writes.push((room.table, vec![0xFF; room.size()]));
-            plan.writes.push((at, block.bytes));
-            release(&mut free, room.table, room.size() & !3);
-            plan.report.applied += block.applied;
-            plan.report.relocated += block.applied;
         }
-        leave = waiting;
+        free = attempt;
+        plan.writes.extend(placed.writes);
+        plan.report.applied += placed.applied;
+        plan.report.relocated += placed.relocated;
+        plan.report.no_room += placed.no_room;
     }
-    plan.report.no_room += leave.iter().map(|block| block.applied).sum::<usize>();
     plan.rooms.sort_unstable();
+    plan.rooms.dedup();
     Ok(plan)
 }
 

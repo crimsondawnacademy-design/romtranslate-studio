@@ -915,6 +915,79 @@ mod bank {
             .contains("\"maxLine\":18"));
     }
 
+    #[test]
+    fn repeated_messages_are_stored_once_when_the_blocks_do_not_fit() {
+        let tmp = TempDir::new("bank-pool");
+        let rom = synth::make_gba_rom_jis16_bank_repeated();
+        let source = tmp.0.join("game.gba");
+        fs::write(&source, &rom).unwrap();
+        let dir = tmp.0.join("game.rtsproj");
+        create_project(CreateProjectArgs {
+            source_path: source,
+            platform: Platform::Gba,
+            adapter_id: GbaAdapter.id().to_string(),
+            source_language: Some("ja".to_string()),
+            target_language: "pt-BR".to_string(),
+            project_dir: dir.clone(),
+        })
+        .unwrap();
+        extract_project(&dir).unwrap();
+        // A mensagem 0 esta nas salas 0 e 3; a 45, nas salas 2 e 5. Sem
+        // espaco livre no arquivo, bloco a bloco nenhuma das quatro cabe.
+        set_translations(
+            &dir,
+            &[
+                (&synth::jis16_message(0), LONG),
+                (&synth::jis16_message(45), LONG),
+            ],
+        );
+        let outcome = reinsert_project_with(&dir, ErrorPolicy::Block).unwrap();
+        assert_eq!((outcome.apply.applied, outcome.apply.no_room), (4, 0));
+        let working = fs::read(&outcome.working_path).unwrap();
+        assert_eq!(working.len(), rom.len());
+
+        // Lido pelo diretorio, cada sala tem as mensagens dela: as traduzidas
+        // nas duas salas que as tem, e todas as outras como eram.
+        let long =
+            "◆Ｔｏｄｏ ｏ ｐｏｖｏ ａｑｕｉ[FF01]ｓｅｇｕｅ ｎｏ ｔｒａｂａｌｈｏ．[FF03][FF00]";
+        for room in 0..6 {
+            for k in 0..20 {
+                let expected = match (room % 3, k) {
+                    (0, 0) | (2, 5) => long.to_string(),
+                    _ => message(&rom, room, k),
+                };
+                assert_eq!(
+                    message(&working, room, k),
+                    expected,
+                    "sala {room}, mensagem {k}"
+                );
+            }
+            // A tabela continua logo antes do texto, e o texto abre com o
+            // cabecalho da propria sala.
+            let (old_table, old_text) = room_at(&rom, room);
+            let (table, text) = room_at(&working, room);
+            assert_eq!(text - table, old_text - old_table, "sala {room}");
+            assert_eq!(
+                working[text..text + 4],
+                rom[old_text..old_text + 4],
+                "sala {room}"
+            );
+        }
+        // As salas que repetem outra apontam pras mesmas mensagens dela.
+        let offset = |room: usize, k: usize| {
+            let (table, text) = room_at(&working, room);
+            text + u16_at(&working, table + 2 * k)
+        };
+        assert_eq!(offset(0, 7), offset(3, 7));
+        assert_eq!(offset(2, 5), offset(5, 5));
+        // Nada fora do banco mudou.
+        let (first, _) = room_at(&rom, 0);
+        assert_eq!(working[..JIS16_BANK_AT], rom[..JIS16_BANK_AT]);
+        let end = (0..6).map(|room| room_at(&rom, room).1).max().unwrap() + 0x1000;
+        assert!(first > JIS16_BANK_AT);
+        assert_eq!(working[end..], rom[end..]);
+    }
+
     // --- Caixa de texto que rola: o app quebra as linhas sozinho ---
 
     fn scrolling_project(tmp: &TempDir) -> PathBuf {

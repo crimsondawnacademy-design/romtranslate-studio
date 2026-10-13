@@ -999,7 +999,15 @@ pub const JIS16_BANK_PADDING: std::ops::Range<usize> = 0x20000..0x38000;
 /// mensagem fecha com 0xFF03 0xFF00 0xFFFF. Com `padding`, 96 KiB de 0xFF em
 /// `JIS16_BANK_PADDING`, e dado depois.
 pub fn make_gba_rom_jis16_bank(padding: bool) -> Vec<u8> {
-    jis16_bank(padding, false)
+    jis16_bank(padding, false, false)
+}
+
+/// O banco de `make_gba_rom_jis16_bank(false)` (sem espaco livre nenhum) com
+/// as salas 3, 4 e 5 repetindo as mensagens das salas 0, 1 e 2, como a mesma
+/// sala de um jogo em capitulos diferentes: metade do texto esta guardada
+/// duas vezes.
+pub fn make_gba_rom_jis16_bank_repeated() -> Vec<u8> {
+    jis16_bank(false, false, true)
 }
 
 /// A terceira linha das mensagens compridas de
@@ -1023,10 +1031,10 @@ pub fn jis16_scrolling_message(i: usize) -> String {
 /// fica alinhado depois do losango) e uma mensagem em cada dez tem tres
 /// linhas emendadas pela quebra — mais do que a caixa mostra de uma vez.
 pub fn make_gba_rom_jis16_bank_scrolling() -> Vec<u8> {
-    jis16_bank(true, true)
+    jis16_bank(true, true, false)
 }
 
-fn jis16_bank(padding: bool, scrolls: bool) -> Vec<u8> {
+fn jis16_bank(padding: bool, scrolls: bool, repeated: bool) -> Vec<u8> {
     let mut rom = make_gba_rom("JISBANK");
     rom.resize(256 * 1024, 0);
     let units = |text: &str| -> Vec<u16> {
@@ -1046,6 +1054,7 @@ fn jis16_bank(padding: bool, scrolls: bool) -> Vec<u8> {
         let mut text: Vec<u16> = vec![0xFFFF, room as u16];
         let mut table: Vec<u16> = Vec::new();
         for i in room * per_room..(room + 1) * per_room {
+            let i = if repeated { i % (3 * per_room) } else { i };
             table.push(2 * text.len() as u16);
             let (s, p) = (i / JIS16_PREDICATES.len(), i % JIS16_PREDICATES.len());
             match jis16_pattern(i) {
