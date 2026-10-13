@@ -54,7 +54,9 @@ Prefere compilar do código? Veja [Rodando](#rodando).
   OpenAI-compatible, ou a sua assinatura do ChatGPT pelo Codex CLI (sem chave
   de API); batching, retry, cancelamento, progresso; **translation
   memory** e **glossário** por projeto (SQLite); tradução remota exige opt-in
-  explícito de privacidade;
+  explícito de privacidade. Texto ASCII e texto de tabela vão com a lista dos
+  caracteres que o jogo escreve, e nome interno do jogo (identificador) fica
+  fora da fila;
 - **Validação e revisão**: placeholders/control codes/tags, limite de bytes no
   encoding destino, editor com filtros e statuses; erros bloqueiam a reinserção;
 - **Reinserção** em working copy verificada — o arquivo original **nunca** é
@@ -149,9 +151,10 @@ Num modelo local pequeno (`llama3.2:3b`): nenhuma pontuação fora da tabela, e
 3 ou 4 das 7 respostas ainda vieram com acento e foram gravadas sem ele (nas
 6 rodadas em que isso foi contado). No ChatGPT pelo Codex CLI (modelo padrão
 do Codex em 12/10/2026, `gpt-6-astra`): nenhum acento e nenhum caractere fora
-da tabela, em 7 rodadas. A troca só
-cobre letra latina acentuada num caractere só (`á`, `ç`, `É`); tradução
-escrita à mão não é mexida.
+da tabela, em 7 rodadas. A troca
+cobre letra latina acentuada num caractere só (`á`, `ç`, `É`) e aspas,
+travessão e reticências tipográficos (quando a tabela tem o sinal simples);
+tradução escrita à mão não é mexida.
 
 **Tamanho do texto de tabela**: ele é sempre gravado no lugar, então o
 espaço da original é o teto. A tradução por IA recebe esse teto em cada
@@ -193,6 +196,59 @@ pedido só diz o máximo. E a sobra de
 uma tradução mais curta vira `0x00` quando o byte depois da string original
 é `0x00` (senão é preenchida com o espaço da tabela) — jogo com outro
 terminador pede conferência no emulador.
+
+**Texto ASCII traduzido para idioma com acento**: num jogo que guarda o
+texto em ASCII (é o que a extração estruturada lê; no DS, também UTF-16),
+letra acentuada não existe. O lote de strings ASCII vai para a IA com a lista
+do ASCII imprimível e a instrução de que não há letra acentuada — o mesmo
+mecanismo do texto de tabela. Se a resposta vier mesmo assim com acento, ou
+com aspas, travessão e reticências tipográficos (`“ ” ‘ ’ — – …`), o app
+grava a letra sem acento e o sinal simples (`" ' - ...`) e a frase ganha um
+aviso de validação com o que a IA respondeu e o que foi gravado. O que não
+tem equivalente (`º`, `ß`) continua erro, e a mensagem diz qual caractere e
+em que posição. Texto UTF-8 e UTF-16 escreve acento e não é mexido: vai em
+lote separado, sem a lista. A memória de tradução passa pela mesma rede, e
+tradução guardada que nem assim cabe em ASCII não é usada.
+
+Medido em 12/10/2026 no mesmo jogo real de GBA, com 30 falas espalhadas pelo
+arquivo e o ChatGPT pelo Codex CLI (`gpt-6-astra`), 3 rodadas de cada pedido
+(só contagens; o texto do jogo não entra neste repositório):
+
+| Pedido | Respostas com caractere fora de ASCII | Passam na validação como a IA respondeu | Passam como o app grava | Maiores que o campo |
+|---|---|---|---|---|
+| sem a lista (o de antes) | 17, 18 e 19 de 30 | 12, 10 e 10 de 30 | 29, 28 e 28 de 30 | 1, 2 e 2 |
+| com a lista (o de hoje) | 0 de 30 nas 3 | 26, 27 e 27 de 30 | 26, 27 e 27 de 30 | 4, 3 e 3 |
+
+Com a lista o modelo não usou acento em nenhuma das 90 respostas, e a troca
+não precisou agir; sem ela, a troca sozinha já tira o acento do caminho. O
+que sobra barrado é tamanho: tradução maior que o campo de uma linha da
+caixa de texto (erro que manda encurtar; nada é cortado). Com a lista houve
+mais dessas (10 em 90, contra 5 em 90), numa amostra pequena demais para
+dizer que a causa é a lista. Na primeira rodada com a lista, as 26 válidas
+foram reinseridas: arquivo do mesmo tamanho, 698 bytes alterados, nenhum
+fora de string traduzida, verificação ok, patch IPS de 885 bytes. Limites:
+um jogo, um par de idiomas, um modelo; tirar o acento pode mudar o sentido
+(`avô` e `avó` viram `avo`); para ter acento no jogo o texto precisa ser
+lido por uma tabela `.tbl` que tenha a letra, e o jogo precisa ter o desenho
+dela.
+
+**Nomes internos**: jogo guarda, ao lado do texto, nomes que nunca aparecem
+na tela (sala, script, recurso). A extração marca como **nome interno** a
+string feita só de maiúsculas, dígitos e sublinhado, sem espaço, com pelo
+menos um sublinhado ou um dígito (`FASE4_31_01`, `VILA_SET_1`, `SALA12`).
+Palavra de menu (`START`) e frase em maiúsculas (`NEW GAME`) continuam
+texto. A string marcada fica na lista — ela pode ter ponteiro em tabela, e o
+Raio-X conta com ela —, mas não vai para a IA e, sem tradução, não é
+regravada. A tela de tradução diz quantas ficaram de fora, o filtro "nomes
+internos" mostra quais, e o botão "É texto do jogo" desfaz a marca de uma.
+No jogo medido, 2.326 das 17.936 strings saem da fila (sobram 15.610): 1.596
+com sublinhado, das quais 1.564 têm ponteiro em tabela, e 730 só com dígito
+colado, que ali são gráfico que passou no filtro de texto. Das 1.590 strings
+com ponteiro em tabela, 1.565 são marcadas; as 25 que ficam são texto de
+menu (21) e lixo (4). Limites: é heurística — `PLAYER1`, `STAGE1` e `1UP`
+são texto e batem na regra; a marca é refeita a cada extração enquanto a
+string não tem tradução (desfazer e extrair de novo marca outra vez); nome
+interno que já recebeu tradução num projeto antigo fica como está.
 
 Se o texto está comprimido, o **Raio-X** mostra quanto — hoje o app só
 reconhece o LZ77 tipo 0x10 e só para leitura: texto comprimido ainda não é
@@ -265,9 +321,9 @@ Fixtures sintéticas para testar sem ROM real:
 
 ```bash
 cargo run -p romtranslate-core --example gen_fixtures
-# gera 20 arquivos em fixtures/generated/ — um por plataforma, mais os de
-# tabela de ponteiros, tabela de caracteres própria, texto comprimido e lixo
-# imprimível antes do texto
+# gera 21 arquivos em fixtures/generated/ — um por plataforma, mais os de
+# tabela de ponteiros, tabela de caracteres própria, texto comprimido, lixo
+# imprimível antes do texto e texto ASCII com nomes internos
 ```
 
 Testes e checks:

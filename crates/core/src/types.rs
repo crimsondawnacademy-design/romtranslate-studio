@@ -67,6 +67,10 @@ pub enum TranslationStatus {
     Machine,
     Reviewed,
     Error,
+    /// Nome interno do jogo (`scan::looks_like_identifier`), nao texto: fica
+    /// fora da traducao automatica e, sem traducao, nao e regravado. Volta a
+    /// `Untranslated` por `validate::unmark_internal`.
+    Internal,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]

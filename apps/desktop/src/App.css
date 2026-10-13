@@ -459,6 +459,10 @@ input[type="password"] {
   border-color: var(--danger);
 }
 
+.status.internal {
+  border-style: dashed;
+}
+
 .glossary-form {
   display: flex;
   gap: 10px;

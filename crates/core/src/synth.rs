@@ -737,6 +737,52 @@ pub fn make_gba_rom_with_junk() -> Vec<u8> {
     rom
 }
 
+/// Falas ASCII de `make_gba_rom_with_names`, na ordem do cartucho.
+pub const NAMES_ROM_LINES: [&str; 4] = [
+    "Come back in the morning!",
+    "\"No!\" he said, and ran off.",
+    "The old bridge is out again.",
+    "You came in first place!",
+];
+/// Texto de menu em maiusculas: frase com espaco e palavra unica.
+pub const NAMES_ROM_MENU: [&str; 3] = ["NEW GAME", "START", "OPTIONS"];
+/// Nomes internos (sala, script), todos com ponteiro em tabela.
+pub const NAMES_ROM_NAMES: [&str; 4] = ["FASE4_31_01", "VILA_SET_1", "SALA12", "TORRE_0d_04"];
+/// Onde ficam os nomes internos e a tabela de ponteiros deles.
+pub const NAMES_ROM_INTERNAL: std::ops::Range<usize> = 0x700..0x800;
+/// Onde esta, em UTF-16LE, a mesma frase de `NAMES_ROM_LINES[0]`.
+pub const NAMES_ROM_WIDE: std::ops::Range<u64> = 0x800..0x840;
+
+/// GBA de 4 KiB com o que um jogo de texto ASCII mistura:
+/// - 0x400: `NAMES_ROM_LINES`, uma a cada 0x40 bytes;
+/// - 0x600: `NAMES_ROM_MENU`, uma a cada 0x10;
+/// - 0x700: `NAMES_ROM_NAMES`, uma a cada 0x10, e em 0x780 a tabela de
+///   ponteiros pros quatro — nome interno, nao texto;
+/// - 0x800: a primeira fala de novo, em UTF-16LE (texto que aceita acento).
+pub fn make_gba_rom_with_names() -> Vec<u8> {
+    let mut rom = make_gba_rom("NAMETEST");
+    rom.resize(4096, 0);
+    for (base, step, group) in [
+        (0x400, 0x40, &NAMES_ROM_LINES[..]),
+        (0x600, 0x10, &NAMES_ROM_MENU[..]),
+        (NAMES_ROM_INTERNAL.start, 0x10, &NAMES_ROM_NAMES[..]),
+    ] {
+        for (i, text) in group.iter().enumerate() {
+            plant(&mut rom, base + i * step, text.as_bytes());
+        }
+    }
+    for i in 0..NAMES_ROM_NAMES.len() {
+        let target = 0x0800_0000 + (NAMES_ROM_INTERNAL.start + i * 0x10) as u32;
+        plant(&mut rom, 0x780 + i * 4, &target.to_le_bytes());
+    }
+    let wide: Vec<u8> = NAMES_ROM_LINES[0]
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    plant(&mut rom, NAMES_ROM_WIDE.start as usize, &wide);
+    rom
+}
+
 /// Bytes pseudo-aleatorios deterministicos (xorshift), p/ testes negativos.
 pub fn make_random(len: usize, seed: u64) -> Vec<u8> {
     let mut state = seed.max(1);

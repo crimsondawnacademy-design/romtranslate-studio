@@ -268,6 +268,15 @@ async fn set_entry_reviewed(
 }
 
 #[tauri::command]
+async fn unmark_internal(project_dir: String, id: String) -> Result<(), String> {
+    blocking(move || {
+        let mut db = ProjectDb::open(&PathBuf::from(project_dir))?;
+        validate::unmark_internal(&mut db, &id)
+    })
+    .await
+}
+
+#[tauri::command]
 async fn validate_project(project_dir: String) -> Result<validate::ValidationReport, String> {
     blocking(move || {
         let mut db = ProjectDb::open(&PathBuf::from(project_dir))?;
@@ -433,6 +442,7 @@ pub fn run() {
             export_patch,
             update_entry,
             set_entry_reviewed,
+            unmark_internal,
             validate_project,
             glossary_list,
             glossary_upsert,

@@ -37,6 +37,7 @@ type StatusFilter =
   | "machine"
   | "reviewed"
   | "error"
+  | "internal"
   | "too_long"
   | "placeholder_mismatch";
 
@@ -46,6 +47,7 @@ const STATUS_FILTERS: StatusFilter[] = [
   "machine",
   "reviewed",
   "error",
+  "internal",
   "too_long",
   "placeholder_mismatch",
 ];
@@ -438,6 +440,16 @@ export default function ProjectView({
     }
   }
 
+  async function unmarkInternal(entry: TextEntry) {
+    setError(null);
+    try {
+      await invoke("unmark_internal", { projectDir, id: entry.id });
+      await reloadEntries();
+    } catch (e) {
+      setError(String(e));
+    }
+  }
+
   function selectEntry(entry: TextEntry) {
     setSelectedId(entry.id);
     setDraft(entry.translatedText ?? "");
@@ -523,7 +535,10 @@ export default function ProjectView({
       : settings.openaiCompatible
     : null;
   const endpointKey = settings?.provider === "ollama" ? "ollama" : "openaiCompatible";
-  const pending = entries.filter((e) => !e.translatedText).length;
+  // Nome interno do jogo nao e texto: fica fora da fila, contado na tela.
+  const internal = entries.filter((e) => e.status === "internal").length;
+  const pending = entries.filter((e) => !e.translatedText && e.status !== "internal").length;
+  const hasAscii = entries.some((e) => e.encoding === "ascii");
 
   return (
     <section className="card">
@@ -802,6 +817,7 @@ export default function ProjectView({
               onDraft={setDraft}
               onSave={saveDraft}
               onToggleReviewed={() => toggleReviewed(selected)}
+              onUnmarkInternal={() => unmarkInternal(selected)}
             />
           ) : (
             <p className="hint left">{t("editor.pick")}</p>
@@ -900,6 +916,8 @@ export default function ProjectView({
           {settings.provider === "codex_cli" && (
             <p className="hint left">{t("translate.codexHint")}</p>
           )}
+          {hasAscii && <p className="hint left">{t("translate.ascii")}</p>}
+          {internal > 0 && <p className="hint left">{t("translate.internal", { n: internal })}</p>}
           {settings.provider !== "ollama" && (
             <label className="checkline">
               <input
@@ -1107,6 +1125,7 @@ interface EntryEditorProps {
   onDraft: (v: string) => void;
   onSave: () => void;
   onToggleReviewed: () => void;
+  onUnmarkInternal: () => void;
 }
 
 function EntryEditor({
@@ -1117,6 +1136,7 @@ function EntryEditor({
   onDraft,
   onSave,
   onToggleReviewed,
+  onUnmarkInternal,
 }: EntryEditorProps) {
   const draftBytes = encodedByteLength(draft, entry.encoding);
   const originalBytes = entry.originalBytes.length / 2;
@@ -1165,7 +1185,12 @@ function EntryEditor({
         </ul>
       )}
 
+      {entry.status === "internal" && <p className="hint left">{t("editor.internal")}</p>}
+
       <div className="actions">
+        {entry.status === "internal" && (
+          <button onClick={onUnmarkInternal}>{t("editor.unmarkInternal")}</button>
+        )}
         <button onClick={onToggleReviewed} disabled={!entry.translatedText}>
           {entry.status === "reviewed"
             ? t("editor.unmarkReviewed")

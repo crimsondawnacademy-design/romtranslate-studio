@@ -179,6 +179,15 @@ pub fn scan_bytes(data: &[u8], config: &ScanConfig) -> Result<ScanOutcome> {
             break;
         }
         let abs = start as u64 + run.offset as u64;
+        // ponytail: a marca e refeita a cada extracao enquanto a entry nao
+        // tem traducao — desfazer e extrair de novo marca outra vez. Guardar
+        // a escolha do usuario fora de `entries` (como `accent_swaps`) se
+        // isso incomodar.
+        let status = if looks_like_identifier(&run.text) {
+            TranslationStatus::Internal
+        } else {
+            TranslationStatus::Untranslated
+        };
         entries.push(TextEntry {
             id: format!("scan-{abs:08x}"),
             resource_path: None,
@@ -190,7 +199,7 @@ pub fn scan_bytes(data: &[u8], config: &ScanConfig) -> Result<ScanOutcome> {
             // Scanner generico nao garante limite de reinsercao (Camada B decide).
             max_bytes: None,
             encoding: text_encoding(config),
-            status: TranslationStatus::Untranslated,
+            status,
             metadata: serde_json::json!({
                 "scanner": config.encoding,
                 "chars": run.chars,
@@ -266,6 +275,44 @@ pub fn looks_like_text(text: &str) -> bool {
         .filter(|c| "aeiouyAEIOUY".contains(**c))
         .count();
     !odd_case && (ascii < 4 || vowels * 8 >= ascii)
+}
+
+/// E nome interno do jogo (sala, script, recurso), e nao texto que aparece na
+/// tela? O scanner marca a entry como `TranslationStatus::Internal`: ela fica
+/// na lista (pode ter ponteiro em tabela, e o Raio-X conta com ela), mas nao
+/// vai pra traducao automatica nem e regravada.
+///
+/// A regra, sem contar espaco nas pontas (preenchimento de campo fixo):
+/// - so maiusculas ASCII, digitos e `_`, com pelo menos uma letra;
+/// - e pelo menos um `_` ou um digito: "FASE4_31_01", "VILA_SET_1", "SALA12".
+///   Sem isso e palavra de menu ("START", "OPTIONS"), e com espaco no meio e
+///   frase ("NEW GAME", "GAME OVER") — texto, nos dois casos;
+/// - minuscula so num pedaco entre `_` que tambem tem digito ("TORRE_0d_04",
+///   "PONTE_14_R0f"): e numero em hexadecimal, nao palavra.
+///
+/// Calibrada em 12/10/2026 no mesmo jogo real de GBA de `looks_like_text` (so
+/// contagens): das 17.936 strings extraidas, 2.326 batem — 1.596 com `_`
+/// (1.564 com ponteiro em tabela) e 730 so com digito colado, que la sao
+/// tile que passou no filtro, nao nome; das 1.590 com ponteiro ficam de fora
+/// 25 — 21 sao texto (palavras de menu, nomes de idioma) e 4, lixo. Sem a
+/// regra da minuscula e a do espaco nas pontas, 116 nomes com ponteiro
+/// continuavam indo pra traducao.
+///
+/// E heuristica e erra pro outro lado tambem: "PLAYER1", "STAGE1" e "1UP"
+/// sao texto de jogo e batem na regra. Por isso a marca aparece na interface,
+/// contada, e se desfaz por entry (`validate::unmark_internal`).
+pub fn looks_like_identifier(text: &str) -> bool {
+    let name = text.trim_matches(' ');
+    let joined = name.contains('_');
+    name.split('_').all(|piece| {
+        piece
+            .chars()
+            .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+            || (joined
+                && piece.chars().all(|c| c.is_ascii_alphanumeric())
+                && piece.chars().any(|c| c.is_ascii_digit()))
+    }) && name.chars().any(|c| c.is_ascii_alphabetic())
+        && name.chars().any(|c| c == '_' || c.is_ascii_digit())
 }
 
 /// Tira de `entries` o que nao parece texto e devolve quantas sairam. Entry
@@ -508,5 +555,59 @@ mod tests {
         ] {
             assert!(!looks_like_text(text), "{text}");
         }
+    }
+
+    #[test]
+    fn identifier_needs_an_underscore_or_a_digit_and_no_inner_space() {
+        for text in [
+            "FASE4_31_01",
+            "VILA_SET_1",
+            "SALA12",         // digito colado, sem sublinhado
+            "LV01",           //
+            "TORRE_0d_04",    // hexadecimal em minuscula num pedaco com digito
+            "PONTE_14_R0f",   //
+            "FASE1_10_TOPO ", // espaco de preenchimento na ponta
+        ] {
+            assert!(looks_like_identifier(text), "{text}");
+        }
+        for text in [
+            "NEW GAME",       // frase em maiusculas
+            "GAME OVER",      //
+            "START",          // palavra de menu
+            "OPTIONS",        //
+            "  FRENCH      ", // palavra de menu com preenchimento
+            "Lv1",            // minuscula sem sublinhado e texto
+            "The_old_bridge", // minuscula em pedaco sem digito
+            "player_name",    //
+            "HP {0}: 120",    //
+            "SAVE 1",         // espaco no meio
+            "1234",           // sem letra
+            "____",           //
+            "",
+        ] {
+            assert!(!looks_like_identifier(text), "{text}");
+        }
+    }
+
+    #[test]
+    fn scanner_marks_internal_names_and_leaves_menu_words_alone() {
+        let mut data = vec![0u8; 0x80];
+        for (at, text) in [(0x00, "VILA_SET_1"), (0x20, "NEW GAME"), (0x40, "START")] {
+            data[at..at + text.len()].copy_from_slice(text.as_bytes());
+        }
+        let found: Vec<(String, TranslationStatus)> = scan_bytes(&data, &ScanConfig::default())
+            .unwrap()
+            .entries
+            .into_iter()
+            .map(|e| (e.source_text, e.status))
+            .collect();
+        assert_eq!(
+            found,
+            [
+                ("VILA_SET_1".to_string(), TranslationStatus::Internal),
+                ("NEW GAME".to_string(), TranslationStatus::Untranslated),
+                ("START".to_string(), TranslationStatus::Untranslated),
+            ]
+        );
     }
 }

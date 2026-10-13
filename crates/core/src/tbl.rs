@@ -190,10 +190,11 @@ impl TblTable {
         self.chars_that_fit(slot.saturating_sub(bytes)) + chars
     }
 
-    /// `text` com cada letra acentuada que a tabela nao escreve trocada pela
-    /// letra sem acento ('ç' -> 'c', 'É' -> 'E') — so quando a tabela tem
-    /// essa letra. `None` = nada a trocar. Caractere sem troca fica como veio
-    /// e a validacao acusa: aqui nada some nem vira outro simbolo.
+    /// `text` com cada caractere que a tabela nao escreve trocado pelo
+    /// equivalente simples dele (`plain_equivalent`: 'ç' -> 'c', 'É' -> 'E',
+    /// '”' -> '"') — so quando a tabela escreve o equivalente. `None` = nada a
+    /// trocar. Caractere sem troca fica como veio e a validacao acusa: aqui
+    /// nada some nem vira outro simbolo.
     // ponytail: so caractere precomposto. Resposta com o acento solto ("e" +
     // U+0301) nao e mexida e cai no erro de validacao; compor antes (NFC) se
     // algum provider responder assim.
@@ -207,9 +208,15 @@ impl TblTable {
                 rest = &rest[end..];
                 continue;
             }
-            let base =
-                base_letter(ch).filter(|b| self.reverse.contains_key(b.to_string().as_str()));
-            out.push(base.unwrap_or(ch));
+            let plain = plain_equivalent(ch).filter(|plain| {
+                plain
+                    .chars()
+                    .all(|c| self.reverse.contains_key(c.to_string().as_str()))
+            });
+            match plain {
+                Some(plain) => out.push_str(&plain),
+                None => out.push(ch),
+            }
             rest = &rest[ch.len_utf8()..];
         }
         (out != text).then_some(out)
@@ -347,6 +354,22 @@ pub fn adopt_table(project_dir: &Path, source: &Path) -> Result<PathBuf> {
         Err(e) => return Err(CoreError::io(&dest, e)),
     }
     Ok(dest)
+}
+
+/// O que se grava no lugar de um caractere que a fonte do jogo nao tem,
+/// quando existe um equivalente que nao troca a palavra: a letra sem acento
+/// (`base_letter`) e o sinal ASCII de aspas, travessao e reticencias
+/// tipograficos. Sempre ASCII. `None` = nao ha equivalente (e o que vale pra
+/// todo caractere ASCII).
+pub(crate) fn plain_equivalent(ch: char) -> Option<String> {
+    let sign = match ch {
+        '\u{2018}' | '\u{2019}' => "'",
+        '\u{201C}' | '\u{201D}' => "\"",
+        '\u{2013}' | '\u{2014}' => "-",
+        '\u{2026}' => "...",
+        _ => return base_letter(ch).map(String::from),
+    };
+    Some(sign.to_string())
 }
 
 /// A letra sem acento de uma letra latina acentuada, pela decomposicao
@@ -537,6 +560,26 @@ mod tests {
         // Decomposicao que da outra letra nao e troca de acento.
         let other = TblTable::parse("80=и\n81=か\n").unwrap();
         assert_eq!(other.drop_missing_accents("йが"), None);
+    }
+
+    #[test]
+    fn typographic_signs_become_the_ascii_sign_only_when_the_table_has_it() {
+        let table = TblTable::parse("80=a\n81=\"\n82=-\n83=.\n").unwrap();
+        // Aspas, travessao e reticencias: o sinal ASCII, que a tabela tem.
+        assert_eq!(
+            table.drop_missing_accents("“a” — a…").as_deref(),
+            Some("\"a\" - a...")
+        );
+        // Apostrofo ela nao tem: fica como veio, e a validacao acusa.
+        assert_eq!(table.drop_missing_accents("a’a"), None);
+        // Sem o ponto, as reticencias ficam; o travessao, que tem saida, sai.
+        let bare = TblTable::parse("80=a\n82=-\n").unwrap();
+        assert_eq!(bare.drop_missing_accents("a–a…").as_deref(), Some("a-a…"));
+        // ASCII nunca tem equivalente: nada a trocar nele.
+        assert!((' '..='~').all(|ch| plain_equivalent(ch).is_none()));
+        assert_eq!(plain_equivalent('ã').as_deref(), Some("a"));
+        assert_eq!(plain_equivalent('‘').as_deref(), Some("'"));
+        assert_eq!(plain_equivalent('º'), None);
     }
 
     #[test]

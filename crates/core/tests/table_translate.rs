@@ -187,7 +187,8 @@ fn translation(dir: &Path, source: &str) -> String {
         .unwrap_or_else(|| panic!("\"{source}\" sem traducao"))
 }
 
-fn ascii_entry(id: &str, text: &str) -> TextEntry {
+/// Entry de texto que escreve tudo (UTF-8): sem lista de caracteres.
+fn plain_entry(id: &str, text: &str) -> TextEntry {
     TextEntry {
         id: id.to_string(),
         resource_path: None,
@@ -197,7 +198,7 @@ fn ascii_entry(id: &str, text: &str) -> TextEntry {
         translated_text: None,
         context: None,
         max_bytes: None,
-        encoding: TextEncoding::Ascii,
+        encoding: TextEncoding::Utf8,
         status: TranslationStatus::Untranslated,
         metadata: serde_json::Value::Null,
     }
@@ -211,8 +212,8 @@ async fn table_batch_lists_the_characters_and_plain_batch_is_untouched() {
     ProjectDb::open(&dir)
         .unwrap()
         .upsert_entries(&[
-            ascii_entry("ascii-1", "HELLO"),
-            ascii_entry("ascii-2", "WORLD"),
+            plain_entry("plain-1", "HELLO"),
+            plain_entry("plain-2", "WORLD"),
         ])
         .unwrap();
 
@@ -221,8 +222,9 @@ async fn table_batch_lists_the_characters_and_plain_batch_is_untouched() {
     assert_eq!(summary.translated, CUSTOM_LINES.len() + 2);
     assert_eq!(summary.failed, 0);
 
-    // Um batch, uma tabela: o texto sem tabela vai num pedido so dele, sem
-    // lista de caracteres; as 7 frases da tabela, em batches de 4.
+    // Um batch, uma tabela: o texto sem restricao (UTF-8) vai num pedido so
+    // dele, sem lista de caracteres; as 7 frases da tabela, em batches de 4.
+    // O batch de texto ASCII esta em `tests/ascii_translate.rs`.
     let requests = provider.requests();
     let texts = |r: &TranslationRequest| -> Vec<String> {
         r.items.iter().map(|i| i.text.clone()).collect()

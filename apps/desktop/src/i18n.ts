@@ -80,6 +80,7 @@ const messages = {
     "status.machine": "máquina",
     "status.reviewed": "revisada",
     "status.error": "erro",
+    "status.internal": "nome interno",
     "translate.title": "Tradução",
     "translate.provider": "Provider",
     "translate.baseUrl": "Base URL",
@@ -104,6 +105,10 @@ const messages = {
     "translate.summary":
       "{translated} traduzidas · {tmHits} da memória · {failed} falharam",
     "translate.summaryCancelled": " · cancelado",
+    "translate.internal":
+      "{n} strings ficam de fora da tradução por serem nomes internos do jogo (sala, script: só maiúsculas, dígitos e sublinhado, sem espaço). Não vão para a IA e não são regravadas. Para vê-las, filtre por “nomes internos”; se alguma for texto do jogo, selecione-a e clique em “É texto do jogo”.",
+    "translate.ascii":
+      "Texto ASCII não tem letra acentuada: a IA é avisada disso e, se mesmo assim responder com acento ou com aspas e travessão tipográficos, o app grava a letra sem acento e o sinal simples, com um aviso na frase. O que não tem equivalente bloqueia a reinserção e a frase diz qual caractere é.",
     "glossary.title": "Glossário",
     "glossary.term": "Termo",
     "glossary.translation": "Tradução",
@@ -116,6 +121,7 @@ const messages = {
     "filter.machine": "traduzidas (máquina)",
     "filter.reviewed": "revisadas",
     "filter.error": "com erro",
+    "filter.internal": "nomes internos",
     "filter.too_long": "muito longas",
     "filter.placeholder_mismatch": "placeholder quebrado",
     "validate.run": "Validar",
@@ -131,6 +137,9 @@ const messages = {
     "editor.save": "Salvar tradução",
     "editor.markReviewed": "Marcar revisada",
     "editor.unmarkReviewed": "Desmarcar revisão",
+    "editor.internal":
+      "Nome interno do jogo: fica de fora da tradução e não é regravado. A marca volta se você extrair de novo antes de traduzir.",
+    "editor.unmarkInternal": "É texto do jogo",
     "extract.structured": "Extração estruturada",
     "extract.xray": "Raio-X",
     "xray.title": "Raio-X do arquivo",
@@ -267,6 +276,7 @@ const messages = {
     "status.machine": "machine",
     "status.reviewed": "reviewed",
     "status.error": "error",
+    "status.internal": "internal name",
     "translate.title": "Translation",
     "translate.provider": "Provider",
     "translate.baseUrl": "Base URL",
@@ -290,6 +300,10 @@ const messages = {
     "translate.phase.translate": "translating",
     "translate.summary": "{translated} translated · {tmHits} from memory · {failed} failed",
     "translate.summaryCancelled": " · cancelled",
+    "translate.internal":
+      "{n} strings are left out of the translation because they are internal names of the game (room, script: only capitals, digits and underscores, no space). They are not sent to the AI and are not written back. To see them, filter by “internal names”; if one is game text, select it and click “It is game text”.",
+    "translate.ascii":
+      "ASCII text has no accented letters: the AI is told so and, if it still answers with an accent or with typographic quotes and dashes, the app writes the plain letter and the plain sign, with a warning on the string. Anything with no equivalent blocks reinsertion and the string says which character it is.",
     "glossary.title": "Glossary",
     "glossary.term": "Term",
     "glossary.translation": "Translation",
@@ -302,6 +316,7 @@ const messages = {
     "filter.machine": "machine translated",
     "filter.reviewed": "reviewed",
     "filter.error": "with errors",
+    "filter.internal": "internal names",
     "filter.too_long": "too long",
     "filter.placeholder_mismatch": "placeholder mismatch",
     "validate.run": "Validate",
@@ -317,6 +332,9 @@ const messages = {
     "editor.save": "Save translation",
     "editor.markReviewed": "Mark reviewed",
     "editor.unmarkReviewed": "Unmark review",
+    "editor.internal":
+      "Internal name of the game: left out of the translation and not written back. The mark comes back if you extract again before translating.",
+    "editor.unmarkInternal": "It is game text",
     "extract.structured": "Structured extraction",
     "extract.xray": "X-ray",
     "xray.title": "File X-ray",

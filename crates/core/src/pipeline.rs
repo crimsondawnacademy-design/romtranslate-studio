@@ -14,7 +14,7 @@ use crate::adapters::inplace::terminated;
 use crate::db::{GlobalTm, ProjectDb};
 use crate::error::Result;
 use crate::provider::{BatchItem, GlossaryTerm, TranslationProvider, TranslationRequest};
-use crate::tbl::{ProjectTables, TblTable};
+use crate::tbl::{plain_equivalent, ProjectTables, TblTable};
 use crate::types::{TextEncoding, TextEntry, TranslationStatus};
 use crate::validate::extract_tokens;
 
@@ -74,7 +74,8 @@ pub async fn run_translation(
     let pending: Vec<TextEntry> = db
         .load_entries()?
         .into_iter()
-        .filter(|e| e.translated_text.is_none())
+        // Nome interno do jogo nao e texto: nem memoria, nem provider.
+        .filter(|e| e.translated_text.is_none() && e.status != TranslationStatus::Internal)
         .collect();
     let total = pending.len();
     let mut summary = TranslateSummary {
@@ -94,20 +95,21 @@ pub async fn run_translation(
     for entry in pending {
         // Tabela ausente do projeto e erro ja aqui: sem ela nao ha o que
         // dizer pro provider nem como conferir a resposta.
-        let table = tables.for_entry(&entry)?;
+        let charset = Charset::of(&entry, &mut tables)?;
         let mut hit = db.tm_lookup(&entry.source_text, &src_lang, &opts.target_language)?;
         if hit.is_none() {
             if let Some(global) = global_tm.as_deref_mut() {
                 hit = global.tm_lookup(&entry.source_text, &src_lang, &opts.target_language)?;
             }
         }
-        // Memoria que a tabela nao escreve nem sem os acentos, ou que nao
-        // cabe no espaco desta string (veio de texto de outro encoding, de
-        // outro projeto ou de uma resposta que estourou), nao serve: o
-        // provider recebe a lista de caracteres e o teto, e responde de novo.
-        let hit = hit.filter(|hit| table.is_none_or(|table| table_accepts(&entry, table, hit)));
+        // Memoria que o conjunto da entry nao escreve nem sem os acentos, ou
+        // que nao cabe no espaco de uma string de tabela (veio de texto de
+        // outro encoding, de outro projeto ou de uma resposta que estourou),
+        // nao serve: o provider recebe a lista de caracteres e o teto, e
+        // responde de novo.
+        let hit = hit.filter(|hit| charset.is_none_or(|charset| charset.accepts(&entry, hit)));
         if let Some(hit) = hit {
-            save_translation(db, &entry, &hit, table)?;
+            save_translation(db, &entry, &hit, charset)?;
             summary.tm_hits += 1;
         } else {
             remaining.push(entry);
@@ -119,21 +121,27 @@ pub async fn run_translation(
         phase: "tm",
     });
 
-    // Fase 2 — provider, em batches sequenciais com retry. Um batch, uma
-    // tabela: o prompt lista os caracteres de UMA tabela. A ordenacao e
-    // estavel — texto sem tabela vem primeiro, na ordem de sempre.
+    // Fase 2 — provider, em batches sequenciais com retry. Um batch, um
+    // conjunto de caracteres: o prompt lista os caracteres de UM conjunto, e
+    // texto que escreve tudo (UTF-8, UTF-16) nunca divide batch com texto
+    // que nao tem acento. A ordenacao e estavel — dentro de cada grupo, a
+    // ordem de sempre.
     let glossary = db.glossary_list()?;
     let mut done = summary.tm_hits;
-    remaining.sort_by(|a, b| table_id(a).cmp(&table_id(b)));
+    remaining.sort_by(|a, b| charset_group(a).cmp(&charset_group(b)));
     let batches = remaining
-        .chunk_by(|a, b| table_id(a) == table_id(b))
-        .flat_map(|same_table| same_table.chunks(opts.batch_size.max(1)));
+        .chunk_by(|a, b| charset_group(a) == charset_group(b))
+        .flat_map(|same_charset| same_charset.chunks(opts.batch_size.max(1)));
     for batch in batches {
         if cancel.load(Ordering::Relaxed) {
             summary.cancelled = true;
             break;
         }
-        let table = tables.for_entry(&batch[0])?;
+        let charset = Charset::of(&batch[0], &mut tables)?;
+        let table = match charset {
+            Some(Charset::Table(table)) => Some(table),
+            _ => None,
+        };
         let request = TranslationRequest {
             items: batch
                 .iter()
@@ -160,7 +168,7 @@ pub async fn run_translation(
             source_language: opts.source_language.clone(),
             target_language: opts.target_language.clone(),
             glossary: relevant_terms(&glossary, batch),
-            charset: table.map(TblTable::charset),
+            charset: charset.map(Charset::chars),
         };
 
         match call_with_retry(provider, &request, opts).await {
@@ -169,7 +177,7 @@ pub async fn run_translation(
                     let Some(entry) = batch.iter().find(|e| e.id == item.id) else {
                         continue; // id inventado pelo modelo: ignora
                     };
-                    save_translation(db, entry, &item.translation, table)?;
+                    save_translation(db, entry, &item.translation, charset)?;
                     db.tm_store(
                         &entry.source_text,
                         &src_lang,
@@ -179,6 +187,12 @@ pub async fn run_translation(
                     // Resposta moldada pela tabela de UM jogo (sem acento,
                     // sem a pontuacao que falta) nao vai pra memoria global:
                     // outro projeto a receberia sem perguntar ao provider.
+                    // ponytail: a de batch ASCII vai, como sempre foi — todo
+                    // adapter extrai ASCII, e sem ela a memoria global nao
+                    // serviria de um jogo pro outro. O custo: entry UTF-8 ou
+                    // UTF-16 de outro projeto pode receber dela uma traducao
+                    // sem acento. Marcar na memoria o conjunto que moldou a
+                    // resposta se aparecer projeto que misture os dois.
                     if let Some(global) = global_tm.as_deref_mut().filter(|_| table.is_none()) {
                         global.tm_store(
                             &entry.source_text,
@@ -222,38 +236,94 @@ pub async fn run_translation(
     Ok(summary)
 }
 
-/// O id da tabela de caracteres que le e grava a entry, se houver.
-fn table_id(entry: &TextEntry) -> Option<&str> {
-    match &entry.encoding {
-        TextEncoding::Table(id) => Some(id),
-        _ => None,
+/// O que o encoding da entry escreve, quando e menos que o Unicode. Decide o
+/// batch (um batch, um conjunto), vai pro prompt e e a rede por onde a
+/// traducao automatica passa antes de ser gravada. UTF-8 e UTF-16 escrevem
+/// tudo: nao tem conjunto, e nada e trocado neles.
+// ponytail: Shift-JIS fica sem conjunto — nao ha encoder nem extrator dele
+// aqui, e o conjunto nao cabe numa linha de prompt.
+#[derive(Clone, Copy)]
+enum Charset<'a> {
+    /// `TextEncoding::Ascii`: o ASCII imprimivel.
+    Ascii,
+    /// `TextEncoding::Table`: o que a tabela do projeto escreve.
+    Table(&'a TblTable),
+}
+
+impl<'a> Charset<'a> {
+    fn of(entry: &TextEntry, tables: &'a mut ProjectTables) -> Result<Option<Self>> {
+        Ok(match &entry.encoding {
+            TextEncoding::Ascii => Some(Charset::Ascii),
+            TextEncoding::Table(id) => Some(Charset::Table(tables.get(id)?)),
+            _ => None,
+        })
+    }
+
+    /// A lista de caracteres que vai pro prompt do batch.
+    fn chars(self) -> String {
+        match self {
+            Charset::Ascii => (' '..='~').collect(),
+            Charset::Table(table) => table.charset(),
+        }
+    }
+
+    /// `text` com o que o conjunto nao escreve trocado pelo equivalente
+    /// simples (`tbl::plain_equivalent`: a letra sem acento, o sinal ASCII
+    /// das aspas e do travessao tipograficos). `None` = nada a trocar. O que
+    /// nao tem equivalente fica como veio, e a validacao acusa.
+    fn fit(self, text: &str) -> Option<String> {
+        match self {
+            Charset::Ascii => {
+                let plain = |ch: char| plain_equivalent(ch).unwrap_or_else(|| ch.to_string());
+                let fitted: String = text.chars().map(plain).collect();
+                (fitted != text).then_some(fitted)
+            }
+            Charset::Table(table) => table.drop_missing_accents(text),
+        }
+    }
+
+    /// A reinsercao aceita `text` no lugar desta entry? O conjunto tem que
+    /// escreve-lo (sem os acentos que faltam) e, em texto de tabela que so e
+    /// gravado no lugar, ele tem que caber no espaco da string — a conta da
+    /// validacao, sobra de largura fixa inclusive.
+    fn accepts(self, entry: &TextEntry, text: &str) -> bool {
+        let fitted = self.fit(text);
+        let text = fitted.as_deref().unwrap_or(text);
+        match self {
+            Charset::Ascii => text.is_ascii(),
+            Charset::Table(table) => {
+                let slot = entry.original_bytes.len();
+                table
+                    .encode_slot(text, slot, terminated(entry))
+                    .is_ok_and(|bytes| bytes.len() <= slot || !entry.pointer_offsets().is_empty())
+            }
+        }
     }
 }
 
-/// A reinsercao aceita `text` no lugar desta entry de tabela? A tabela tem que
-/// escreve-lo (sem os acentos que faltam) e, se a string so e gravada no
-/// lugar, ele tem que caber no espaco dela — a conta da validacao, sobra de
-/// largura fixa inclusive.
-fn table_accepts(entry: &TextEntry, table: &TblTable, text: &str) -> bool {
-    let fitted = table.drop_missing_accents(text);
-    let slot = entry.original_bytes.len();
-    table
-        .encode_slot(fitted.as_deref().unwrap_or(text), slot, terminated(entry))
-        .is_ok_and(|bytes| bytes.len() <= slot || !entry.pointer_offsets().is_empty())
+/// Entries do mesmo grupo escrevem com o mesmo conjunto de caracteres e
+/// podem dividir um batch: sem restricao (UTF-8, UTF-16), ASCII, e cada
+/// tabela. Os mesmos casos de `Charset::of`.
+fn charset_group(entry: &TextEntry) -> (u8, &str) {
+    match &entry.encoding {
+        TextEncoding::Ascii => (1, ""),
+        TextEncoding::Table(id) => (2, id),
+        _ => (0, ""),
+    }
 }
 
-/// Grava a traducao automatica da entry. Texto de tabela passa antes pela
-/// rede de seguranca: acento que a tabela nao tem vira a letra base
-/// (`TblTable::drop_missing_accents`), e a troca fica registrada pra
-/// validacao mostrar como aviso. O que continuar fora da tabela e gravado
-/// como veio — e erro de validacao, nunca byte inventado.
+/// Grava a traducao automatica da entry. Texto de conjunto restrito (ASCII,
+/// tabela) passa antes pela rede de seguranca: o que o conjunto nao escreve
+/// e tem equivalente simples e trocado por ele (`Charset::fit`), e a troca
+/// fica registrada pra validacao mostrar como aviso. O que continuar fora do
+/// conjunto e gravado como veio — e erro de validacao, nunca byte inventado.
 fn save_translation(
     db: &mut ProjectDb,
     entry: &TextEntry,
     answer: &str,
-    table: Option<&TblTable>,
+    charset: Option<Charset>,
 ) -> Result<()> {
-    let written = table.and_then(|table| table.drop_missing_accents(answer));
+    let written = charset.and_then(|charset| charset.fit(answer));
     db.update_translation(
         &entry.id,
         written.as_deref().unwrap_or(answer),

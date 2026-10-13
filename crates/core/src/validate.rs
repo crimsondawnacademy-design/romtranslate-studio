@@ -36,8 +36,9 @@ pub enum IssueKind {
     LengthAnomaly,
     /// Traducao nao e codificavel no encoding destino (ex.: "ç" em ASCII).
     Unencodable,
-    /// A traducao automatica veio com acento que a tabela do jogo nao tem e
-    /// foi gravada com a letra base (Warning).
+    /// A traducao automatica veio com acento (ou aspas e travessao
+    /// tipograficos) que o texto da string nao escreve — ASCII ou a tabela do
+    /// jogo — e foi gravada com o equivalente simples (Warning).
     AccentDropped,
 }
 
@@ -73,15 +74,14 @@ pub enum EncodedLen {
 /// (`ProjectTables::for_entry`); os outros encodings nao olham pra ela.
 pub fn encoded_len(text: &str, encoding: &TextEncoding, table: Option<&TblTable>) -> EncodedLen {
     match encoding {
-        TextEncoding::Ascii => {
-            if text.is_ascii() {
-                EncodedLen::Bytes(text.len())
-            } else {
-                EncodedLen::Unencodable(
-                    "traducao tem caracteres fora do encoding destino".to_string(),
-                )
-            }
-        }
+        TextEncoding::Ascii => match text.chars().enumerate().find(|(_, c)| !c.is_ascii()) {
+            None => EncodedLen::Bytes(text.len()),
+            Some((at, ch)) => EncodedLen::Unencodable(format!(
+                "o caractere {ch:?} (posicao {}) nao existe em ASCII, que e como o texto desta \
+                 string esta gravado — troque o caractere",
+                at + 1
+            )),
+        },
         TextEncoding::Utf8 => EncodedLen::Bytes(text.len()),
         TextEncoding::Utf16Le | TextEncoding::Utf16Be => {
             EncodedLen::Bytes(text.encode_utf16().count() * 2)
@@ -287,17 +287,23 @@ fn accent_swap_issue(
     swaps: &HashMap<String, (String, String)>,
 ) -> Option<ValidationIssue> {
     let (answer, written) = swaps.get(&entry.id)?;
-    let TextEncoding::Table(id) = &entry.encoding else {
-        return None;
+    let why = match &entry.encoding {
+        TextEncoding::Table(id) => format!(
+            "a tabela do jogo nao tem esses caracteres — confira se o sentido se mantem; pra \
+             te-los no jogo, acrescente a linha deles em tables/{id}.tbl"
+        ),
+        TextEncoding::Ascii => "o texto desta string e ASCII, sem letra acentuada nem aspas e \
+                                travessao tipograficos — confira se o sentido se mantem"
+            .to_string(),
+        // UTF-8 e UTF-16 escrevem tudo: troca nenhuma vale pra eles.
+        _ => return None,
     };
     (entry.translated_text.as_ref() == Some(written)).then(|| ValidationIssue {
         entry_id: entry.id.clone(),
         severity: Severity::Warning,
         kind: IssueKind::AccentDropped,
         message: format!(
-            "a traducao veio como \"{answer}\" e foi gravada como \"{written}\": a tabela do \
-             jogo nao tem esses acentos — confira se o sentido se mantem; pra ter o acento no \
-             jogo, acrescente a linha dele em tables/{id}.tbl"
+            "a traducao veio como \"{answer}\" e foi gravada como \"{written}\": {why}"
         ),
     })
 }
@@ -417,6 +423,20 @@ pub fn set_reviewed(db: &mut ProjectDb, id: &str, reviewed: bool) -> Result<Tran
     Ok(status)
 }
 
+/// Desfaz a marca de nome interno (`scan::looks_like_identifier`): a entry
+/// volta a ser texto pendente e entra na proxima traducao.
+pub fn unmark_internal(db: &mut ProjectDb, id: &str) -> Result<()> {
+    match db.get_entry(id)?.map(|entry| entry.status) {
+        Some(TranslationStatus::Internal) => db.set_status(id, TranslationStatus::Untranslated),
+        Some(_) => Err(crate::error::CoreError::Project(format!(
+            "a entry {id} nao esta marcada como nome interno"
+        ))),
+        None => Err(crate::error::CoreError::Project(format!(
+            "entry {id} nao existe"
+        ))),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -478,9 +498,13 @@ mod tests {
             .iter()
             .any(|i| i.kind == IssueKind::ByteOverflow && i.severity == Severity::Warning));
 
-        // Nao-ASCII em encoding ASCII -> Unencodable.
+        // Nao-ASCII em encoding ASCII -> Unencodable, com o caractere e onde.
         let bad = validate_entry(&entry("POTION", "POÇÃO", TextEncoding::Ascii), None);
         assert!(kinds(&bad).contains(&IssueKind::Unencodable));
+        assert!(
+            bad[0].message.contains("'Ç'") && bad[0].message.contains("posicao 3"),
+            "{bad:?}"
+        );
 
         // UTF-16: 2 bytes por unidade.
         assert_eq!(

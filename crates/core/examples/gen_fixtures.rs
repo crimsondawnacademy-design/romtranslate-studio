@@ -10,7 +10,7 @@ fn main() -> std::io::Result<()> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/generated");
     fs::create_dir_all(&dir)?;
 
-    let files: [(&str, Vec<u8>); 20] = [
+    let files: [(&str, Vec<u8>); 21] = [
         ("synthetic_ps1.bin", synth::make_ps1_bin()),
         ("synthetic_ps2.iso", synth::make_ps2_iso()),
         ("synthetic_psp.iso", synth::make_psp_iso()),
@@ -49,6 +49,8 @@ fn main() -> std::io::Result<()> {
         ("synthetic_lz77.gba", synth::make_gba_rom_with_lz77().0),
         // Lixo imprimivel antes do texto: o filtro de "parece texto".
         ("synthetic_lixo.gba", synth::make_gba_rom_with_junk()),
+        // Texto ASCII, nomes internos com ponteiro e uma fala em UTF-16.
+        ("synthetic_nomes.gba", synth::make_gba_rom_with_names()),
     ];
 
     for (name, bytes) in files {
