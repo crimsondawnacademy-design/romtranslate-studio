@@ -167,12 +167,14 @@ const messages = {
       "{n} frases estavam dentro de blocos comprimidos (LZ77). A tradução de cada uma precisa caber no espaço da original; na reinserção o bloco é recomprimido.",
     "extract.jis16":
       "{n} frases estão em japonês, em códigos de 16 bits na ordem da tabela japonesa padrão (JIS). O app montou a tabela de letras sozinho e guardou no projeto (tables/jis16.tbl). O que o scanner comum leu neste jogo saiu da fila de tradução: num jogo assim é quase tudo dado, e aparece no filtro “nomes internos”.",
+    "extract.banked":
+      "{n} dessas mensagens podem crescer: o jogo guarda cada bloco de falas com uma tabela de posições, e o app remonta o bloco com a tradução maior (se ele não couber onde estava, vai para o espaço livre do arquivo). O limite passa a ser a caixa de texto do jogo: a largura de linha medida no próprio jogo, que a validação confere.",
     "translate.ascii":
       "Texto ASCII não tem letra acentuada: a IA é avisada disso e, se mesmo assim responder com acento ou com aspas e travessão tipográficos, o app grava a letra sem acento e o sinal simples, com um aviso na frase. O que não tem equivalente bloqueia a reinserção e a frase diz qual caractere é.",
     "translate.japanese":
       "Texto em japonês (Shift-JIS): a tradução é gravada com as letras comuns, sem acento, porque a tabela japonesa não tem letra acentuada. Japonês diz muito em poucos bytes, então a frase que não pode mudar de lugar precisa caber no espaço da original, e a IA já recebe esse limite. Palavra escrita só em kanji, sem kana, ainda não é lida.",
     "translate.jis16":
-      "Japonês em códigos de 16 bits: cada letra da tradução ocupa o espaço de um caractere japonês (2 bytes) e é gravada na forma larga que a tabela japonesa tem, sem acento. A frase precisa caber no espaço da original, então a tradução pode ter no máximo o mesmo número de letras, e a IA recebe esse limite. Os códigos entre colchetes, como [FF01], são comandos do jogo (quebra de linha, pausa): a tradução tem que mantê-los.",
+      "Japonês em códigos de 16 bits: cada letra da tradução ocupa o espaço de um caractere japonês (2 bytes) e é gravada na forma larga que a tabela japonesa tem, sem acento. A mensagem que está num bloco com tabela de posições pode crescer, e o limite dela é a largura da caixa de texto; a que não está precisa caber no espaço da original, e a IA recebe esse limite. Os códigos entre colchetes, como [FF01], são comandos do jogo (quebra de linha, pausa): a tradução tem que mantê-los.",
     "glossary.title": "Glossário",
     "glossary.term": "Termo",
     "glossary.translation": "Tradução",
@@ -250,6 +252,8 @@ const messages = {
       "Este arquivo é para o seu uso. Para compartilhar a tradução, exporte o patch: quem tem o jogo original aplica o patch e chega no mesmo arquivo.",
     "reinsert.applied": "{applied} traduções aplicadas · {kept} mantidas no original",
     "reinsert.relocated": "{n} realocadas, com os ponteiros atualizados",
+    "reinsert.noRoom":
+      "{n} traduções ficaram sem espaço: o bloco de falas delas, remontado, não coube no espaço livre do arquivo. Esses blocos ficaram como no original. Encurte as traduções desses blocos e reinsira.",
     "reinsert.packedLeftOut":
       "{n} traduções de blocos comprimidos ficaram de fora: o bloco regravado ficou maior que o original e o jogo não tem tabela de ponteiros para ele mudar de lugar. Encurte o texto desses blocos e reinsira.",
     "reinsert.advanced": "Modo avançado: reinserir mesmo com erros de validação",
@@ -430,12 +434,14 @@ const messages = {
       "{n} lines were inside compressed blocks (LZ77). Each translation must fit the space of its original; on reinsertion the block is compressed again.",
     "extract.jis16":
       "{n} lines are in Japanese, as 16-bit codes in the order of the standard Japanese table (JIS). The app built the letter table by itself and saved it in the project (tables/jis16.tbl). What the plain scanner read in this game left the translation queue: in a game like this it is almost all data, and it shows up under the “internal names” filter.",
+    "extract.banked":
+      "{n} of those messages can grow: the game stores each block of lines with a table of positions, and the app rebuilds the block with the longer translation (if it no longer fits where it was, it goes to the free space of the file). The limit becomes the game's text box: the line width measured in the game itself, which validation checks.",
     "translate.ascii":
       "ASCII text has no accented letters: the AI is told so and, if it still answers with an accent or with typographic quotes and dashes, the app writes the plain letter and the plain sign, with a warning on the string. Anything with no equivalent blocks reinsertion and the string says which character it is.",
     "translate.japanese":
       "Japanese text (Shift-JIS): the translation is written with plain letters, no accents, because the Japanese table has no accented letters. Japanese says a lot in few bytes, so a line that cannot move must fit the space of its original, and the AI is told that limit up front. A word written only in kanji, with no kana, is not read yet.",
     "translate.jis16":
-      "Japanese in 16-bit codes: each letter of the translation takes the space of one Japanese character (2 bytes) and is written in the wide form the Japanese table has, without accents. A line must fit the space of its original, so the translation can have at most the same number of letters, and the AI is told that limit. Codes in brackets, like [FF01], are game commands (line break, pause): the translation must keep them.",
+      "Japanese in 16-bit codes: each letter of the translation takes the space of one Japanese character (2 bytes) and is written in the wide form the Japanese table has, without accents. A message that sits in a block with a table of positions can grow, and its limit is the width of the text box; one that does not must fit the space of its original, and the AI is told that limit. Codes in brackets, like [FF01], are game commands (line break, pause): the translation must keep them.",
     "glossary.title": "Glossary",
     "glossary.term": "Term",
     "glossary.translation": "Translation",
@@ -513,6 +519,8 @@ const messages = {
       "This file is for your own use. To share the translation, export the patch: anyone who owns the original game applies it and gets the same file.",
     "reinsert.applied": "{applied} translations applied · {kept} kept original",
     "reinsert.relocated": "{n} relocated, with pointers updated",
+    "reinsert.noRoom":
+      "{n} translations ran out of room: their block of lines, rebuilt, did not fit the free space of the file. Those blocks stayed as in the original. Shorten the translations in those blocks and reinsert.",
     "reinsert.packedLeftOut":
       "{n} translations in compressed blocks were left out: the rewritten block came out larger than the original and the game has no pointer table that lets it move. Shorten the text in those blocks and reinsert.",
     "reinsert.advanced": "Advanced mode: reinsert even with validation errors",

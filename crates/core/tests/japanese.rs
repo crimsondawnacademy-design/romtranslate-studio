@@ -491,7 +491,7 @@ mod jis16 {
             assert!(out.tables.is_empty());
             assert!(!out.entries.iter().any(|e| e.encoding == table_encoding()));
         }
-        assert!(kuten::extract(&synth::make_gba_rom_japanese()).is_none());
+        assert!(kuten::extract(&synth::make_gba_rom_japanese(), &Default::default()).is_none());
     }
 
     #[test]
@@ -637,5 +637,242 @@ mod jis16 {
             .iter()
             .flat_map(|r| r.items.iter())
             .any(|i| i.text == "WELCOME TO THE VILLAGE!"));
+    }
+}
+
+// --- Banco de mensagens em blocos: a traducao pode crescer ---
+
+mod bank {
+    use super::*;
+    use romtranslate_core::kuten;
+    use romtranslate_core::reinsert::{reinsert_project_with, ErrorPolicy};
+    use romtranslate_core::synth::{JIS16_BANK_AT, JIS16_BANK_PADDING, JIS16_BANK_PAIRS};
+
+    fn u16_at(rom: &[u8], at: usize) -> usize {
+        u16::from_le_bytes([rom[at], rom[at + 1]]) as usize
+    }
+
+    fn u32_at(rom: &[u8], at: usize) -> usize {
+        u32::from_le_bytes(rom[at..at + 4].try_into().unwrap()) as usize
+    }
+
+    /// (tabela, texto) da sala `room`, pelo diretorio do banco.
+    fn room_at(rom: &[u8], room: usize) -> (usize, usize) {
+        let entry = JIS16_BANK_AT + 4 + 8 * JIS16_BANK_PAIRS[room];
+        (
+            JIS16_BANK_AT + u32_at(rom, entry),
+            JIS16_BANK_AT + u32_at(rom, entry + 4),
+        )
+    }
+
+    /// A mensagem `k` da sala `room`, lida como o jogo le: diretorio, tabela,
+    /// e dali ate o 0xFFFF. Comandos e numeros aparecem como codigo.
+    fn message(rom: &[u8], room: usize, k: usize) -> String {
+        let (table, text) = room_at(rom, room);
+        let mut at = text + u16_at(rom, table + 2 * k);
+        let mut out = String::new();
+        while u16_at(rom, at) != 0xFFFF {
+            let code = u16_at(rom, at) as u16;
+            out.push_str(&match code {
+                synth::JIS16_SPACE => " ".to_string(),
+                code if code >= 0xFF00 => format!("[{code:04X}]"),
+                code => kuten::decode(code).map_or(format!("<{code:04X}>"), String::from),
+            });
+            at += 2;
+        }
+        out
+    }
+
+    fn project(tmp: &TempDir, padding: bool) -> (PathBuf, Vec<u8>) {
+        let rom = synth::make_gba_rom_jis16_bank(padding);
+        let source = tmp.0.join("game.gba");
+        fs::write(&source, &rom).unwrap();
+        let dir = tmp.0.join("game.rtsproj");
+        create_project(CreateProjectArgs {
+            source_path: source,
+            platform: Platform::Gba,
+            adapter_id: GbaAdapter.id().to_string(),
+            source_language: Some("ja".to_string()),
+            target_language: "pt-BR".to_string(),
+            project_dir: dir.clone(),
+        })
+        .unwrap();
+        extract_project(&dir).unwrap();
+        (dir, rom)
+    }
+
+    /// Uma traducao maior que o original (36 unidades contra 27), com as
+    /// duas linhas dentro da caixa de 18 caracteres.
+    const LONG: &str = "◆Todo o povo aqui[FF01]segue no trabalho.";
+
+    #[test]
+    fn messages_in_a_bank_can_grow_and_know_the_width_of_the_box() {
+        let rom = synth::make_gba_rom_jis16_bank(true);
+        let out = GbaAdapter.extract(&rom).unwrap();
+        let first = by_text(&out.entries, &synth::jis16_message(0));
+        assert_eq!(first.max_bytes, None);
+        assert!(first.can_grow());
+        assert_eq!(first.metadata["bank"]["at"], JIS16_BANK_AT);
+        assert_eq!(first.metadata["bank"]["pair"], JIS16_BANK_PAIRS[0]);
+        // A maior linha do roteiro: "おいしい スープを つくっている。" e o
+        // sujeito mais comprido com o losango.
+        let longest = (0..120)
+            .map(|i| {
+                synth::jis16_message(i)
+                    .split(['[', ']'])
+                    .step_by(2)
+                    .map(|line| line.chars().count())
+                    .max()
+                    .unwrap()
+            })
+            .max()
+            .unwrap();
+        assert_eq!(first.metadata["bank"]["line"], longest);
+        // As 120 mensagens, das seis salas, todas marcadas.
+        let banked = out.entries.iter().filter(|e| e.can_grow()).count();
+        assert_eq!(banked, 120);
+        by_text(&out.entries, &synth::jis16_message(119));
+
+        // Maior que o original nao e erro, e dentro da caixa nem aviso de
+        // linha; linha maior que a caixa e aviso.
+        let table = romtranslate_core::tbl::TblTable::parse(&out.tables[0].1).unwrap();
+        let issues = validate_entry(&translated(first, LONG), Some(&table));
+        assert!(
+            !issues
+                .iter()
+                .any(|i| i.severity == Severity::Error || i.message.contains("caixa de texto")),
+            "{issues:?}"
+        );
+        let wide = "◆O povo todo desta vila aqui[FF01]trabalha.";
+        let issues = validate_entry(&translated(first, wide), Some(&table));
+        assert!(
+            issues
+                .iter()
+                .any(|i| i.severity == Severity::Warning && i.message.contains("caixa de texto")),
+            "{issues:?}"
+        );
+    }
+
+    #[test]
+    fn a_block_that_grows_moves_to_the_free_space_and_the_game_still_finds_it() {
+        let tmp = TempDir::new("bank-grow");
+        let (dir, rom) = project(&tmp, true);
+        set_translations(&dir, &[(&synth::jis16_message(0), LONG)]);
+        let outcome = reinsert_project_with(&dir, ErrorPolicy::Block).unwrap();
+        assert_eq!(outcome.apply.applied, 1);
+        assert_eq!(outcome.apply.relocated, 1);
+        assert_eq!(outcome.apply.no_room, 0);
+        let working = fs::read(&outcome.working_path).unwrap();
+        assert_eq!(working.len(), rom.len());
+
+        // A sala 0 foi pro preenchimento, tabela e texto colados.
+        let (old_table, old_text) = room_at(&rom, 0);
+        let (table, text) = room_at(&working, 0);
+        assert!(JIS16_BANK_PADDING.contains(&table), "0x{table:X}");
+        assert_eq!(text - table, old_text - old_table);
+        // Lida pelo diretorio: a traducao, em letras de largura inteira, com a
+        // quebra de linha e os comandos do fim no lugar.
+        assert_eq!(
+            message(&working, 0, 0),
+            "◆Ｔｏｄｏ ｏ ｐｏｖｏ ａｑｕｉ[FF01]ｓｅｇｕｅ ｎｏ ｔｒａｂａｌｈｏ．[FF03][FF00]"
+        );
+        // As outras 19 mensagens da sala continuam inteiras, no lugar novo.
+        for k in 1..20 {
+            assert_eq!(message(&working, 0, k), message(&rom, 0, k), "mensagem {k}");
+        }
+        // O lugar antigo foi limpo, e o resto do banco nao foi tocado.
+        let (next_table, _) = room_at(&rom, 1);
+        assert!(working[old_table..next_table].iter().all(|b| *b == 0xFF));
+        for room in 1..6 {
+            assert_eq!(room_at(&working, room), room_at(&rom, room));
+            for k in 0..20 {
+                assert_eq!(message(&working, room, k), message(&rom, room, k));
+            }
+        }
+        assert_eq!(working[..JIS16_BANK_AT], rom[..JIS16_BANK_AT]);
+        assert_eq!(
+            working[JIS16_BANK_PADDING.end..],
+            rom[JIS16_BANK_PADDING.end..]
+        );
+    }
+
+    #[test]
+    fn a_block_that_still_fits_stays_where_it_was() {
+        let tmp = TempDir::new("bank-stay");
+        let (dir, rom) = project(&tmp, true);
+        // Mais curta que o original, na mensagem 11 (sala 0, com o comando e
+        // o parametro antes do losango) e na 20 (a primeira da sala 1, com o
+        // numero da sala e o numero de cabecalho antes dela).
+        set_translations(
+            &dir,
+            &[
+                (&synth::jis16_message(11), "◆Eles[FF01]cantam."),
+                (&synth::jis16_message(20), "◆Ela[FF01]dorme."),
+            ],
+        );
+        let outcome = reinsert_project_with(&dir, ErrorPolicy::Block).unwrap();
+        assert_eq!((outcome.apply.applied, outcome.apply.relocated), (2, 0));
+        let working = fs::read(&outcome.working_path).unwrap();
+        for room in 0..2 {
+            assert_eq!(room_at(&working, room), room_at(&rom, room));
+        }
+        // O comando e o parametro dele (lido aqui como "，") continuam antes
+        // do losango; o numero de cabecalho da mensagem 20 tambem.
+        assert!(message(&working, 0, 11).starts_with("[FF08]，◆Ｅｌｅｓ[FF01]ｃａｎｔａｍ．"));
+        assert!(message(&working, 1, 0).starts_with("・◆Ｅｌａ[FF01]ｄｏｒｍｅ．"));
+        let (_, text) = room_at(&working, 1);
+        assert_eq!(
+            working[text..text + 4],
+            [0xFF, 0xFF, 0x01, 0x00],
+            "cabecalho da sala"
+        );
+        assert_eq!(message(&working, 0, 10), message(&rom, 0, 10));
+        assert_eq!(message(&working, 1, 19), message(&rom, 1, 19));
+        assert_eq!(working[JIS16_BANK_PADDING], rom[JIS16_BANK_PADDING]);
+    }
+
+    #[test]
+    fn without_free_space_the_block_is_left_alone_and_the_count_says_so() {
+        let tmp = TempDir::new("bank-full");
+        let (dir, rom) = project(&tmp, false);
+        set_translations(&dir, &[(&synth::jis16_message(0), LONG)]);
+        let err = reinsert_project_with(&dir, ErrorPolicy::Block)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("sem espaco"), "{err}");
+        let outcome = reinsert_project_with(&dir, ErrorPolicy::Skip).unwrap();
+        assert_eq!((outcome.apply.applied, outcome.apply.no_room), (0, 1));
+        assert_eq!(fs::read(&outcome.working_path).unwrap(), rom);
+    }
+
+    #[tokio::test]
+    async fn the_ai_is_told_the_width_of_the_box_instead_of_a_size_limit() {
+        let tmp = TempDir::new("bank-ia");
+        let (dir, _) = project(&tmp, true);
+        let provider = FakeProvider {
+            answers: HashMap::new(),
+            requests: Mutex::new(Vec::new()),
+        };
+        let mut db = ProjectDb::open(&dir).unwrap();
+        run_translation(
+            &mut db,
+            None,
+            &provider,
+            "fake-model",
+            &TranslateOptions::new("pt-BR"),
+            &AtomicBool::new(false),
+            &|_| {},
+        )
+        .await
+        .unwrap();
+        let requests = provider.requests.lock().unwrap().clone();
+        let item = requests
+            .iter()
+            .flat_map(|r| r.items.iter())
+            .find(|i| i.text == synth::jis16_message(0))
+            .expect("a primeira mensagem foi pedida");
+        assert_eq!(item.max_chars, None);
+        let note = item.context.as_deref().unwrap_or_default();
+        assert!(note.contains("characters per line"), "{note}");
     }
 }

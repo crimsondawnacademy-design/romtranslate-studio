@@ -1756,3 +1756,39 @@ Comando com parâmetro pode deixar o parâmetro aparecer como caractere.
 **Lição:** "jogo japonês" não é um formato. Antes de escrever leitor, medir
 num jogo real: uma busca estatística de 16 bits achou em minutos o que a
 suposição (Shift-JIS) não acharia nunca.
+
+
+## 2026-10-13 — Banco de mensagens em blocos: reconhecer pela estrutura e remontar
+
+**Contexto:** no jogo japonês medido a tradução só cabia com o número de
+letras do original ("Sim" não cabe em "はい"). O Rhuan pediu a frase poder
+crescer antes de traduzir tudo. Medindo o cartucho: o roteiro (85% do texto)
+é um banco com diretório de 32 bits, tabela de 16 bits por bloco e mensagens
+fechadas por `0xFFFF`.
+
+**Decisão:**
+- **Reconhecer pela estrutura, não pelo jogo.** `bank::find` aceita um banco
+  quando o diretório é coerente e quase todo offset das tabelas cai dentro do
+  bloco dele e logo depois de um fim de mensagem. São centenas de números que
+  têm que bater: não há perfil de jogo nem lista de títulos.
+- **Remontar o bloco inteiro**, não mexer em mensagem solta: a tabela é de
+  offsets de 16 bits relativos ao bloco, então mensagem maior desloca todas
+  as seguintes. O trecho de cada mensagem vai do offset dela ao da próxima, e
+  o que não é texto (comando, parâmetro, cabeçalho, fim) é copiado como está.
+- **Onde pôr o bloco que cresceu:** no próprio lugar se couber; senão no
+  espaço livre do arquivo — só trecho de 64 KiB ou mais de `0xFF`, e o lugar
+  dos blocos que saíram. O GBA do `relocate` anexa no fim do ROM, mas um
+  cartucho de 32 MiB não cresce. Sem lugar, o bloco fica como no original e a
+  contagem aparece: nunca uma imagem pela metade.
+- **O limite vira a caixa de texto**, medida no jogo: o tamanho de linha que
+  999 em cada mil linhas do banco respeitam. É aviso na validação, não erro:
+  é estatística do texto original, não leitura do motor do jogo.
+- **`TextEntry::can_grow`** junta os dois jeitos de crescer (ponteiro em
+  tabela e banco); validação, pipeline e reinserção perguntam a ele.
+
+**O que NÃO foi provado:** ninguém viu o jogo rodando com blocos fora do
+lugar. A suposição é que o jogo só chega nos blocos pelo diretório; um
+ponteiro direto pra dentro do banco, em código, quebraria. O espaço livre é
+justo (93% usado num teste com texto 1,5 vez maior). Só o GBA, só texto de
+16 bits com `0xFFFF` de fim. Os outros bancos do jogo medido (menus,
+batalha, nomes) não têm essa forma.

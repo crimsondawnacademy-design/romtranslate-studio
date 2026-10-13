@@ -224,7 +224,7 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
             {
                 push(Severity::Error, IssueKind::ByteOverflow, e.to_string());
             }
-            let relocatable = !entry.pointer_offsets().is_empty();
+            let relocatable = entry.can_grow();
             // Realocavel pode ter teto (PS1: a sobra do setor final do arquivo):
             // passar dele e erro; entre o original e o teto, aviso.
             match entry.max_bytes {
@@ -233,6 +233,9 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
                     IssueKind::ByteOverflow,
                     format!("traducao ocupa {n} bytes; limite do campo e {max}"),
                 ),
+                // Mensagem de banco com a largura da caixa conhecida: crescer
+                // e o esperado, e quem avisa e a conta de linha, mais abaixo.
+                _ if n > original && crate::adapters::bank::line_width(entry).is_some() => {}
                 // Realocar resolve o espaco na imagem, nao na tela: caixa de texto
                 // ou buffer de RAM do jogo podem nao comportar o texto maior.
                 _ if n > original && relocatable => push(
@@ -262,6 +265,22 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
                 ),
                 _ => {}
             }
+        }
+    }
+
+    // Mensagem que pode crescer ainda tem que caber na caixa de texto: cada
+    // linha (trecho entre dois codigos) ate a largura medida no jogo.
+    if let Some(width) = crate::adapters::bank::line_width(entry) {
+        let line = crate::adapters::bank::longest_line(translation);
+        if line > width {
+            push(
+                Severity::Warning,
+                IssueKind::ByteOverflow,
+                format!(
+                    "uma linha da traducao tem {line} caracteres; a caixa de texto do jogo \
+                     mostra {width} por linha — quebre a frase de outro jeito ou encurte"
+                ),
+            );
         }
     }
 

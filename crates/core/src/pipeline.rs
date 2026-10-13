@@ -152,7 +152,7 @@ fn batch_request(
             .map(|e| BatchItem {
                 id: e.id.clone(),
                 text: e.source_text.clone(),
-                context: e.context.clone(),
+                context: line_note(e).or_else(|| e.context.clone()),
                 max_bytes: e.max_bytes,
                 // Texto de tabela sem ponteiro em tabela so e gravado no
                 // lugar: o espaco da original e o teto, e o modelo
@@ -160,7 +160,7 @@ fn batch_request(
                 // copiar do original (codigo de controle, placeholder)
                 // entra pelo que custa, nao pelo que o modelo conta.
                 max_chars: table
-                    .filter(|_| e.pointer_offsets().is_empty())
+                    .filter(|_| !e.can_grow())
                     .map(|table| {
                         table.chars_that_fit_keeping(
                             e.original_bytes.len(),
@@ -171,7 +171,7 @@ fn batch_request(
                     // 6 letras: sem o teto ja no primeiro pedido, quase toda
                     // frase presa ao espaco dela voltaria grande demais.
                     .or_else(|| {
-                        (e.encoding == TextEncoding::ShiftJis && e.pointer_offsets().is_empty())
+                        (e.encoding == TextEncoding::ShiftJis && !e.can_grow())
                             .then(|| e.max_bytes.unwrap_or(e.original_bytes.len()))
                     }),
             })
@@ -181,6 +181,18 @@ fn batch_request(
         glossary: relevant_terms(glossary, batch),
         charset: charset.map(Charset::chars),
     }
+}
+
+/// O aviso da largura da caixa de texto pra mensagem de banco: ela pode
+/// crescer, mas cada linha tem que caber na caixa.
+fn line_note(entry: &TextEntry) -> Option<String> {
+    let width = crate::adapters::bank::line_width(entry)?;
+    Some(format!(
+        "The game's text box shows {width} characters per line. A line is the text between two \
+         codes in square brackets (and before the first and after the last one): write every \
+         line with at most {width} characters, counting spaces. Keep every code in square \
+         brackets exactly as it is, in the same order."
+    ))
 }
 
 /// Lotes seguidos que podem falhar (cada um ja com as suas tentativas) antes
@@ -578,7 +590,7 @@ impl<'a> Charset<'a> {
                 let slot = entry.original_bytes.len();
                 table
                     .encode_slot(text, slot, terminated(entry))
-                    .is_ok_and(|bytes| bytes.len() <= slot || !entry.pointer_offsets().is_empty())
+                    .is_ok_and(|bytes| bytes.len() <= slot || entry.can_grow())
             }
         }
     }
@@ -623,7 +635,7 @@ fn save_translation(
 /// em tabela), o encoding escreve tudo, ou `text` nem se escreve nele.
 fn excess(entry: &TextEntry, text: &str, charset: Option<Charset>) -> Option<usize> {
     let charset = charset?;
-    if !entry.pointer_offsets().is_empty() {
+    if entry.can_grow() {
         return None;
     }
     let table = match charset {

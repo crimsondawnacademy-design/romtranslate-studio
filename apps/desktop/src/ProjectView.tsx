@@ -92,6 +92,8 @@ export default function ProjectView({
     packed: number;
     /** Das salvas, quantas sao japones em codigos de 16 bits (tabela gerada). */
     jis16: number;
+    /** Das salvas, quantas podem crescer (banco em blocos). */
+    banked: number;
     structured: boolean;
   } | null>(null);
   const [encoding, setEncoding] = useState<ScanEncoding>("ascii");
@@ -242,6 +244,7 @@ export default function ProjectView({
         stray: 0,
         packed: 0,
         jis16: 0,
+        banked: 0,
         structured: false,
       });
       await reloadEntries();
@@ -315,6 +318,7 @@ export default function ProjectView({
         stray: outcome.stray,
         packed: outcome.packed,
         jis16: outcome.jis16,
+        banked: outcome.banked,
         structured: true,
       });
       await reloadEntries();
@@ -887,6 +891,9 @@ export default function ProjectView({
       {scanInfo && scanInfo.jis16 > 0 && (
         <p className="hint left">{t("extract.jis16", { n: scanInfo.jis16 })}</p>
       )}
+      {scanInfo && scanInfo.banked > 0 && (
+        <p className="hint left">{t("extract.banked", { n: scanInfo.banked })}</p>
+      )}
       {savedPath && <div className="ok">{t("export.saved", { path: savedPath })}</div>}
 
       {entries.length === 0 && (
@@ -1399,6 +1406,12 @@ export default function ProjectView({
                   <>
                     <br />
                     {t("reinsert.relocated", { n: reinsertOutcome.apply.relocated })}
+                  </>
+                )}
+                {reinsertOutcome.apply.noRoom > 0 && (
+                  <>
+                    <br />
+                    {t("reinsert.noRoom", { n: reinsertOutcome.apply.noRoom })}
                   </>
                 )}
                 {reinsertOutcome.apply.packedLeftOut > 0 && (

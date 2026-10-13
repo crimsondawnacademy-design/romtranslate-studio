@@ -344,13 +344,14 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             let mut text = format!(
                 "gravadas: {}, descartadas (nao parecem texto): {}, removidas do projeto antigo: {}, \
                  fora das regioes de texto (ficam fora da traducao): {}, de blocos comprimidos: {}, \
-                 em japones de 16 bits (tabela gerada): {}",
+                 em japones de 16 bits (tabela gerada): {}, que podem crescer (banco em blocos): {}",
                 outcome.saved,
                 outcome.discarded,
                 outcome.removed,
                 outcome.stray,
                 outcome.packed,
-                outcome.jis16
+                outcome.jis16,
+                outcome.banked
             );
             if outcome.truncated {
                 text.push_str("\ncortou no teto: pode haver mais texto");
@@ -456,7 +457,7 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             load(&project)?;
             let outcome = reinsert_project_with(&project, policy)?;
             let mut text = format!(
-                "arquivo traduzido: {}\naplicadas: {} ({} em outro lugar, com o ponteiro reapontado), no original: {}, fora da extracao estruturada: {}\npuladas por erro: {}, gravadas com erro: {}, de bloco comprimido que nao coube: {}\nverificacao: {}",
+                "arquivo traduzido: {}\naplicadas: {} ({} em outro lugar, com o ponteiro reapontado), no original: {}, fora da extracao estruturada: {}\npuladas por erro: {}, gravadas com erro: {}, de bloco comprimido que nao coube: {}, sem espaco no arquivo: {}\nverificacao: {}",
                 outcome.working_path.display(),
                 outcome.apply.applied,
                 outcome.apply.relocated,
@@ -465,6 +466,7 @@ fn run(cli: Cli) -> Result<Output, Failure> {
                 outcome.skipped_errors,
                 outcome.forced_errors,
                 outcome.apply.packed_left_out,
+                outcome.apply.no_room,
                 if outcome.verification.ok { "ok" } else { "FALHOU" }
             );
             for problem in &outcome.verification.problems {

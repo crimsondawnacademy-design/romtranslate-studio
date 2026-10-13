@@ -110,6 +110,8 @@ export interface ExtractOutcome {
   packed: number;
   /** Das salvas, quantas sao japones em codigos de 16 bits, lido por tabela gerada. */
   jis16: number;
+  /** Das salvas, quantas estao num banco em blocos: a traducao pode crescer. */
+  banked: number;
 }
 
 export interface OpenProjectReport {
@@ -258,6 +260,8 @@ export interface ApplyReport {
   relocated: number;
   /** Traducoes de bloco comprimido que nao couberam: o bloco ficou como no original. */
   packedLeftOut: number;
+  /** Traducoes de mensagem de banco que ficaram sem espaco no arquivo. */
+  noRoom: number;
 }
 
 export interface VerificationReport {

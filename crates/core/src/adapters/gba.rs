@@ -22,6 +22,7 @@
 
 use std::collections::HashSet;
 
+use super::bank;
 use super::packed;
 use super::pointers::{
     ensure_pointers_untouched, find_pointer_tables, is_terminated, mark_relocatable, relocate,
@@ -122,7 +123,10 @@ fn extract_capped(data: &[u8], cap: usize) -> Result<Extraction> {
     // Texto japones em codigos de 16 bits: e o texto do jogo, vai na frente
     // (o teto corta o fim) e nenhuma outra leitura fica com os bytes dele.
     let mut tables = Vec::new();
-    if let Some(found) = crate::kuten::extract(data) {
+    let banks = bank::find(data);
+    if let Some(mut found) = crate::kuten::extract(data, &bank::message_starts(&banks)) {
+        // Mensagem dentro de um banco em blocos pode crescer.
+        bank::tag(&mut found.entries, &banks);
         discarded += packed::drop_overlapping(&mut entries, &found.spans);
         // Num jogo que guarda o texto assim, o que o scanner de 8 bits le e
         // quase tudo dado: sem ponteiro em tabela, sai da fila de traducao
@@ -242,22 +246,32 @@ impl GameAdapter for GbaAdapter {
         }
         let raw: Vec<TextEntry> = entries
             .iter()
-            .filter(|e| !packed::is_packed(e))
+            .filter(|e| !packed::is_packed(e) && !bank::is_banked(e))
             .cloned()
             .collect();
         let mut plan = super::inplace::plan_in_place(data, &raw, true)?;
         let blocks = packed::plan(data, entries)?;
-        // Projeto extraido antes do texto comprimido pode ter traducao de
-        // string crua DENTRO de um bloco: ela perde, o bloco e que vale.
+        let banks = bank::plan(data, entries)?;
+        // Projeto extraido antes do texto comprimido (ou dos bancos de
+        // mensagens) pode ter traducao de string crua DENTRO de um bloco:
+        // ela perde, o bloco e que vale.
         let writes = plan.writes.len();
-        plan.writes
-            .retain(|(offset, patch)| !blocks.covers(*offset, patch.len()));
+        plan.writes.retain(|(offset, patch)| {
+            !blocks.covers(*offset, patch.len()) && !banks.covers(*offset, patch.len())
+        });
         let dropped = writes - plan.writes.len();
         plan.report.applied -= dropped;
         plan.report.ignored_generic += dropped;
 
         let mut out = data.to_vec();
-        for (offset, patch) in plan.writes.iter().chain(&blocks.writes) {
+        // As escritas dos bancos vao por ultimo e NA ORDEM em que vieram: um
+        // bloco pode ir pro lugar que outro acabou de deixar.
+        for (offset, patch) in plan
+            .writes
+            .iter()
+            .chain(&blocks.writes)
+            .chain(&banks.writes)
+        {
             out[*offset..offset + patch.len()].copy_from_slice(patch);
         }
         ensure_pointers_untouched(data, &out, entries)?;
@@ -269,6 +283,10 @@ impl GameAdapter for GbaAdapter {
         report.kept_original += blocks.report.kept_original;
         report.relocated += blocks.report.relocated;
         report.packed_left_out = blocks.report.packed_left_out;
+        report.applied += banks.report.applied;
+        report.kept_original += banks.report.kept_original;
+        report.relocated += banks.report.relocated;
+        report.no_room = banks.report.no_room;
         Ok(AppliedImage { bytes: out, report })
     }
 

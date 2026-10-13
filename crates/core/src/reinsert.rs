@@ -63,7 +63,7 @@ fn overflows_in_place(entry: &TextEntry) -> bool {
     let Some(text) = &entry.translated_text else {
         return false;
     };
-    entry.pointers().is_empty()
+    !entry.can_grow()
         && matches!(
             encoded_len(text, &entry.encoding, None),
             EncodedLen::Bytes(len) if len > entry.original_bytes.len()
@@ -175,6 +175,14 @@ fn reinsert(
         let original =
             fs::read(&project.source_path).map_err(|e| CoreError::io(&project.source_path, e))?;
         let applied = adapter.apply_text(&original, &entries)?;
+        if policy == ErrorPolicy::Block && applied.report.no_room > 0 {
+            return Err(CoreError::Project(format!(
+                "{} traducoes ficaram sem espaco: o bloco de mensagens delas, remontado, nao \
+                 coube no espaco livre do arquivo — encurte as traducoes desses blocos (ou \
+                 reinsira pulando as frases com erro)",
+                applied.report.no_room
+            )));
+        }
         if policy == ErrorPolicy::Block && applied.report.packed_left_out > 0 {
             return Err(CoreError::Project(format!(
                 "{} traducoes estao em blocos comprimidos que, regravados, ficaram maiores que \

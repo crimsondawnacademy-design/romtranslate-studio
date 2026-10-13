@@ -93,6 +93,10 @@ pub struct ApplyReport {
     /// ficou maior que o original e nao tem ponteiro em tabela pra mudar de
     /// lugar. O bloco inteiro fica como estava.
     pub packed_left_out: usize,
+    /// Traducoes de mensagem de banco que ficaram de fora por falta de
+    /// espaco: o bloco remontado nao coube em lugar nenhum do arquivo, ou
+    /// passou do que a tabela dele alcanca. O bloco fica como estava.
+    pub no_room: usize,
 }
 
 /// Imagem modificada em memoria + relatorio. O caller decide onde gravar

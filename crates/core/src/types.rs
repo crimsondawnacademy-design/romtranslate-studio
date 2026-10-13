@@ -217,6 +217,13 @@ impl TextEntry {
         read("pointers", 4).chain(read("pointers16", 2)).collect()
     }
 
+    /// A traducao pode ocupar mais que o espaco da original: a string tem
+    /// ponteiro em tabela (vai pra outro lugar) ou esta numa mensagem de
+    /// banco (`adapters::bank`: o bloco e remontado).
+    pub fn can_grow(&self) -> bool {
+        !self.pointers().is_empty() || self.metadata.get("bank").is_some_and(|v| v.is_object())
+    }
+
     /// So as posicoes dos ponteiros, de qualquer largura.
     pub fn pointer_offsets(&self) -> Vec<usize> {
         self.pointers().iter().map(|p| p.at).collect()

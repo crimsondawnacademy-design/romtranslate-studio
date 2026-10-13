@@ -322,7 +322,7 @@ struct Span {
 /// um desenho) e a unidade onde a varredura continua. Comando e espaco so
 /// entram quando vem outro caractere depois: no fim sao fecho de mensagem e
 /// preenchimento de campo.
-fn span_at(codes: &[u16], dialect: &Dialect, at: usize) -> (Span, usize) {
+fn span_at(codes: &[u16], dialect: &Dialect, starts: &HashSet<usize>, at: usize) -> (Span, usize) {
     let mut span = Span {
         begin: at,
         end: at,
@@ -332,6 +332,10 @@ fn span_at(codes: &[u16], dialect: &Dialect, at: usize) -> (Span, usize) {
     let (mut spaces, mut glyphs) = (0, 0);
     let mut i = at;
     while i < codes.len() && i - at < MAX_SPAN {
+        // Onde se sabe que outra mensagem comeca, esta acaba.
+        if i > at && starts.contains(&i) {
+            break;
+        }
         let (piece, len) = dialect.piece(codes, i);
         match piece {
             Piece::Char(' ') => spaces += 1,
@@ -370,7 +374,9 @@ fn span_at(codes: &[u16], dialect: &Dialect, at: usize) -> (Span, usize) {
 
 /// As sequencias de `codes` que passam por mensagem no jeito `dialect` de
 /// ler: comeco limpo, a regra de `Script` e, as curtas, fim limpo tambem.
-fn scan(codes: &[u16], dialect: &Dialect) -> Vec<Span> {
+/// `starts` = unidades onde se sabe que uma mensagem comeca (a tabela de um
+/// banco aponta pra la): nenhuma sequencia atravessa uma delas.
+fn scan(codes: &[u16], dialect: &Dialect, starts: &HashSet<usize>) -> Vec<Span> {
     // Unidades que sao parametro de comando: nunca abrem uma mensagem.
     let mut is_param = vec![false; codes.len()];
     let mut i = 0;
@@ -407,7 +413,7 @@ fn scan(codes: &[u16], dialect: &Dialect) -> Vec<Span> {
         // marca de fala do jogo. Fica fora da entry. No jogo medido sao 414
         // falas assim, com valores de 1 a 52.
         let header = i > 0
-            && codes[i - 1] == END
+            && (codes[i - 1] == END || starts.contains(&i))
             && codes[i] < *SHAPES.start()
             && codes
                 .get(i + 1)
@@ -415,13 +421,13 @@ fn scan(codes: &[u16], dialect: &Dialect) -> Vec<Span> {
         if header {
             i += 1;
         }
-        let (span, next) = span_at(codes, dialect, i);
+        let (span, next) = span_at(codes, dialect, starts, i);
         // O espaco do jogo antes e depois nao conta: a linha de baixo de uma
         // fala costuma abrir com um, logo depois da quebra de linha.
         let is_space = |at: &usize| Some(codes[*at]) == dialect.space;
         let before = (0..span.begin).rev().find(|at| !is_space(at));
         let after = (span.end..codes.len()).find(|at| !is_space(at));
-        let clean = header || clean_edge(before);
+        let clean = header || starts.contains(&span.begin) || clean_edge(before);
         // Ate 3 caracteres so entre comandos ou zeros dos dois lados: valor
         // pequeno de mapa de tiles vira "あい" o tempo todo.
         let anchored = span.chars > 3 || after.is_none_or(|at| clean_edge(Some(at)));
@@ -442,16 +448,22 @@ fn scan(codes: &[u16], dialect: &Dialect) -> Vec<Span> {
 /// Sao duas leituras: a primeira acha onde esta o texto, e e nele que se ve
 /// quais comandos levam parametro e com que marca as falas abrem; a segunda
 /// le de novo sabendo disso.
-pub fn extract(data: &[u8]) -> Option<Kuten16> {
+///
+/// `starts` = posicoes (em bytes) onde se sabe que uma mensagem comeca, de
+/// quem conhece a estrutura em volta do texto (`adapters::bank`). Pode vir
+/// vazio.
+pub fn extract(data: &[u8], starts: &HashSet<usize>) -> Option<Kuten16> {
+    let starts: HashSet<usize> = starts.iter().map(|at| at / 2).collect();
+    let starts = &starts;
     let codes = units(data);
     let mut dialect = Dialect {
         space: find_space(&codes),
         ..Dialect::default()
     };
-    let first = scan(&codes, &dialect);
+    let first = scan(&codes, &dialect, starts);
     dialect.params = find_params(&codes, dialect.space, &first);
     dialect.bullets = find_bullets(&codes, &first);
-    let found = scan(&codes, &dialect);
+    let found = scan(&codes, &dialect, starts);
 
     // Texto de jogo vem em fila; fora de fila so fica a sequencia longa.
     let text_of = |span: &Span| -> String {
@@ -576,13 +588,13 @@ mod tests {
 
     #[test]
     fn noise_and_small_numbers_are_not_text() {
-        assert!(extract(&make_random(1 << 20, 5)).is_none());
+        assert!(extract(&make_random(1 << 20, 5), &HashSet::new()).is_none());
         // Rampa de valores pequenos, como um mapa de tiles: cai nos kana.
         let ramp: Vec<u8> = (0..40_000u32)
             .flat_map(|i| ((280 + i % 90) as u16).to_le_bytes())
             .collect();
-        assert!(extract(&ramp).is_none());
-        assert!(extract(&[]).is_none());
-        assert!(extract(&[0x1B]).is_none());
+        assert!(extract(&ramp, &HashSet::new()).is_none());
+        assert!(extract(&[], &HashSet::new()).is_none());
+        assert!(extract(&[0x1B], &HashSet::new()).is_none());
     }
 }

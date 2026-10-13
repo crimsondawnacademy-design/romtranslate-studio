@@ -285,6 +285,38 @@ num emulador.** O que falta para esse jogo virar jogável em português é o
 que falta em geral: frase que muda de lugar (tabela de ponteiros relativos)
 e fonte (letra estreita e acentuada).
 
+**Tradução que cresce: banco de mensagens em blocos**
+(`crates/core/src/adapters/bank.rs`). O roteiro do jogo japonês medido fica
+num banco com esta forma: um número e, depois dele, uma fila de posições de
+32 bits relativas ao começo do banco, aos pares (a tabela de um bloco e o
+texto dele); a tabela de cada bloco é uma fila de posições de 16 bits
+relativas ao bloco de texto, uma por mensagem; cada mensagem fecha com
+`0xFFFF`. O app reconhece o banco pela própria estrutura (centenas de
+posições que têm que cair no lugar certo), sem saber que jogo é. Com isso:
+
+- a extração usa os começos de mensagem que a tabela aponta, e a mensagem
+  de banco deixa de ter teto de bytes;
+- na reinserção o bloco é remontado com as mensagens em fila e a tabela
+  refeita. Se o bloco novo cabe onde o antigo estava, fica lá; senão vai
+  para o espaço livre do arquivo (trecho de 64 KiB ou mais de `0xFF`, e o
+  lugar dos blocos que saíram) e o diretório é reapontado. Bloco que não
+  acha lugar, ou que passa de 64 KiB, fica como no original, e a contagem
+  aparece na tela;
+- o limite passa a ser a **caixa de texto**: a largura de linha (trecho
+  entre dois comandos) que 999 em cada mil linhas do banco respeitam. A IA
+  recebe essa largura e a validação avisa a linha que passa dela.
+
+Medido no jogo real, só em contagens: um banco de 563 blocos e 8.120
+mensagens, com 85% do texto do cartucho; caixa de 20 caracteres por linha
+(99,96% das 31 mil linhas); 359 KiB de preenchimento livre. Num teste de
+esforço, as 7.338 mensagens do banco foram trocadas por texto 1,5 vez maior:
+todas entraram, 414 dos 481 blocos com tabela mudaram de lugar, 336 dos 359
+KiB livres foram usados, e a leitura pelo diretório, mensagem a mensagem,
+deu os mesmos comandos e parâmetros do original nas 8.120. **Ninguém viu o
+jogo rodando com blocos fora do lugar.** Os outros bancos de texto desse
+jogo (menus, batalha, nomes: 15% do texto) têm outra estrutura e continuam
+com a tradução presa ao espaço da original.
+
 **Texto ASCII traduzido para idioma com acento**: num jogo que guarda o
 texto em ASCII (é o que a extração estruturada lê; no DS, também UTF-16),
 letra acentuada não existe. O lote de strings ASCII vai para a IA com a lista

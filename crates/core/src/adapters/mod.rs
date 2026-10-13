@@ -1,3 +1,4 @@
+pub(crate) mod bank;
 pub(crate) mod cdrom;
 pub mod gamecube;
 pub mod gba;
@@ -66,6 +67,9 @@ pub struct ExtractOutcome {
     /// Das salvas, quantas sao texto japones em codigos de 16 bits, lido pela
     /// tabela que a extracao montou (`kuten`).
     pub jis16: usize,
+    /// Das salvas, quantas estao numa mensagem de banco em blocos
+    /// (`bank`): a traducao delas pode crescer.
+    pub banked: usize,
 }
 
 /// Extracao estruturada do arquivo de origem de um projeto, gravada no banco.
@@ -103,6 +107,11 @@ pub fn extract_project(project_dir: &Path) -> Result<ExtractOutcome> {
             .entries
             .iter()
             .filter(|e| e.encoding == jis16)
+            .count(),
+        banked: extraction
+            .entries
+            .iter()
+            .filter(|e| bank::is_banked(e))
             .count(),
     })
 }
