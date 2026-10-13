@@ -1,0 +1,875 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>RomTranslate Studio: traduza jogos retrô com IA, no seu computador</title>
+    <meta
+      name="description"
+      content="App gratuito e de código aberto que traduz os textos de jogos retrô com IA, no seu computador. Arraste o arquivo do jogo, revise a tradução e exporte um patch."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="pt_BR" />
+    <meta property="og:title" content="RomTranslate Studio: traduza jogos retrô com IA, no seu computador" />
+    <meta
+      property="og:description"
+      content="App gratuito e de código aberto. Arraste o arquivo do jogo, revise a tradução e exporte um patch. O arquivo do jogo não sai do seu computador."
+    />
+    <meta property="og:image" content="https://romtranslate-studio.pages.dev/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="logo.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="estilo.css" />
+    <script src="versao.js" defer></script>
+    <script src="site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip" href="#conteudo">Pular para o conteúdo</a>
+
+    <header class="top wrap">
+      <a class="brand" href="./">
+        <img src="logo.svg" alt="" width="46" height="46" />
+        RomTranslate Studio
+      </a>
+      <nav aria-label="Seções da página">
+        <a href="#demo">Demonstração</a>
+        <a href="#como-funciona">Como funciona</a>
+        <a href="#baixar">Baixar</a>
+        <a href="#perguntas">Perguntas</a>
+      </nav>
+      <div class="tools">
+        <button
+          type="button"
+          class="chip motion-toggle"
+          hidden
+          data-pausar="Pausar movimento"
+          data-retomar="Retomar movimento"
+        >
+          Pausar movimento
+        </button>
+        <a class="chip" href="en/" lang="en" hreflang="en">English</a>
+      </div>
+    </header>
+
+    <main id="conteudo">
+      <!-- 1. Abertura -->
+      <section class="hero" data-anim>
+        <div class="sky-art" aria-hidden="true">
+          <i class="shape a"></i>
+          <i class="shape b"></i>
+          <i class="shape c"></i>
+        </div>
+        <div class="wrap">
+          <div class="intro">
+            <p class="badges">
+              <span class="badge">gratuito</span>
+              <span class="badge sky">código aberto</span>
+              <span class="badge star">versão de testes</span>
+            </p>
+            <h1>Traduza jogos retrô com IA, <span class="sticker">no seu computador</span></h1>
+            <p class="lead">
+              O RomTranslate Studio é um app para computador. Você arrasta o arquivo do jogo para a
+              janela. Ele descobre de qual console é, encontra as falas, traduz com a IA que você
+              escolher e grava tudo numa cópia. O arquivo original fica como estava.
+            </p>
+            <p class="actions">
+              <a
+                class="btn primary big"
+                href="#baixar"
+                data-rotulo="Baixar para {os}"
+                data-alvo="#baixar-{os}"
+                ><span>Baixar</span></a
+              >
+              <a class="btn big" href="#demo"><span>Experimente aqui</span></a>
+            </p>
+            <p class="hint">
+              Para <a href="#baixar-macos">macOS</a>, <a href="#baixar-windows">Windows</a> e
+              <a href="#baixar-linux">Linux</a>.
+            </p>
+            <p class="hint">
+              É uma versão de testes<span data-versao=" ({v})"></span>. Veja
+              <a href="#medido">o que já foi medido e o que ainda não faz</a>.
+            </p>
+          </div>
+
+          <div
+            class="stage"
+            data-falas='[["Press START to light the lamp.","Aperte START para acender a lâmpada."],["The tide left a letter on the stairs.","A maré deixou uma carta na escada."],["Pip joined your crew!","Pip entrou na sua tripulação!"]]'
+          >
+            <p class="sr">
+              Exemplo com uma fala inventada: “Press START to light the lamp.” vira “Aperte START
+              para acender a lâmpada.”
+            </p>
+            <div class="stage-art" aria-hidden="true">
+              <p class="balloon before">
+                <small>Fala original</small>
+                <span class="line">Press START to light the lamp.</span>
+              </p>
+              <img class="cart" src="logo.svg" alt="" width="64" height="64" />
+              <p class="balloon after">
+                <small>Tradução</small>
+                <span class="line">Aperte START para acender a lâmpada.</span>
+              </p>
+              <i class="spark s1"></i><i class="spark s2"></i><i class="spark s3"></i
+              ><i class="spark s4"></i>
+            </div>
+            <p class="hint">Falas inventadas, do jogo da demonstração logo abaixo.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. Demonstracao ao vivo -->
+      <section class="sec field" id="demo" data-anim>
+        <div class="deco" aria-hidden="true"><i class="shape d1"></i><i class="shape d2"></i></div>
+        <div class="wrap">
+          <div class="head">
+            <h2>Experimente aqui, sem instalar</h2>
+            <p class="lead">
+              Esta é a tela de verdade do app, rodando dentro desta página. O jogo (“Brisa e o Farol
+              de Papel”) e as falas são inventados, as respostas são simuladas e nada é enviado a
+              lugar nenhum.
+            </p>
+          </div>
+          <div class="demo-grid">
+            <aside class="script card" aria-labelledby="roteiro">
+              <h3 id="roteiro">Como testar</h3>
+              <ol class="steps" role="list">
+                <li>
+                  <h4>Clique em “Extração estruturada”</h4>
+                  <p>
+                    É o botão rosa, no alto. <b>O que observar:</b> um aviso verde diz que 20
+                    “strings” (trechos de texto) foram salvas, e uma linha abaixo conta 18 trechos
+                    descartados por não parecerem texto. Na tabela, cada linha tem a fala original e
+                    a tradução lado a lado.
+                  </p>
+                </li>
+                <li>
+                  <h4>Clique em “Traduzir pendentes”</h4>
+                  <p>
+                    Fica na etapa 2, mais abaixo. <b>O que observar:</b> a barra de progresso anda
+                    e, no fim, um resumo diz quantas falas foram traduzidas e quantas falharam. A IA
+                    aqui é simulada, então a tabela não muda.
+                  </p>
+                </li>
+                <li>
+                  <h4>Clique em “Reinserir na cópia de trabalho”</h4>
+                  <p>
+                    Fica na etapa 3. <b>O que observar:</b> o aviso “Jogo traduzido pronto e
+                    verificado” e a conta do que aconteceu: 11 traduções aplicadas e 7 falas
+                    mantidas como no original.
+                  </p>
+                </li>
+              </ol>
+              <p class="hint">
+                Quer mexer mais? Clique em qualquer linha da tabela para abrir a fala e editar a
+                tradução.
+              </p>
+            </aside>
+
+            <div class="window">
+              <div class="window-frame">
+                <p class="window-bar">
+                  Demonstração: jogo inventado
+                  <a href="demo/index.html?auto=project&amp;lang=pt-BR">Abrir em tela cheia</a>
+                </p>
+                <div class="window-view">
+                  <iframe
+                    src="demo/index.html?auto=project&amp;lang=pt-BR"
+                    title="Demonstração do RomTranslate Studio com um jogo inventado"
+                    loading="lazy"
+                  ></iframe>
+                  <a class="demo-open" href="demo/index.html?auto=project&amp;lang=pt-BR">
+                    <span class="btn primary"><span>Abrir a demonstração em tela cheia</span></span>
+                  </a>
+                </div>
+              </div>
+              <i class="spark w1" aria-hidden="true"></i><i class="spark w2" aria-hidden="true"></i>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. Como funciona -->
+      <section class="sec" id="como-funciona" data-anim>
+        <div class="wrap">
+          <div class="head">
+            <h2>Como funciona, em seis passos</h2>
+          </div>
+          <ol class="how" role="list">
+            <li class="card" style="--i: 0">
+              <div class="scene s-detect" aria-hidden="true">
+                <i class="g-ping"></i><img class="g-cart" src="logo.svg" alt="" />
+              </div>
+              <h3>Você arrasta o arquivo</h3>
+              <p>
+                O app reconhece de qual console é o jogo e mostra as pistas que usou para decidir.
+              </p>
+            </li>
+            <li class="card" style="--i: 1">
+              <div class="scene s-extract" aria-hidden="true">
+                <img class="g-cart" src="logo.svg" alt="" /><i class="g-bal"></i
+                ><i class="g-bal"></i><i class="g-bal"></i>
+              </div>
+              <h3>Ele encontra os textos</h3>
+              <p>
+                Ele separa os textos do resto do arquivo. O que só parece texto é descartado.
+              </p>
+            </li>
+            <li class="card" style="--i: 2">
+              <div class="scene s-translate" aria-hidden="true">
+                <i class="g-bal word">Hi!</i>
+                <span class="g-mid"
+                  ><b class="g-chip">IA</b><span class="g-dots"><i></i><i></i><i></i></span
+                ></span>
+                <i class="g-bal word">Oi!</i>
+              </div>
+              <h3>A IA traduz</h3>
+              <p>
+                Você escolhe a IA. Ela recebe várias falas de uma vez e é avisada de quanto espaço
+                cada uma tem.
+              </p>
+            </li>
+            <li class="card" style="--i: 3">
+              <div class="scene s-check" aria-hidden="true">
+                <i class="g-bal word">Oi!</i><i class="g-rule"></i><i class="g-check"></i>
+              </div>
+              <h3>Cada fala é conferida</h3>
+              <p>
+                O app confere o tamanho, os códigos escondidos no texto (por exemplo, o lugar onde
+                entra o nome do jogador) e as letras que o jogo sabe escrever. O que não cabe volta
+                sozinho para a IA. Você também pode corrigir qualquer fala à mão.
+              </p>
+            </li>
+            <li class="card" style="--i: 4">
+              <div class="scene s-copy" aria-hidden="true">
+                <i class="g-bal word">Oi!</i><img class="g-cart" src="logo.svg" alt="" /><b
+                  class="g-chip"
+                  >cópia</b
+                >
+              </div>
+              <h3>A tradução vai para uma cópia</h3>
+              <p>
+                O app grava as falas traduzidas numa cópia de trabalho e confere o resultado. O
+                arquivo original nunca é modificado.
+              </p>
+            </li>
+            <li class="card" style="--i: 5">
+              <div class="scene s-patch" aria-hidden="true">
+                <span class="g-file"><i class="spark"></i></span><b class="g-chip">patch</b
+                ><i class="spark"></i><i class="spark"></i>
+              </div>
+              <h3>Sai um patch</h3>
+              <p>
+                É um arquivo pequeno que guarda só o que mudou (nos formatos IPS ou BPS). Você
+                compartilha o patch, no lugar do jogo.
+              </p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- 4. O que voce precisa -->
+      <section class="sec field sky" id="o-que-precisa" data-anim>
+        <div class="deco" aria-hidden="true"><i class="shape d1"></i><i class="shape d2"></i></div>
+        <div class="wrap">
+          <div class="head">
+            <h2>O que você precisa</h2>
+          </div>
+          <div class="needs">
+            <div class="card">
+              <div class="scene" aria-hidden="true">
+                <img class="g-cart" src="logo.svg" alt="" />
+              </div>
+              <h3>O arquivo do seu próprio jogo</h3>
+              <p>
+                É a cópia digital do jogo, guardada num arquivo no computador. O app trabalha com um
+                arquivo que você já tem. Ele não baixa jogos, e este site não oferece nenhum.
+              </p>
+            </div>
+            <div class="card">
+              <div class="scene s-pc" aria-hidden="true"><i class="g-screen"></i></div>
+              <h3>Um computador</h3>
+              <p>Com macOS, Windows ou Linux. O app é instalado nele e o trabalho acontece ali.</p>
+            </div>
+            <div class="card">
+              <div class="scene s-translate" aria-hidden="true">
+                <i class="g-bal word">Hi!</i>
+                <span class="g-mid"
+                  ><b class="g-chip">IA</b><span class="g-dots"><i></i><i></i><i></i></span
+                ></span>
+                <i class="g-bal word">Oi!</i>
+              </div>
+              <h3>Uma IA para traduzir</h3>
+              <p>Você escolhe uma destas três opções:</p>
+              <ul class="options">
+                <li>
+                  <h4>IA no seu computador (Ollama) <span class="badge">grátis</span></h4>
+                  <p>
+                    O Ollama é um programa gratuito que roda a IA na sua máquina. Nada sai dela. Um
+                    modelo pequeno tem dificuldade para manter a fala curta.
+                  </p>
+                </li>
+                <li>
+                  <h4>
+                    Assinatura do ChatGPT <span class="badge sky">o plano que você já paga</span>
+                  </h4>
+                  <p>
+                    Não precisa de chave de API. Usa o Codex CLI, um programa da OpenAI que você
+                    instala, e o login é feito de dentro do app. Vale o limite de uso do seu plano.
+                  </p>
+                </li>
+                <li>
+                  <h4>Chave de API <span class="badge star">cobrada pelo uso</span></h4>
+                  <p>
+                    Chave de API é uma senha que um serviço de IA dá para programas usarem a sua
+                    conta. Serve a do Claude ou a de um serviço compatível com a API da OpenAI. Quem
+                    cobra é o serviço. O app calcula o gasto antes e mostra o que foi cobrado
+                    depois.
+                  </p>
+                </li>
+              </ul>
+              <p class="hint">
+                Nas opções pela internet, o app pede a sua permissão antes e mostra qual texto vai
+                sair. Só as falas extraídas são enviadas, nunca o arquivo do jogo.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. Vantagens e facilidades -->
+      <section class="sec" id="facilidades">
+        <div class="wrap">
+          <div class="head">
+            <h2>O que facilita para quem não é técnico</h2>
+          </div>
+          <ul class="perks">
+            <li class="card">
+              <h3>Sem programar</h3>
+              <p>
+                Você não escreve código nem abre editor de bytes, o programa que mostra um arquivo
+                número por número. O trabalho é feito por botões. Alguns jogos ainda pedem ajuste
+                manual: veja <a href="#limites">os limites</a>.
+              </p>
+            </li>
+            <li class="card">
+              <h3>O jogo não sai do computador</h3>
+              <p>
+                O arquivo do jogo fica na sua máquina. Com uma IA pela internet, só as falas saem, e
+                com a sua permissão.
+              </p>
+            </li>
+            <li class="card">
+              <h3>O original nunca é alterado</h3>
+              <p>O app trabalha numa cópia. O arquivo que você arrastou continua igual.</p>
+            </li>
+            <li class="card">
+              <h3>Tradução que não cabe volta sozinha</h3>
+              <p>
+                Cada fala tem um espaço limitado dentro do jogo. Se a tradução passa do espaço, o
+                app pede outra mais curta à IA, sem você fazer nada.
+              </p>
+            </li>
+            <li class="card">
+              <h3>O que não é texto fica fora da fila</h3>
+              <p>
+                Nomes internos do jogo e pedaços do arquivo que só parecem texto não vão para a IA.
+              </p>
+            </li>
+            <li class="card">
+              <h3>Dá para cancelar</h3>
+              <p>
+                Você pode parar a tradução a qualquer momento. O que já foi traduzido fica salvo.
+              </p>
+            </li>
+            <li class="card">
+              <h3>No fim sai um patch</h3>
+              <p>
+                Um arquivo pequeno só com a tradução. Quem tem o jogo original aplica o patch e
+                chega no mesmo resultado. Você compartilha sem distribuir o jogo.
+              </p>
+            </li>
+            <li class="card">
+              <h3>Gratuito e de código aberto</h3>
+              <p>Licença MIT. Qualquer pessoa pode ler o código e ver o que o app faz.</p>
+            </li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- 6. Consoles -->
+      <section class="sec field star" id="consoles" data-anim>
+        <div class="marquee" aria-hidden="true">
+          <div class="track">
+            <ul>
+              <li>Game Boy Advance</li>
+              <li>Nintendo DS</li>
+              <li>NES</li>
+              <li>Super Nintendo</li>
+              <li>GameCube</li>
+              <li>PlayStation 1</li>
+              <li>PlayStation 2</li>
+              <li>PSP</li>
+            </ul>
+            <ul>
+              <li>Game Boy Advance</li>
+              <li>Nintendo DS</li>
+              <li>NES</li>
+              <li>Super Nintendo</li>
+              <li>GameCube</li>
+              <li>PlayStation 1</li>
+              <li>PlayStation 2</li>
+              <li>PSP</li>
+            </ul>
+          </div>
+        </div>
+        <div class="wrap split">
+          <div class="head">
+            <h2>Consoles</h2>
+            <p class="lead">
+              Todo suporte é experimental. Cada jogo guarda os textos de um jeito, então não há
+              promessa de que qualquer jogo funcione.
+            </p>
+            <p class="hint">
+              A última coluna importa porque, na maioria dos casos, a tradução precisa caber no
+              espaço da fala original. Wii e Wii U são só reconhecidos: o app ainda não lê os
+              textos deles.
+            </p>
+          </div>
+          <table class="table">
+            <thead>
+              <tr>
+                <th scope="col">Console</th>
+                <th scope="col">Lê os textos</th>
+                <th scope="col">Grava a tradução</th>
+                <th scope="col">Tradução maior que a fala original</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <th scope="row">Game Boy Advance</th>
+                <td class="yes">Sim</td>
+                <td class="yes">Sim</td>
+                <td>Em parte dos textos</td>
+              </tr>
+              <tr>
+                <th scope="row">Nintendo DS</th>
+                <td class="yes">Sim</td>
+                <td class="yes">Sim</td>
+                <td>Em parte dos textos</td>
+              </tr>
+              <tr>
+                <th scope="row">NES</th>
+                <td class="yes">Sim</td>
+                <td class="yes">Sim</td>
+                <td>Não</td>
+              </tr>
+              <tr>
+                <th scope="row">Super Nintendo</th>
+                <td class="yes">Sim</td>
+                <td class="yes">Sim</td>
+                <td>Não</td>
+              </tr>
+              <tr>
+                <th scope="row">GameCube</th>
+                <td class="yes">Sim</td>
+                <td class="yes">Sim</td>
+                <td>Não</td>
+              </tr>
+              <tr>
+                <th scope="row">PlayStation 1</th>
+                <td class="yes">Sim</td>
+                <td class="yes">Sim</td>
+                <td>Pouco</td>
+              </tr>
+              <tr>
+                <th scope="row">PlayStation 2</th>
+                <td class="yes">Sim</td>
+                <td class="yes">Sim</td>
+                <td>Não</td>
+              </tr>
+              <tr>
+                <th scope="row">PSP</th>
+                <td class="yes">Sim</td>
+                <td class="yes">Sim</td>
+                <td>Não</td>
+              </tr>
+              <tr>
+                <th scope="row">Wii e Wii U <small>só reconhecidos</small></th>
+                <td class="no">Não</td>
+                <td class="no">Não</td>
+                <td class="muted">Não se aplica</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- 7. O que foi medido e o que ainda nao faz -->
+      <section class="sec" id="medido">
+        <div class="wrap honest">
+          <div>
+            <div class="head">
+              <h2>O que foi medido até agora</h2>
+              <p class="lead">
+                O app está em fase de testes (alpha). Estes números vêm de um único jogo comercial
+                de Game Boy Advance, do cartucho do próprio mantenedor. Nenhum dado desse jogo está
+                neste site ou no repositório.
+              </p>
+            </div>
+            <dl class="stats">
+              <div class="stat">
+                <dt>trechos de texto traduzidos e regravados</dt>
+                <dd><b data-count="10705">10.705</b></dd>
+              </div>
+              <div class="stat">
+                <dt>mensagens com os códigos de controle idênticos, byte a byte</dt>
+                <dd><b data-count="3699">3.699</b> de 3.699</dd>
+              </div>
+              <div class="stat">
+                <dt>bytes alterados fora do texto das mensagens</dt>
+                <dd><b>0</b></dd>
+              </div>
+              <div class="stat">
+                <dt>
+                  o jogo liga com a tradução: abertura e primeiro diálogo conferidos num emulador
+                </dt>
+                <dd><b>Sim</b></dd>
+              </div>
+              <div class="stat">
+                <dt>
+                  falas da IA aprovadas na conferência (ChatGPT, com nova tentativa automática)
+                </dt>
+                <dd><b data-count="199">199</b> de 200</dd>
+              </div>
+              <div class="stat">
+                <dt>velocidade, com 4 pedidos à IA ao mesmo tempo</dt>
+                <dd><b data-count="200">200</b> falas em <span><b data-count="86">86</b> s</span></dd>
+              </div>
+            </dl>
+            <div class="card note">
+              <h3>O que isso não prova</h3>
+              <ul class="marks warn">
+                <li>Ninguém jogou esse jogo até o fim com a tradução.</li>
+                <li>Só um jogo real passou pelo processo inteiro.</li>
+                <li>
+                  A versão com acentos precisou de ajuste manual: a tabela de letras do jogo e a
+                  região do texto foram indicadas à mão.
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="card limits" id="limites">
+            <h2>O que ainda não faz</h2>
+            <ul class="marks no">
+              <li>
+                <strong>Texto comprimido.</strong> Alguns jogos guardam o texto compactado. O app
+                conta esses blocos, mas não extrai o texto deles.
+              </li>
+              <li>
+                <strong>Jogos em japonês.</strong> O app ainda não lê a forma de escrita japonesa
+                mais comum nesses jogos (Shift-JIS).
+              </li>
+              <li>
+                <strong>Fonte e texto desenhado.</strong> Ele não edita as letras do jogo nem texto
+                que é imagem, como a tela de título e alguns menus.
+              </li>
+              <li>
+                <strong>Tamanho.</strong> A maior parte do texto só pode ter o tamanho do original.
+              </li>
+              <li>
+                <strong>Jogos de cartucho.</strong> Escolher a região do texto e a tabela de letras
+                do jogo ainda é trabalho manual.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- 8. Baixar -->
+      <section class="sec field mint" id="baixar" data-anim>
+        <div class="deco" aria-hidden="true"><i class="shape d1"></i><i class="shape d2"></i></div>
+        <div class="wrap">
+          <div class="head">
+            <h2>Baixar</h2>
+            <p class="lead">
+              <span data-versao="Versão {v}. "></span>Os instaladores não são assinados: é um
+              projeto pessoal, e o certificado é pago. Por isso o sistema reclama na primeira vez.
+              Cada bloco diz o que fazer.
+            </p>
+          </div>
+          <div class="downloads">
+            <article class="card dl" id="baixar-macos" data-os="macos">
+              <span class="badge star yours">parece ser o seu sistema</span>
+              <h3>macOS</h3>
+              <ul class="files">
+                <li>
+                  <a
+                    class="btn file"
+                    data-arquivo="RomTranslate.Studio_{v}_aarch64.dmg"
+                    href="https://github.com/crimsondawnacademy-design/romtranslate-studio/releases"
+                    ><span
+                      >Mac com chip Apple <small>M1 ou mais novo</small><code data-nome>.dmg</code>
+                    </span></a
+                  >
+                </li>
+                <li>
+                  <a
+                    class="btn file"
+                    data-arquivo="RomTranslate.Studio_{v}_x64.dmg"
+                    href="https://github.com/crimsondawnacademy-design/romtranslate-studio/releases"
+                    ><span
+                      >Mac com Intel <small>modelos mais antigos</small><code data-nome>.dmg</code>
+                    </span></a
+                  >
+                </li>
+              </ul>
+              <h4>Quando o sistema reclamar</h4>
+              <p>O macOS diz que o app está danificado. É o aviso para app sem assinatura.</p>
+              <ol>
+                <li>Abra o arquivo baixado e arraste o app para a pasta Aplicativos.</li>
+                <li>
+                  Abra o app Terminal, cole esta linha e aperte Enter:
+                  <code class="cmd">xattr -cr "/Applications/RomTranslate Studio.app"</code>
+                  <span class="copy">
+                    <button
+                      type="button"
+                      class="btn small"
+                      data-copiar='xattr -cr "/Applications/RomTranslate Studio.app"'
+                      data-ok="Linha copiada."
+                      data-falhou="Não deu para copiar. Selecione a linha e copie à mão."
+                    >
+                      <span>Copiar a linha</span>
+                    </button>
+                    <span role="status"></span>
+                  </span>
+                </li>
+                <li>Abra o RomTranslate Studio.</li>
+              </ol>
+            </article>
+
+            <article class="card dl" id="baixar-windows" data-os="windows">
+              <span class="badge star yours">parece ser o seu sistema</span>
+              <h3>Windows</h3>
+              <ul class="files">
+                <li>
+                  <a
+                    class="btn file"
+                    data-arquivo="RomTranslate.Studio_{v}_x64-setup.exe"
+                    href="https://github.com/crimsondawnacademy-design/romtranslate-studio/releases"
+                    ><span
+                      >Instalador <small>o caminho mais simples</small
+                      ><code data-nome>-setup.exe</code>
+                    </span></a
+                  >
+                </li>
+                <li>
+                  <a
+                    class="btn file"
+                    data-arquivo="RomTranslate.Studio_{v}_x64_en-US.msi"
+                    href="https://github.com/crimsondawnacademy-design/romtranslate-studio/releases"
+                    ><span
+                      >Pacote MSI <small>para quem prefere esse formato</small
+                      ><code data-nome>.msi</code>
+                    </span></a
+                  >
+                </li>
+              </ul>
+              <h4>Quando o sistema reclamar</h4>
+              <p>
+                O Windows mostra um aviso do SmartScreen. Clique em “Mais informações” e depois em
+                “Executar assim mesmo”.
+              </p>
+            </article>
+
+            <article class="card dl" id="baixar-linux" data-os="linux">
+              <span class="badge star yours">parece ser o seu sistema</span>
+              <h3>Linux</h3>
+              <ul class="files">
+                <li>
+                  <a
+                    class="btn file"
+                    data-arquivo="RomTranslate.Studio_{v}_amd64.deb"
+                    href="https://github.com/crimsondawnacademy-design/romtranslate-studio/releases"
+                    ><span
+                      >Pacote .deb <small>Debian, Ubuntu e derivados</small
+                      ><code data-nome>.deb</code>
+                    </span></a
+                  >
+                </li>
+                <li>
+                  <a
+                    class="btn file"
+                    data-arquivo="RomTranslate.Studio-{v}-1.x86_64.rpm"
+                    href="https://github.com/crimsondawnacademy-design/romtranslate-studio/releases"
+                    ><span
+                      >Pacote .rpm <small>Fedora, openSUSE e derivados</small
+                      ><code data-nome>.rpm</code>
+                    </span></a
+                  >
+                </li>
+                <li>
+                  <a
+                    class="btn file"
+                    data-arquivo="RomTranslate.Studio_{v}_amd64.AppImage"
+                    href="https://github.com/crimsondawnacademy-design/romtranslate-studio/releases"
+                    ><span
+                      >AppImage <small>roda sem instalar</small><code data-nome>.AppImage</code>
+                    </span></a
+                  >
+                </li>
+              </ul>
+              <h4>Antes de abrir o AppImage</h4>
+              <p>
+                Dê permissão de execução ao arquivo. No terminal, na pasta onde ele está:
+                <code>chmod +x RomTranslate*.AppImage</code>
+              </p>
+            </article>
+          </div>
+          <p class="hint">
+            Só o instalador de macOS foi aberto e usado por uma pessoa até agora. Os de Windows e
+            Linux são gerados automaticamente e ainda precisam de alguém que teste. Se você testar,
+            <a href="https://github.com/crimsondawnacademy-design/romtranslate-studio/issues"
+              >conte o que aconteceu na página do projeto</a
+            >. Todas as versões ficam na
+            <a href="https://github.com/crimsondawnacademy-design/romtranslate-studio/releases"
+              >página de versões</a
+            >.
+          </p>
+        </div>
+      </section>
+
+      <!-- 9. Perguntas -->
+      <section class="sec" id="perguntas">
+        <div class="wrap split">
+          <div class="head">
+            <h2>Perguntas de quem está chegando</h2>
+          </div>
+          <div class="faq">
+            <details>
+              <summary>O que é esse “arquivo do jogo” e de onde ele vem?</summary>
+              <p>
+                É a cópia digital do conteúdo de um cartucho ou de um disco, guardada num arquivo.
+                Muita gente chama de ROM ou de ISO. Ela vem da cópia do jogo que você tem. Este site
+                e o app não oferecem jogos, não baixam jogos e não indicam onde baixar.
+              </p>
+            </details>
+            <details>
+              <summary>Isso é permitido?</summary>
+              <p>
+                Não somos advogados, e este texto não é orientação jurídica. O que dá para afirmar é
+                o que o app faz: ele não distribui jogos, trabalha só com o arquivo que você já tem,
+                e o que se compartilha é o patch, que guarda a tradução e não o jogo. A licença do
+                app cobre só o próprio app: ela não dá direito sobre nenhum jogo, marca ou tradução
+                de obra de terceiros.
+              </p>
+            </details>
+            <details>
+              <summary>Preciso saber programar?</summary>
+              <p>
+                Não. O caminho inteiro é feito por botões na janela do app. Em alguns jogos de
+                cartucho ainda é preciso indicar à mão onde fica o texto e qual é a tabela de letras
+                do jogo. Isso não é programar, mas dá trabalho, e está na lista do que o app ainda
+                não faz sozinho.
+              </p>
+            </details>
+            <details>
+              <summary>Funciona com qualquer jogo?</summary>
+              <p>
+                Não. Todo suporte é experimental. Cada jogo guarda os textos de um jeito, e há casos
+                que o app ainda não lê: texto comprimido, jogos em japonês e texto desenhado como
+                imagem. Até agora, só um jogo real passou pelo processo inteiro.
+              </p>
+            </details>
+            <details>
+              <summary>O jogo sai do meu computador?</summary>
+              <p>
+                O arquivo do jogo, nunca. Com a IA que roda no seu computador, nada sai. Com uma IA
+                pela internet, só as falas extraídas são enviadas, e o app pede a sua permissão
+                antes, mostrando qual texto vai sair.
+              </p>
+            </details>
+            <details>
+              <summary>Quanto custa?</summary>
+              <p>
+                O app é gratuito. A IA pode ser grátis (a que roda no seu computador), pode ser a
+                assinatura do ChatGPT que você já paga, ou pode ser uma chave de API, cobrada pelo
+                uso pelo serviço que você escolher.
+              </p>
+            </details>
+            <details>
+              <summary>Quanto demora?</summary>
+              <p>
+                Depende da IA. Com a assinatura do ChatGPT, o ritmo medido foi de cerca de 5 falas
+                por segundo. Nesse ritmo, um jogo com cerca de 9 mil falas leva por volta de meia
+                hora.
+              </p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <!-- 10. Apoie o projeto -->
+      <section class="sec field" id="apoie" data-anim>
+        <div class="deco" aria-hidden="true"><i class="shape d1"></i><i class="shape d2"></i></div>
+        <div class="wrap">
+          <div class="head">
+            <h2>Apoie o projeto</h2>
+            <p class="lead">
+              O RomTranslate Studio é gratuito e feito no tempo livre. Se ele te ajudou, há dois
+              jeitos de apoiar.
+            </p>
+          </div>
+          <div class="support">
+            <div class="card">
+              <i class="spark big" aria-hidden="true"></i>
+              <h3>Dê uma estrela no GitHub</h3>
+              <p>Não custa nada e ajuda outras pessoas a acharem o projeto.</p>
+              <a
+                class="btn primary"
+                href="https://github.com/crimsondawnacademy-design/romtranslate-studio"
+                ><span>Abrir o projeto no GitHub</span></a
+              >
+            </div>
+            <div class="card">
+              <h3>Pix</h3>
+              <p>A chave é um número de telefone:</p>
+              <code class="pix">13982286871</code>
+              <p class="copy">
+                <button
+                  type="button"
+                  class="btn small"
+                  data-copiar="13982286871"
+                  data-ok="Chave copiada."
+                  data-falhou="Não deu para copiar. Selecione a chave e copie à mão."
+                >
+                  <span>Copiar a chave</span>
+                </button>
+                <span role="status"></span>
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div class="wrap">
+        <p>
+          RomTranslate Studio é software livre, com
+          <a
+            href="https://github.com/crimsondawnacademy-design/romtranslate-studio/blob/main/LICENSE"
+            >licença MIT</a
+          >. O
+          <a href="https://github.com/crimsondawnacademy-design/romtranslate-studio"
+            >código está no GitHub</a
+          >.
+        </p>
+        <p>Este site e o repositório não têm jogos, nem links para baixar jogos.</p>
+      </div>
+    </footer>
+  </body>
+</html>

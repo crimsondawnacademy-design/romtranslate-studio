@@ -8,6 +8,9 @@ dist/
 # Fixtures geradas localmente (rode: cargo run -p romtranslate-core --example gen_fixtures)
 /fixtures/generated/
 
+# Demonstracao do site, compilada por site/build-demo.sh
+site/demo/
+
 # OS / editor
 .DS_Store
 *.log
