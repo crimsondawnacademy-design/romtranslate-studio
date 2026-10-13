@@ -219,6 +219,7 @@ impl GameAdapter for GameCubeAdapter {
                     region_end: Some(end),
                     max_entries: MAX_TEXT_ENTRIES - out.entries.len(),
                     only_text: true,
+                    skip_noise: true,
                     ..ScanConfig::default()
                 },
             )?;

@@ -280,3 +280,45 @@ fn ps2_full_project_flow_reinsert_and_patch() {
     assert_eq!(apply_ips(&iso, &patch).unwrap(), working);
     assert!(working.windows(12).any(|w| w == b"SALVAR JOGO?"));
 }
+
+/// Video, audio e dado comprimido dao centenas de "palavras" de 4 letras por
+/// MiB. Num disco elas enchiam o projeto (e o teto) de lixo: o bloco que nao
+/// e de texto sai inteiro, e o arquivo pequeno so de menu fica.
+#[test]
+fn noise_in_a_disc_file_does_not_become_text() {
+    use romtranslate_core::scan::{scan_bytes, ScanConfig};
+
+    let iso = synth::make_ps2_iso_with_noise();
+    let files = Ps2Adapter.list_resources(&iso).unwrap();
+    let movie = files.iter().find(|f| f.path == "DATA/MOVIE.BIN").unwrap();
+    // Sem o corte por bloco, o arquivo de ruido passa de cem strings no filtro.
+    let unfiltered = scan_bytes(
+        &iso,
+        &ScanConfig {
+            region_start: Some(movie.offset),
+            region_end: Some(movie.offset + movie.size),
+            only_text: true,
+            ..ScanConfig::default()
+        },
+    )
+    .unwrap();
+    assert!(
+        unfiltered.entries.len() > 100,
+        "{}",
+        unfiltered.entries.len()
+    );
+
+    let out = Ps2Adapter.extract(&iso).unwrap();
+    let from = |path: &str| -> Vec<&str> {
+        out.entries
+            .iter()
+            .filter(|e| e.resource_path.as_deref() == Some(path))
+            .map(|e| e.source_text.as_str())
+            .collect()
+    };
+    assert_eq!(from("DATA/MOVIE.BIN"), Vec::<&str>::new());
+    assert_eq!(from("DATA/TEXT.PAK"), ["PRESS X TO JUMP", "SAVE PROGRESS?"]);
+    assert_eq!(from("DATA/MENU.BIN"), synth::NOISE_ISO_MENU);
+    assert!(out.discarded >= unfiltered.entries.len());
+    assert!(!out.truncated);
+}

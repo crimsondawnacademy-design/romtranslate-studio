@@ -101,7 +101,7 @@ Every real platform is **experimental**. Games use different engines, compressio
 ## What it cannot do yet
 
 - Compressed text: on Game Boy Advance the app extracts and rewrites the text inside LZ77 blocks, and each translation must fit the space of its original inside the block. This was checked with test files only: no real game with compressed text has been through it. On DS compressed text is only counted, and other compressors are not recognized.
-- Japanese: the code now reads and rewrites Shift-JIS text, the most common form on disc games and on part of the cartridge ones (it ships in the next version). It was checked with test files only: no real Japanese game has been through it. A word written only in kanji is not read yet, translations come out without accents, and cartridge games with their own character table still need that table.
+- Japanese: the app reads and rewrites Shift-JIS text, the most common form on disc games and on part of the cartridge ones. It was checked with test files only: no real Japanese game has been through it. A word written only in kanji is not read yet, translations come out without accents, and cartridge games with their own character table still need that table.
 - It does not edit fonts or text drawn as graphics (title screens, some menus).
 - Most text can only be as long as the original. Growing it needs a pointer table the app recognises; tables declared by the user are on the roadmap.
 - Choosing the text region and the character table for a cartridge game is still manual work.

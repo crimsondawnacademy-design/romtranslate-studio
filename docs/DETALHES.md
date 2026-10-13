@@ -202,6 +202,18 @@ uma tradução mais curta vira `0x00` quando o byte depois da string original
 é `0x00` (senão é preenchida com o espaço da tabela) — jogo com outro
 terminador pede conferência no emulador.
 
+**Disco grande**: num disco, vídeo, áudio e arquivo comprimido dão centenas
+de "palavras" de 4 letras por MiB que passam no filtro de texto. A extração
+dos discos (PS2, PSP, GameCube) julga cada bloco de 64 KiB do arquivo: fica o
+bloco que tem pelo menos uma frase ou meio por cento dos bytes em strings com
+cara de texto, o resto é descartado e contado. O scanner ASCII lê uma
+sequência por vez, então a memória não cresce com o tamanho do disco. Medido
+em 13/10/2026 num disco de teste com 64 MiB de dado aleatório: de 1,1 GiB de
+RAM e 19.899 strings de lixo para 76 MiB e nenhuma, em metade do tempo.
+Calibrado em ruído, não em disco de jogo: executável com rótulo curto e
+esparso no meio de código perde esses rótulos. No PS1 (que precisa das
+sequências cruas para achar ponteiros) o corte por bloco não entra.
+
 **Jogo em japonês (Shift-JIS)**: a extração estruturada do Game Boy Advance,
 do DS, do GameCube e do PS1, PS2 e PSP lê, além do ASCII, o texto japonês em
 Shift-JIS, e cada faixa de bytes sai numa leitura só. Dado binário lido como

@@ -284,6 +284,7 @@ pub fn extract_ascii_by_file(
                     region_end: Some(end),
                     max_entries: MAX_ENTRIES - out.entries.len(),
                     only_text: !slack_pointers,
+                    skip_noise: !slack_pointers,
                     ..ScanConfig::default()
                 },
             )?;

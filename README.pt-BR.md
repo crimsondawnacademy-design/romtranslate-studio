@@ -101,7 +101,7 @@ Toda plataforma real é **experimental**. Jogos usam motores, compressões e tab
 ## O que ainda não faz
 
 - Texto comprimido: no Game Boy Advance o app extrai e regrava o texto de dentro dos blocos LZ77, e a tradução precisa caber no espaço da original dentro do bloco. Isso foi conferido só com arquivo de teste: nenhum jogo real com texto comprimido passou por aqui. No DS o texto comprimido é só contado, e outros compressores não são reconhecidos.
-- Japonês: o código já lê e regrava texto em Shift-JIS, a forma mais comum nos jogos de disco e em parte dos de cartucho (sai na próxima versão). Foi conferido só com arquivo de teste: nenhum jogo japonês real passou por aqui. Palavra escrita só em kanji ainda não é lida, a tradução sai sem acento, e jogo de cartucho com tabela de caracteres própria continua pedindo a tabela.
+- Japonês: o app lê e regrava texto em Shift-JIS, a forma mais comum nos jogos de disco e em parte dos de cartucho. Foi conferido só com arquivo de teste: nenhum jogo japonês real passou por aqui. Palavra escrita só em kanji ainda não é lida, a tradução sai sem acento, e jogo de cartucho com tabela de caracteres própria continua pedindo a tabela.
 - Não edita fonte nem texto desenhado como imagem (tela de título, alguns menus).
 - A maior parte do texto só pode ter o tamanho do original. Crescer depende de uma tabela de ponteiros que o app reconheça; tabela indicada pelo usuário está no roteiro.
 - Escolher a região do texto e a tabela de caracteres de um jogo de cartucho ainda é trabalho manual.

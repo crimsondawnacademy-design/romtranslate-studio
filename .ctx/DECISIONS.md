@@ -1656,3 +1656,68 @@ e 96% depois. Nenhum DVD de jogo real passou por aqui.
 **Lição:** disco sintético montado por nós repete as nossas suposições de
 layout. Formato de disco pede pelo menos uma imagem feita por outra
 ferramenta.
+
+
+## 2026-10-13 — Japonês: Shift-JIS com regra que pede kana
+
+**Contexto:** pedido do Rhuan: "traduzir principalmente os games em japonês,
+tem muito rpg bom japonês que não saiu em inglês". O enum já tinha
+`TextEncoding::ShiftJis`, sem leitor nem escritor.
+
+**Decisão:**
+- **Tabela pelo `encoding_rs`** (dependência nova). O JIS X 0208 tem quase 7
+  mil caracteres: não se escreve à mão, e a fonte é o padrão WHATWG. O
+  scanner não chama o decoder por caractere: monta uma tabela par de bytes →
+  caractere uma vez e consulta.
+- **Uma leitura por faixa de bytes.** Os adapters varrem em ASCII com
+  `ScanConfig.japanese`: entra também a sequência Shift-JIS que é texto
+  japonês, e a string ASCII que cai dentro dela deixa de sair. Jogo ocidental
+  fica com as mesmas entries e os mesmos ids.
+- **A regra pede kana.** Um par de bytes qualquer cai na tabela 1 vez a cada
+  9, quase sempre como kanji; kana é 2% da tabela. Então: dois kana
+  diferentes, e os cortes descritos em `sjis::looks_japanese`. Palavra só de
+  kanji fica de fora.
+- **A tradução usa o conjunto ASCII.** A tabela japonesa não tem letra
+  acentuada. No prompt a entry Shift-JIS é tratada como ASCII (lista de
+  caracteres, troca de acento com aviso); a validação usa o encoder de
+  verdade, então tradução manual com kana ou pontuação japonesa passa.
+- **Teto no primeiro pedido.** Japonês diz em 2 bytes o que o português diz
+  em 5 ou 6 letras: a frase sem ponteiro leva `maxChars` de saída.
+
+**Medido (só contagens):** 0 falso positivo em 16 MiB de ruído (40 com "2
+kana e pronto"); num jogo ocidental de GBA de 16 MiB, 51 sequências passam
+(22 são japonês de verdade, nomes de recurso dos desenvolvedores), todas fora
+das regiões de texto, e nenhuma frase do jogo se perde.
+
+**O que NÃO foi provado:** nenhum jogo japonês real passou por isto. A regra
+foi calibrada contra falso positivo, não contra texto japonês de jogo: pode
+estar apertada demais. Jogo cujo motor só aceita caractere de 2 bytes não vai
+mostrar a tradução em letras de 1 byte. EUC-JP e UTF-8 japonês não são lidos
+pelos adapters.
+
+
+## 2026-10-13 — Disco: scanner uma sequência por vez e corte por bloco de 64 KiB
+
+**Contexto:** corrigida a detecção do DVD de PS2, o passo seguinte do mesmo
+usuário era a extração de um disco de 2,7 GiB. Medido num disco de teste com
+64 MiB de dado aleatório: 1,1 GiB de RAM (o scanner ASCII montava todas as
+sequências, as de 1 byte inclusive, antes de filtrar) e 19.899 strings de
+lixo passando em `looks_like_text` (311 por MiB, quase todas de 4 letras).
+Em disco não há `stray_ids`: entry com arquivo próprio fica de fora dele.
+
+**Decisão:**
+- `AsciiRuns` é um iterador: uma sequência por vez, só as de `min_chars` ou
+  mais. A memória passa a depender do que sobra do filtro, não do arquivo.
+- `ScanConfig.skip_noise` (com `only_text`): as entries de cada bloco de
+  64 KiB esperam o veredito do bloco. Fica o bloco com pelo menos uma frase
+  ou 0,5% dos bytes em strings com cara de texto; ruído dá 0,13%. Ligado no
+  PS2, PSP e GameCube.
+
+**Depois, no mesmo disco:** 76 MiB de RAM, 3 strings (as 3 de verdade), 1,06 s
+contra 2,21 s.
+
+**O que fica de fora:** PS1 (o caminho de ponteiros usa as sequências cruas,
+onde a densidade não separa nada); DS; os scanners UTF-16, Shift-JIS cru e de
+tabela, que ainda montam a lista inteira. Rótulo curto e esparso dentro de
+código de executável é descartado junto. Calibrado em ruído, não em disco de
+jogo real.

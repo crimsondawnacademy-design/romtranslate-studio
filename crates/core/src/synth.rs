@@ -625,6 +625,36 @@ fn ps2_iso(root_lba: u32) -> Vec<u8> {
     )
 }
 
+/// Palavras de menu do `DATA/MENU.BIN` de `make_ps2_iso_with_noise`.
+pub const NOISE_ISO_MENU: [&str; 3] = ["SAVE", "LOAD", "EXIT"];
+
+/// PS2 como um disco de verdade costuma ser: 1 MiB de dado aleatorio
+/// (`DATA/MOVIE.BIN`, o que video, audio e arquivo comprimido parecem pro
+/// scanner) ao lado do texto de `make_ps2_iso` (`DATA/TEXT.PAK`) e de um
+/// arquivo de 1 KiB so com palavras de menu (`DATA/MENU.BIN`).
+pub fn make_ps2_iso_with_noise() -> Vec<u8> {
+    let mut pak = vec![0u8; 1024];
+    plant(&mut pak, 0x20, b"PRESS X TO JUMP\0");
+    plant(&mut pak, 0x40, b"SAVE PROGRESS?\0");
+    let mut menu = vec![0u8; 1024];
+    for (i, word) in NOISE_ISO_MENU.iter().enumerate() {
+        plant(&mut menu, 0x10 + i * 8, word.as_bytes());
+    }
+    build_iso9660(
+        "PLAYSTATION",
+        "SYNTH_PS2_BIG",
+        &[
+            (
+                "SYSTEM.CNF",
+                b"BOOT2 = cdrom0:\\SLUS_205.67;1\r\nVER = 1.00\r\nVMODE = NTSC\r\n".to_vec(),
+            ),
+            ("DATA/MOVIE.BIN", make_random(1024 * 1024, 77)),
+            ("DATA/TEXT.PAK", pak),
+            ("DATA/MENU.BIN", menu),
+        ],
+    )
+}
+
 /// PSP: ISO 2048 de UMD com UMD_DATA.BIN e PSP_GAME/PARAM.SFO validos.
 pub fn make_psp_iso() -> Vec<u8> {
     psp_iso(18)

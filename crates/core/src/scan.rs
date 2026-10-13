@@ -62,6 +62,12 @@ pub struct ScanConfig {
     /// ASCII que cai dentro dela deixa de sair. E o modo dos adapters: jogo
     /// ocidental continua com as mesmas entries, jogo japones ganha as dele.
     pub japanese: bool,
+    /// So com `only_text`: descarta o que sobra do filtro em bloco que nao e
+    /// de texto (`NOISE_BLOCK`). Video, audio e dado comprimido passam de 300
+    /// "palavras" de 4 letras por MiB em `looks_like_text`; num disco de
+    /// gigabytes isso enche o teto antes de a varredura chegar no texto. E o
+    /// modo dos adapters de disco; cartucho usa `stray_ids`.
+    pub skip_noise: bool,
 }
 
 impl Default for ScanConfig {
@@ -75,6 +81,7 @@ impl Default for ScanConfig {
             max_entries: MAX_ENTRIES,
             only_text: false,
             japanese: false,
+            skip_noise: false,
         }
     }
 }
@@ -146,19 +153,26 @@ pub fn scan_bytes(data: &[u8], config: &ScanConfig) -> Result<ScanOutcome> {
     let window = &data[start..end];
 
     let table;
-    let runs = match config.encoding {
-        ScanEncoding::Ascii if config.japanese => ascii_and_japanese_runs(window, config.min_chars),
-        ScanEncoding::Ascii => ascii_runs(window),
-        ScanEncoding::ShiftJis => sjis_runs(window),
-        ScanEncoding::Utf8 => utf8_runs(window),
-        ScanEncoding::Utf16Le => utf16_runs(window, true),
-        ScanEncoding::Utf16Be => utf16_runs(window, false),
+    // ASCII sai uma sequencia por vez (`AsciiRuns`): e o scanner dos discos.
+    // ponytail: os outros ainda montam a lista inteira antes de filtrar — um
+    // arquivo de 1 GiB de dado aleatorio varrido em UTF-16 ou Shift-JIS cru
+    // ocupa mais que isso em RAM. Trocar pelo mesmo iterador se um disco real
+    // passar por esses scanners.
+    let runs: Box<dyn Iterator<Item = Run> + '_> = match config.encoding {
+        ScanEncoding::Ascii if config.japanese => {
+            Box::new(ascii_and_japanese_runs(window, config.min_chars))
+        }
+        ScanEncoding::Ascii => Box::new(AsciiRuns::new(window, config.min_chars)),
+        ScanEncoding::ShiftJis => Box::new(sjis_runs(window).into_iter()),
+        ScanEncoding::Utf8 => Box::new(utf8_runs(window).into_iter()),
+        ScanEncoding::Utf16Le => Box::new(utf16_runs(window, true).into_iter()),
+        ScanEncoding::Utf16Be => Box::new(utf16_runs(window, false).into_iter()),
         ScanEncoding::Table => {
             let tbl_path = config.tbl_path.as_deref().ok_or_else(|| {
                 CoreError::Tbl("encoding 'table' exige o caminho de um arquivo .tbl".to_string())
             })?;
             table = TblTable::load(tbl_path)?;
-            table_runs(window, &table)
+            Box::new(table_runs(window, &table).into_iter())
         }
     };
 
@@ -180,6 +194,10 @@ pub fn scan_bytes(data: &[u8], config: &ScanConfig) -> Result<ScanOutcome> {
     let mut entries = Vec::new();
     let mut truncated = false;
     let mut discarded = 0;
+    let skip_noise = config.skip_noise && config.only_text;
+    // As entries do bloco em andamento, a espera do veredito dele.
+    let mut block: Vec<TextEntry> = Vec::new();
+    let mut block_at = 0;
     for run in runs {
         // Em Shift-JIS o minimo conta bytes (ver `ScanEncoding::ShiftJis`).
         let size = if run.sjis { run.byte_len } else { run.chars };
@@ -192,6 +210,10 @@ pub fn scan_bytes(data: &[u8], config: &ScanConfig) -> Result<ScanOutcome> {
         if filtered && !looks_like_text(&run.text) {
             discarded += 1;
             continue;
+        }
+        if skip_noise && run.offset / NOISE_BLOCK != block_at {
+            discarded += flush_block(&mut block, block_at, window.len(), &mut entries);
+            block_at = run.offset / NOISE_BLOCK;
         }
         if entries.len() >= config.max_entries {
             truncated = true;
@@ -207,7 +229,8 @@ pub fn scan_bytes(data: &[u8], config: &ScanConfig) -> Result<ScanOutcome> {
         } else {
             TranslationStatus::Untranslated
         };
-        entries.push(TextEntry {
+        let target = if skip_noise { &mut block } else { &mut entries };
+        target.push(TextEntry {
             id: format!("scan-{abs:08x}"),
             resource_path: None,
             offset: Some(abs),
@@ -231,6 +254,12 @@ pub fn scan_bytes(data: &[u8], config: &ScanConfig) -> Result<ScanOutcome> {
         });
     }
 
+    discarded += flush_block(&mut block, block_at, window.len(), &mut entries);
+    if entries.len() > config.max_entries {
+        entries.truncate(config.max_entries);
+        truncated = true;
+    }
+
     Ok(ScanOutcome {
         entries,
         truncated,
@@ -241,6 +270,42 @@ pub fn scan_bytes(data: &[u8], config: &ScanConfig) -> Result<ScanOutcome> {
             _ => None,
         },
     })
+}
+
+/// Tamanho do bloco em que `ScanConfig::skip_noise` julga o que achou.
+const NOISE_BLOCK: usize = 64 * 1024;
+
+/// Passa pra `entries` o que foi achado no bloco `at` se ele for de texto, e
+/// devolve quantas descartou. Bloco de texto tem pelo menos uma frase
+/// (`is_sentence`) ou meio por cento dos bytes em strings com cara de texto.
+///
+/// Medido em 13/10/2026: 64 MiB de dado aleatorio dao 19.899 strings que
+/// passam em `looks_like_text` (311 por MiB, quase todas de 4 letras), ou
+/// 0,13% dos bytes — um quarto do corte. Um arquivo so de menu ("SAVE",
+/// "LOAD", "EXIT" num arquivo de 1 KiB) passa de 1%.
+// ponytail: executavel com rotulo curto e esparso no meio de codigo perde
+// esses rotulos; e arquivo que mistura texto e dado comprimido no mesmo
+// bloco de 64 KiB fica com o lixo do bloco. Calibrado em ruido, nao em disco
+// de jogo.
+fn flush_block(
+    block: &mut Vec<TextEntry>,
+    at: usize,
+    window_len: usize,
+    entries: &mut Vec<TextEntry>,
+) -> usize {
+    if block.is_empty() {
+        return 0;
+    }
+    let len = NOISE_BLOCK.min(window_len.saturating_sub(at * NOISE_BLOCK));
+    let text_bytes: usize = block.iter().map(|e| e.original_bytes.len()).sum();
+    let is_text = text_bytes * 200 >= len || block.iter().any(|e| is_sentence(&e.source_text));
+    if is_text {
+        entries.append(block);
+        return 0;
+    }
+    let dropped = block.len();
+    block.clear();
+    dropped
 }
 
 /// Parece texto de jogo, e nao tile, codigo ou tabela que por acaso caiu em
@@ -470,28 +535,55 @@ pub(crate) fn ascii_texts(data: &[u8]) -> Vec<String> {
 }
 
 fn ascii_runs(data: &[u8]) -> Vec<Run> {
-    let mut runs = Vec::new();
-    let mut i = 0;
-    while i < data.len() {
-        if !is_ascii_printable(data[i]) {
-            i += 1;
-            continue;
-        }
-        let begin = i;
-        while i < data.len() && is_ascii_printable(data[i]) {
-            i += 1;
-        }
-        let bytes = &data[begin..i];
-        runs.push(Run {
-            offset: begin,
-            byte_len: bytes.len(),
-            chars: bytes.len(),
-            text: String::from_utf8_lossy(bytes).into_owned(),
-            terminated: data.get(i) == Some(&0),
-            sjis: false,
-        });
+    AsciiRuns::new(data, 1).collect()
+}
+
+/// As sequencias ASCII de `min`+ caracteres, uma por vez. Um disco de
+/// gigabytes tem centenas de milhoes de sequencias de 1 a 3 bytes: montar a
+/// lista inteira antes de filtrar passava de 1 GiB de RAM a cada 64 MiB de
+/// dado aleatorio varrido (medido em 13/10/2026).
+struct AsciiRuns<'a> {
+    data: &'a [u8],
+    at: usize,
+    min: usize,
+}
+
+impl<'a> AsciiRuns<'a> {
+    fn new(data: &'a [u8], min: usize) -> Self {
+        AsciiRuns { data, at: 0, min }
     }
-    runs
+}
+
+impl Iterator for AsciiRuns<'_> {
+    type Item = Run;
+
+    fn next(&mut self) -> Option<Run> {
+        let data = self.data;
+        loop {
+            while self.at < data.len() && !is_ascii_printable(data[self.at]) {
+                self.at += 1;
+            }
+            if self.at >= data.len() {
+                return None;
+            }
+            let begin = self.at;
+            while self.at < data.len() && is_ascii_printable(data[self.at]) {
+                self.at += 1;
+            }
+            let bytes = &data[begin..self.at];
+            if bytes.len() < self.min {
+                continue;
+            }
+            return Some(Run {
+                offset: begin,
+                byte_len: bytes.len(),
+                chars: bytes.len(),
+                text: String::from_utf8_lossy(bytes).into_owned(),
+                terminated: data.get(self.at) == Some(&0),
+                sjis: false,
+            });
+        }
+    }
 }
 
 /// Cada sequencia maxima de caracteres Shift-JIS de `data`, ASCII incluso:
@@ -552,39 +644,40 @@ fn sjis_runs(data: &[u8]) -> Vec<Run> {
     runs
 }
 
-/// As sequencias ASCII e, no lugar das que caem dentro dela, cada sequencia
-/// Shift-JIS que e texto japones (`sjis::looks_japanese`) — uma leitura so
-/// por faixa de bytes, em ordem de posicao. `min_bytes` vale pra japonesa, e
-/// a de ate 3 caracteres ainda precisa do terminador 0x00.
-/// So a sequencia que passa vira string: num disco de gigabytes quase
-/// nenhuma passa.
-fn ascii_and_japanese_runs(data: &[u8], min_bytes: usize) -> Vec<Run> {
+/// As sequencias ASCII (de `min`+ caracteres) e, no lugar das que caem dentro
+/// dela, cada sequencia Shift-JIS que e texto japones (`sjis::looks_japanese`)
+/// — uma leitura so por faixa de bytes, em ordem de posicao. `min` vale em
+/// bytes pra japonesa, e a de ate 3 caracteres ainda precisa do terminador
+/// 0x00. So a sequencia japonesa que passa vira string, e as ASCII saem uma
+/// por vez: num disco de gigabytes quase nenhuma passa.
+fn ascii_and_japanese_runs(data: &[u8], min: usize) -> impl Iterator<Item = Run> + '_ {
     let mut japanese = Vec::new();
     each_sjis_span(data, |begin, end, chars, script| {
         let two_byte = end - begin > chars;
         // Ate 3 caracteres so com o terminador logo depois: "ぉく" solto
         // aparece em ruido, seguido de 0x00 quase nunca.
         let anchored = chars > 3 || data.get(end) == Some(&0);
-        if two_byte && anchored && end - begin >= min_bytes && script.verdict() == Some(true) {
+        if two_byte && anchored && end - begin >= min && script.verdict() == Some(true) {
             japanese.push(sjis_run(data, begin, end, chars));
         }
     });
-    if japanese.is_empty() {
-        return ascii_runs(data);
-    }
     // Toda sequencia ASCII esta inteira dentro de uma Shift-JIS ou fora de
     // todas: o ASCII e parte do Shift-JIS.
-    let inside = |run: &Run| {
-        let i = japanese.partition_point(|j| j.offset <= run.offset);
-        i > 0 && run.offset < japanese[i - 1].offset + japanese[i - 1].byte_len
-    };
-    let mut runs: Vec<Run> = ascii_runs(data)
-        .into_iter()
-        .filter(|run| !inside(run))
+    let spans: Vec<(usize, usize)> = japanese
+        .iter()
+        .map(|j| (j.offset, j.offset + j.byte_len))
         .collect();
-    runs.extend(japanese);
-    runs.sort_by_key(|run| run.offset);
-    runs
+    let outside = move |run: &Run| {
+        let i = spans.partition_point(|span| span.0 <= run.offset);
+        i == 0 || run.offset >= spans[i - 1].1
+    };
+    let mut ascii = AsciiRuns::new(data, min).filter(outside).peekable();
+    let mut japanese = japanese.into_iter().peekable();
+    std::iter::from_fn(move || match (ascii.peek(), japanese.peek()) {
+        (Some(a), Some(j)) if j.offset < a.offset => japanese.next(),
+        (Some(_), _) => ascii.next(),
+        (None, _) => japanese.next(),
+    })
 }
 
 /// Decodifica um char UTF-8 valido em `data[i..]` (from_utf8 rejeita overlong
