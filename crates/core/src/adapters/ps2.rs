@@ -57,7 +57,10 @@ impl GameAdapter for Ps2Adapter {
             "ISO 9660 com system id \"{}\" (volume \"{}\")",
             info.system_id, info.volume_id
         )];
-        match identify_playstation(head, map) {
+        // O diretorio raiz pode estar alem de `head` (DVD): ai olha o arquivo.
+        let found =
+            identify_playstation(head, map).or_else(|| identify_playstation(&input.whole()?, map));
+        match found {
             Some((PsKind::Two, boot)) => {
                 evidence.push(format!("SYSTEM.CNF: {boot}"));
                 ProbeResult {
@@ -69,8 +72,7 @@ impl GameAdapter for Ps2Adapter {
             Some((PsKind::One, _)) => ProbeResult::no_match(self.id(), self.platform()),
             None => {
                 evidence.push(
-                    "SYSTEM.CNF fora da janela de probe — PS1 vs PS2 confirma na extracao"
-                        .to_string(),
+                    "SYSTEM.CNF nao encontrado — PS1 vs PS2 confirma na extracao".to_string(),
                 );
                 ProbeResult {
                     // Sem CNF: 2048 pende pra DVD (PS2); raw pende pra PS1.

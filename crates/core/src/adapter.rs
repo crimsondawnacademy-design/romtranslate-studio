@@ -19,7 +19,8 @@ pub const MAX_FILE_SIZE: u64 = 16 * 1024 * 1024 * 1024;
 pub const IN_MEMORY_MAX: u64 = 2 * 1024 * 1024 * 1024;
 
 /// Entrada de probing: caminho, tamanho e os primeiros bytes do arquivo.
-/// Probes leem SOMENTE de `head`, sempre com bounds check.
+/// Probes leem de `head`, sempre com bounds check. Quem precisa olhar alem
+/// dele (disco optico) pede `whole`.
 #[derive(Debug, Clone)]
 pub struct GameInput {
     pub path: PathBuf,
@@ -46,6 +47,19 @@ impl GameInput {
             size,
             head,
         })
+    }
+
+    /// O arquivo inteiro por mapeamento em memoria (nada e carregado alem do
+    /// que for lido), pra o probe que `head` nao decide: num DVD de PS2 o
+    /// diretorio raiz e o SYSTEM.CNF ficam depois dos 128 KiB, atras da ponte
+    /// UDF. `None` se nao ha mais nada a ver (o arquivo cabe em `head`), se a
+    /// entrada veio de bytes (teste) ou se o arquivo sumiu ou mudou de tamanho.
+    pub fn whole(&self) -> Option<crate::fileio::FileBytes> {
+        if self.size as usize <= self.head.len() {
+            return None;
+        }
+        let view = crate::fileio::read_view(&self.path).ok()?;
+        (view.len() as u64 == self.size).then_some(view)
     }
 
     /// Constroi input direto de bytes — usado em testes com fixtures sinteticas.

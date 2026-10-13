@@ -367,6 +367,22 @@ pub fn make_rpx_header() -> Vec<u8> {
 /// no 18, um nivel opcional de subdiretorio ("DIR/ARQUIVO"). Suficiente para
 /// as fixtures de PS1/PS2/PSP — nenhum byte de disco real.
 fn build_iso9660(system_id: &str, volume_id: &str, files: &[(&str, Vec<u8>)]) -> Vec<u8> {
+    build_iso9660_at(system_id, volume_id, files, 18)
+}
+
+/// Setor do diretorio raiz dos discos "de DVD" sinteticos: depois da janela
+/// de probe (128 KiB = setor 64), como num DVD de verdade, onde a ponte UDF
+/// ocupa os setores ate a ancora dela, no 256.
+pub const FAR_ROOT_LBA: u32 = 262;
+
+/// O mesmo ISO, com o diretorio raiz em `root_lba`; subdiretorios e arquivos
+/// vem logo depois dele.
+fn build_iso9660_at(
+    system_id: &str,
+    volume_id: &str,
+    files: &[(&str, Vec<u8>)],
+    root_lba: u32,
+) -> Vec<u8> {
     const S: usize = 2048;
     fn record(name: &[u8], extent: u32, size: u32, is_dir: bool) -> Vec<u8> {
         let mut r = vec![0u8; 33 + name.len()];
@@ -384,7 +400,7 @@ fn build_iso9660(system_id: &str, volume_id: &str, files: &[(&str, Vec<u8>)]) ->
         r
     }
 
-    // Layout: subdirs ganham 1 setor cada a partir do 19; arquivos depois.
+    // Layout: subdirs ganham 1 setor cada depois da raiz; arquivos depois.
     let mut subdirs: Vec<&str> = Vec::new();
     for (path, _) in files {
         if let Some((dir, _)) = path.split_once('/') {
@@ -393,8 +409,8 @@ fn build_iso9660(system_id: &str, volume_id: &str, files: &[(&str, Vec<u8>)]) ->
             }
         }
     }
-    let root_lba = 18u32;
-    let first_file_lba = 19 + subdirs.len() as u32;
+    let first_dir_lba = root_lba + 1;
+    let first_file_lba = first_dir_lba + subdirs.len() as u32;
     let mut file_lbas: Vec<u32> = Vec::new();
     let mut next = first_file_lba;
     for (_, content) in files {
@@ -429,7 +445,7 @@ fn build_iso9660(system_id: &str, volume_id: &str, files: &[(&str, Vec<u8>)]) ->
         .iter()
         .enumerate()
         .map(|(i, _)| {
-            let lba = 19 + i as u32;
+            let lba = first_dir_lba + i as u32;
             let mut recs = Vec::new();
             recs.extend(record(&[0], lba, S as u32, true));
             recs.extend(record(&[1], root_lba, S as u32, true));
@@ -437,7 +453,12 @@ fn build_iso9660(system_id: &str, volume_id: &str, files: &[(&str, Vec<u8>)]) ->
         })
         .collect();
     for (i, dir) in subdirs.iter().enumerate() {
-        root_records.extend(record(dir.as_bytes(), 19 + i as u32, S as u32, true));
+        root_records.extend(record(
+            dir.as_bytes(),
+            first_dir_lba + i as u32,
+            S as u32,
+            true,
+        ));
     }
     for ((path, content), lba) in files.iter().zip(&file_lbas) {
         let (target, name) = match path.split_once('/') {
@@ -454,7 +475,7 @@ fn build_iso9660(system_id: &str, volume_id: &str, files: &[(&str, Vec<u8>)]) ->
     image[root_lba as usize * S..root_lba as usize * S + root_records.len()]
         .copy_from_slice(&root_records);
     for (i, recs) in subdir_records.iter().enumerate() {
-        let base = (19 + i) * S;
+        let base = (first_dir_lba as usize + i) * S;
         image[base..base + recs.len()].copy_from_slice(recs);
     }
     for ((_, content), lba) in files.iter().zip(&file_lbas) {
@@ -577,10 +598,20 @@ pub fn make_ps1_bin_with_audio() -> (Vec<u8>, usize) {
 
 /// PS2: ISO 2048 com SYSTEM.CNF (BOOT2=) e strings num subdiretorio.
 pub fn make_ps2_iso() -> Vec<u8> {
+    ps2_iso(18)
+}
+
+/// O mesmo disco de PS2 com o layout de um DVD: diretorio raiz e SYSTEM.CNF
+/// depois da janela de probe (`FAR_ROOT_LBA`).
+pub fn make_ps2_dvd_iso() -> Vec<u8> {
+    ps2_iso(FAR_ROOT_LBA)
+}
+
+fn ps2_iso(root_lba: u32) -> Vec<u8> {
     let mut pak = vec![0u8; 1024];
     plant(&mut pak, 0x20, b"PRESS X TO JUMP\0");
     plant(&mut pak, 0x40, b"SAVE PROGRESS?\0");
-    build_iso9660(
+    build_iso9660_at(
         "PLAYSTATION",
         "SYNTH_PS2",
         &[
@@ -590,15 +621,25 @@ pub fn make_ps2_iso() -> Vec<u8> {
             ),
             ("DATA/TEXT.PAK", pak),
         ],
+        root_lba,
     )
 }
 
 /// PSP: ISO 2048 de UMD com UMD_DATA.BIN e PSP_GAME/PARAM.SFO validos.
 pub fn make_psp_iso() -> Vec<u8> {
+    psp_iso(18)
+}
+
+/// O mesmo UMD com o diretorio raiz depois da janela de probe.
+pub fn make_psp_iso_with_far_root() -> Vec<u8> {
+    psp_iso(FAR_ROOT_LBA)
+}
+
+fn psp_iso(root_lba: u32) -> Vec<u8> {
     let mut data = vec![0u8; 1024];
     plant(&mut data, 0x10, b"NEW GAME\0");
     plant(&mut data, 0x20, b"CONTINUE ADVENTURE\0");
-    build_iso9660(
+    build_iso9660_at(
         "PSP GAME",
         "SYNTH_PSP",
         &[
@@ -612,6 +653,7 @@ pub fn make_psp_iso() -> Vec<u8> {
             ),
             ("PSP_GAME/DATA.BIN", data),
         ],
+        root_lba,
     )
 }
 

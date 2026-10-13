@@ -72,6 +72,41 @@ fn probes_distinguish_ps1_ps2_psp() {
     assert!(best.evidence.iter().any(|e| e.contains("ULUS01234")));
 }
 
+/// Num DVD de verdade o diretorio raiz fica depois dos 128 KiB que o probe
+/// carrega. O disco tem que ser reconhecido mesmo assim: sem isso um ISO de
+/// PS2 de 2,7 GiB aparecia como "formato nao reconhecido".
+#[test]
+fn a_disc_with_the_root_directory_past_the_probe_window_is_recognized() {
+    use romtranslate_core::adapter::{GameInput, PROBE_HEAD_LEN};
+    let tmp = TempDir::new("far-root");
+
+    let dvd = synth::make_ps2_dvd_iso();
+    assert!(synth::FAR_ROOT_LBA as usize * 2048 > PROBE_HEAD_LEN);
+    let path = tmp.0.join("dvd.iso");
+    fs::write(&path, &dvd).unwrap();
+    let report = inspect(&path).unwrap();
+    let best = report.best.expect("ps2 em layout de DVD");
+    assert_eq!(best.platform, Platform::Ps2);
+    assert!(best.confidence >= 0.9);
+    assert!(best.evidence.iter().any(|e| e.contains("BOOT2")));
+    assert!(!report.results.iter().any(|r| r.platform == Platform::Ps1));
+
+    let path = tmp.0.join("umd.iso");
+    fs::write(&path, synth::make_psp_iso_with_far_root()).unwrap();
+    let best = inspect(&path).unwrap().best.expect("psp com raiz longe");
+    assert_eq!(best.platform, Platform::Psp);
+    assert!(best.evidence.iter().any(|e| e.contains("ULUS01234")));
+
+    // Entrada que so tem os bytes do comeco (sem arquivo pra abrir) continua
+    // sem decidir, e sem panico.
+    let head_only = GameInput::from_bytes("nao-existe.iso", &dvd[..PROBE_HEAD_LEN]);
+    assert!(Ps2Adapter.probe(&head_only).confidence < 0.5);
+
+    // E o disco inteiro passa pelo resto: a extracao acha o texto dele.
+    let entries = Ps2Adapter.extract_structured(&dvd).unwrap();
+    assert!(entries.iter().any(|e| e.source_text == "PRESS X TO JUMP"));
+}
+
 #[test]
 fn iso_walker_lists_files_in_plain_and_raw() {
     let ps2 = synth::make_ps2_iso();

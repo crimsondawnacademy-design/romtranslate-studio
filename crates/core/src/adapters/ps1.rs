@@ -62,7 +62,10 @@ impl GameAdapter for Ps1Adapter {
         if map == SectorMap::Raw2352 {
             evidence.push("imagem raw de CD (2352 bytes/setor, BIN)".to_string());
         }
-        match identify_playstation(head, map) {
+        // O diretorio raiz pode estar alem de `head` (DVD): ai olha o arquivo.
+        let found =
+            identify_playstation(head, map).or_else(|| identify_playstation(&input.whole()?, map));
+        match found {
             Some((PsKind::One, boot)) => {
                 evidence.push(format!("SYSTEM.CNF: {boot}"));
                 ProbeResult {
@@ -74,8 +77,7 @@ impl GameAdapter for Ps1Adapter {
             Some((PsKind::Two, _)) => ProbeResult::no_match(self.id(), self.platform()),
             None => {
                 evidence.push(
-                    "SYSTEM.CNF fora da janela de probe — PS1 vs PS2 confirma na extracao"
-                        .to_string(),
+                    "SYSTEM.CNF nao encontrado — PS1 vs PS2 confirma na extracao".to_string(),
                 );
                 ProbeResult {
                     // Raw 2352 e forte indicio de CD (PS1); DVD de PS2 nunca e raw.

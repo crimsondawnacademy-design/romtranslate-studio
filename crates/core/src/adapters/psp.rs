@@ -92,7 +92,14 @@ impl GameAdapter for PspAdapter {
         if parse_pvd(head, map).is_err() {
             return ProbeResult::no_match(self.id(), self.platform());
         }
-        let Some((has_umd, sfo)) = find_psp_markers(head, map) else {
+        // Se `head` nao mostra os dois marcadores (diretorio ou PARAM.SFO alem
+        // dele), olha o arquivo inteiro.
+        let complete = |m: &(bool, Option<Vec<u8>>)| m.0 && m.1.is_some();
+        let markers = find_psp_markers(head, map)
+            .filter(complete)
+            .or_else(|| find_psp_markers(&input.whole()?, map))
+            .or_else(|| find_psp_markers(head, map));
+        let Some((has_umd, sfo)) = markers else {
             return ProbeResult::no_match(self.id(), self.platform());
         };
         let has_sfo = sfo.is_some();
