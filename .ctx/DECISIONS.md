@@ -1592,4 +1592,3 @@ inventado — nunca tela de jogo comercial.
 **Hospedagem:** Cloudflare Pages na conta Crimson Dawn (projeto
 `romtranslate-studio`), como os outros sites pessoais dele. Fonte em `site/`
 neste repositório; publicar é `site/publicar.sh`, rodado à mão.
-\n
