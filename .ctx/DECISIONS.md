@@ -1792,3 +1792,77 @@ ponteiro direto pra dentro do banco, em código, quebraria. O espaço livre é
 justo (93% usado num teste com texto 1,5 vez maior). Só o GBA, só texto de
 16 bits com `0xFFFF` de fim. Os outros bancos do jogo medido (menus,
 batalha, nomes) não têm essa forma.
+
+## 2026-10-13 — A caixa de texto é medida, a linha é quebrada pelo app, e mensagem repetida é guardada uma vez
+
+**Contexto:** com metade do roteiro do jogo japonês traduzida e um emulador
+sem janela pra olhar a tela (mGBA compilado só com a biblioteca), três coisas
+apareceram: a tradução presa às quebras de linha do original saía espremida
+e, mesmo assim, 1 em cada 5 passava da caixa; alguns comandos levam mais de
+um número; e o roteiro inteiro traduzido não cabe no cartucho.
+
+**Decisão:**
+- **Quem quebra a linha é o app.** O `Layout` do banco é medido nos textos
+  dele: fecha a linha o código sem parâmetro que separa dois trechos que
+  juntos não caberiam na caixa; a quebra é o que mais aparece sozinho; o
+  recuo e a largura dos códigos do meio da linha saem do que os autores
+  deixaram de folga. A frase vai inteira pro tradutor (`flow`) e é quebrada
+  na reinserção (`wrap`), com a quebra do próprio jogo.
+- **Só onde a caixa rola.** Linha a mais só é segura se o jogo rola a caixa
+  sozinho. A prova aceita: parágrafos (linhas emendadas só pela quebra) mais
+  altos que o de 9 em cada 10 — texto que o jogo só mostra rolando. Sem ela
+  vale a regra anterior (largura no pedido, aviso na validação).
+- **A quebra que a tradução já tem fica.** `wrap` só acrescenta. Quem
+  traduziu à mão, ou o modelo que manteve uma quebra antes de uma marca de
+  fala, decide; o app não desfaz.
+- **Parâmetro contado posição a posição** (`find_params`), com a marca de
+  fala valendo como começo de texto. Mais posições seguidas do que
+  `MAX_PARAMS` não é parâmetro, é texto de outro alfabeto: a leitura para no
+  comando e o que vem depois fica intocado.
+- **Kanji que a tabela não lê é texto, não comando:** `[045C]` pode sumir da
+  tradução (o item vai com um aviso pro modelo); `[FFxx]` continua
+  obrigatório.
+- **Mensagem repetida uma vez só, e só quando falta espaço** (`pooled`).
+  Bloco a bloco continua sendo o caminho normal: mexe só no que foi
+  traduzido. Quando algum bloco fica sem lugar, o banco inteiro é arrumado:
+  blocos com mensagens em comum num mesmo trecho ao alcance do offset de 16
+  bits, com a tabela logo antes do começo do texto de cada bloco, como no
+  original. Cortar acento, encurtar a tradução ou usar as filas de zero do
+  cartucho como espaço livre foram descartados: o primeiro e o segundo
+  pioram o texto, o terceiro escreve por cima de dado.
+
+**O que NÃO foi provado:** só uma sala do jogo foi vista (o quarto do
+começo), nos dois arranjos. A suposição de que o jogo só soma o offset da
+tabela ao começo do texto vale pra essa sala; o resto é leitura pelo
+diretório (8.120 mensagens com os mesmos comandos). A largura de um comando
+que escreve um nome é a folga que os autores deixaram, não o tamanho do nome
+que o jogador escolheu. Verso e lista perdem as quebras quando a frase vai
+emendada pro modelo.
+
+## 2026-10-13 — A chamada ao Codex leva só o pedido
+
+**Contexto:** 56 chamadas de 25 frases esgotaram o limite de 5 horas do
+plano ChatGPT do Rhuan, com 27% dos textos distintos do jogo traduzidos. Ele
+pediu: "come muitos tokens, deixa mais leve". O texto do jogo inteiro é
+pouco (uns 300 mil tokens de entrada e 150 mil de saída); o peso estava em
+volta dele.
+
+**Decisão:**
+- **Desligar o que não traduz.** Cada `codex exec` carregava as skills do
+  computador, plugins e as ferramentas (navegador, imagem, outros agentes).
+  O app pergunta ao Codex que recursos ele tem (`codex features list`) e
+  desliga só os que existem e estão ligados: nome desconhecido derruba o
+  Codex, e a lista muda de versão pra versão. Se a pergunta falha, ficam as
+  duas flags de antes.
+- **Raciocínio `low` fixo.** Traduzir frase de jogo não pede raciocínio
+  longo, e ele conta no limite.
+- **Modelo continua escolha de quem usa.** O nome dos modelos muda a cada
+  poucos meses e depende da conta; o app não escolhe um "leve" sozinho.
+- **Pedido compacto e lote por tamanho:** JSON sem espaço nem campo vazio;
+  o lote fecha em N frases ou 8 mil caracteres de original.
+- **Contar o que gastou:** o `--json` do Codex traz os tokens da chamada, e
+  o resumo da rodada passa a mostrá-los.
+
+**O que NÃO foi provado:** quanto isso economiza. O limite da conta só
+volta depois desta sessão; nenhuma chamada enxuta chegou a rodar de
+verdade (os testes usam um Codex de mentira).

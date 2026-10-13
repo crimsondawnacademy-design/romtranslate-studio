@@ -254,9 +254,12 @@ de outra mensagem, de um comando ou de preenchimento.
 O leitor faz duas passadas, e na primeira aprende o jeito daquele jogo:
 
 - **comando com parâmetro**: o comando que quase nunca é seguido de algo que
-  continue um texto leva um número depois dele, e o par vira uma peça só no
-  texto (`[FF08:0003]`). Sem isso o número era lido como letra, e traduzir a
-  frase trocava o parâmetro do comando;
+  continue um texto leva um número depois dele, e os dois viram uma peça só
+  no texto (`[FF08:0003]`). A conta é feita posição a posição, então o
+  comando pode levar dois ou três (`[FF26:0003:0001]`). Sem isso o número era
+  lido como letra, e traduzir a frase trocava o parâmetro do comando. Número
+  em mais de quatro posições seguidas não é parâmetro: é texto escrito com
+  outro alfabeto do jogo, e a leitura para ali;
 - **marca de fala e número de cabeçalho**: as figuras com que as falas abrem
   ("◆", "◇"); um valor baixo entre o fim de uma mensagem e a marca é
   cabeçalho, e fica fora da frase;
@@ -280,10 +283,12 @@ como a frase não muda de lugar, a tradução pode ter no máximo o mesmo númer
 de letras que o original tem de caracteres, o que do japonês para o
 português quase nunca basta. No texto do próprio jogo aparecem 25 das 26
 maiúsculas de largura inteira e só 13 das 26 minúsculas: não há prova de que
-a fonte do jogo tenha todas. **Ninguém viu uma tradução gravada assim rodando
-num emulador.** O que falta para esse jogo virar jogável em português é o
-que falta em geral: frase que muda de lugar (tabela de ponteiros relativos)
-e fonte (letra estreita e acentuada).
+a fonte do jogo tenha todas. **Conferido depois num emulador sem janela**
+(mGBA compilado só com a biblioteca, com um roteiro de teclas): a fonte desse
+jogo tem as 26 maiúsculas, as 26 minúsculas, os dígitos e a pontuação comum
+em largura inteira, e a fala traduzida aparece na caixa. Não tem letra
+acentuada. O kanji que cai em código vazio (`[045C]`) é texto do original:
+a tradução não precisa repeti-lo.
 
 **Tradução que cresce: banco de mensagens em blocos**
 (`crates/core/src/adapters/bank.rs`). O roteiro do jogo japonês medido fica
@@ -303,8 +308,16 @@ posições que têm que cair no lugar certo), sem saber que jogo é. Com isso:
   acha lugar, ou que passa de 64 KiB, fica como no original, e a contagem
   aparece na tela;
 - o limite passa a ser a **caixa de texto**: a largura de linha (trecho
-  entre dois comandos) que 999 em cada mil linhas do banco respeitam. A IA
-  recebe essa largura e a validação avisa a linha que passa dela.
+  entre dois comandos) que 999 em cada mil linhas do banco respeitam;
+- **o app quebra as linhas**: a quebra de linha do jogo, o recuo da linha de
+  baixo e o espaço que um comando ocupa no meio da linha são medidos nos
+  textos do próprio banco. A frase vai inteira para a IA e é quebrada entre
+  palavras na reinserção. Isso só vale onde há sinal de que a caixa rola
+  sozinha (parágrafos mais altos que o comum); sem ele, a IA recebe a
+  largura e a validação avisa a linha que passa dela;
+- **mensagem repetida guardada uma vez**: quando algum bloco fica sem lugar,
+  o banco inteiro é arrumado de novo, com os blocos que têm mensagens em
+  comum num mesmo trecho e cada mensagem gravada uma vez.
 
 Medido no jogo real, só em contagens: um banco de 563 blocos e 8.120
 mensagens, com 85% do texto do cartucho; caixa de 20 caracteres por linha
@@ -312,10 +325,17 @@ mensagens, com 85% do texto do cartucho; caixa de 20 caracteres por linha
 esforço, as 7.338 mensagens do banco foram trocadas por texto 1,5 vez maior:
 todas entraram, 414 dos 481 blocos com tabela mudaram de lugar, 336 dos 359
 KiB livres foram usados, e a leitura pelo diretório, mensagem a mensagem,
-deu os mesmos comandos e parâmetros do original nas 8.120. **Ninguém viu o
-jogo rodando com blocos fora do lugar.** Os outros bancos de texto desse
-jogo (menus, batalha, nomes: 15% do texto) têm outra estrutura e continuam
-com a tradução presa ao espaço da original.
+deu os mesmos comandos e parâmetros do original nas 8.120. Com tradução de
+verdade em 44% do roteiro o texto ficou 1,76 vez maior que o original: bloco
+a bloco faltariam 222 KiB para o roteiro inteiro, e o cartucho já está no
+tamanho máximo. Como 40% do texto está em mensagens que outro bloco também
+tem (a mesma sala em capítulos diferentes), guardando cada uma uma vez o
+roteiro inteiro cabe, com folga: num teste com o resto preenchido a 1,9 vez,
+7.457 mensagens entraram e nenhuma ficou sem espaço. **O que foi visto
+rodando** (emulador sem janela): o primeiro diálogo do jogo, nos dois
+arranjos, com as linhas quebradas pelo app. Só essa sala. Os outros bancos
+de texto desse jogo (menus, batalha, nomes: 15% do texto) têm outra
+estrutura e continuam com a tradução presa ao espaço da original.
 
 **Texto ASCII traduzido para idioma com acento**: num jogo que guarda o
 texto em ASCII (é o que a extração estruturada lê; no DS, também UTF-16),
@@ -431,7 +451,12 @@ escolha o provider **ChatGPT (Codex CLI)**. O app não faz o login nem guarda
 token: ele chama o `codex exec` com as ferramentas desligadas, só para
 traduzir. Os textos do jogo vão para a OpenAI, então a opção exige "permitir
 tradução remota". Cada lote é uma chamada do Codex — projeto grande gasta o
-limite da assinatura.
+limite da assinatura. Para pesar menos, a chamada vai sem as skills, os
+plugins e as ferramentas do Codex, com o raciocínio no mínimo, e o resumo da
+rodada mostra os tokens que o Codex declarou. O modelo é o padrão da conta,
+que costuma ser o mais caro: o campo de modelo aceita um mais leve. Medido
+num plano de entrada: 56 chamadas de 25 frases, ainda sem esses cortes,
+esgotaram o limite de 5 horas.
 
 ```bash
 pnpm install
