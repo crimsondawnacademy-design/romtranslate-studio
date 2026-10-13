@@ -12,6 +12,7 @@ import {
   PLATFORM_NAMES,
   SupportLevel,
 } from "./types";
+import logo from "./assets/logo.svg";
 import "./App.css";
 
 const TARGET_LANGUAGES = ["pt-BR", "en-US", "es-ES", "fr-FR", "de-DE", "it-IT", "ja-JP"];
@@ -147,10 +148,13 @@ export default function App() {
   }
 
   return (
-    <main className="shell">
+    <main className={screen.kind === "project" ? "shell wide" : "shell"}>
       <header className="masthead">
-        <h1>{t("app.title")}</h1>
-        <p>{t("app.tagline")}</p>
+        <img className="logo" src={logo} alt="" />
+        <div>
+          <h1>{t("app.title")}</h1>
+          <p>{t("app.tagline")}</p>
+        </div>
       </header>
 
       {error && (
@@ -161,6 +165,8 @@ export default function App() {
 
       {screen.kind === "home" && (
         <section className={dropping ? "card center dropping" : "card center"}>
+          <img className="hero-art" src={logo} alt="" />
+          <h2>{t("home.title")}</h2>
           <div className="actions center-actions">
             <button className="primary" onClick={pickFile}>
               {t("home.selectFile")}
@@ -173,6 +179,7 @@ export default function App() {
 
       {screen.kind === "inspecting" && (
         <section className="card center">
+          <img className="hero-art busy" src={logo} alt="" />
           <p>{t("inspect.loading")}</p>
         </section>
       )}

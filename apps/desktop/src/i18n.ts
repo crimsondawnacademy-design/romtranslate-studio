@@ -12,6 +12,7 @@ const messages = {
     "home.hint":
       "Selecione ou arraste para esta janela uma ROM ou dump obtido legalmente por você (ou uma pasta de projeto .rtsproj). O arquivo nunca sai do seu computador nesta etapa.",
     "home.drop": "Solte para abrir.",
+    "home.title": "Arraste o arquivo do jogo para cá",
     "inspect.loading": "Inspecionando arquivo...",
     "inspect.title": "Resultado da detecção",
     "inspect.platform": "Plataforma",
@@ -65,6 +66,9 @@ const messages = {
     "extract.removedOld":
       "{n} strings antigas sem tradução saíram do projeto por não parecerem texto. Ficou o que tem tradução, o que tem ponteiro em tabela e o que foi lido por tabela de caracteres.",
     "extract.none": "Nenhuma string com essa configuração.",
+    "extract.emptyTitle": "Nenhum texto extraído ainda",
+    "extract.emptyHint":
+      "Clique em “Extração estruturada” para puxar os textos do jogo. Eles aparecem aqui, prontos para traduzir.",
     "extract.filter": "Filtrar texto...",
     "extract.showing": "Mostrando {shown} de {total}",
     "extract.offset": "Offset",
@@ -258,6 +262,7 @@ const messages = {
     "home.hint":
       "Select or drag into this window a ROM or dump you legally obtained (or a .rtsproj project folder). The file never leaves your computer at this stage.",
     "home.drop": "Drop to open.",
+    "home.title": "Drag your game file here",
     "inspect.loading": "Inspecting file...",
     "inspect.title": "Detection result",
     "inspect.platform": "Platform",
@@ -311,6 +316,9 @@ const messages = {
     "extract.removedOld":
       "{n} old strings with no translation left the project because they do not look like text. Whatever has a translation, a pointer in a table or was read through a character table stayed.",
     "extract.none": "No strings with this configuration.",
+    "extract.emptyTitle": "No text extracted yet",
+    "extract.emptyHint":
+      "Click “Structured extraction” to pull the game's text. It shows up here, ready to translate.",
     "extract.filter": "Filter text...",
     "extract.showing": "Showing {shown} of {total}",
     "extract.offset": "Offset",

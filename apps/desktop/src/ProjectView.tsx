@@ -663,7 +663,7 @@ export default function ProjectView({
 
   return (
     <section className="card">
-      <h2>{t("extract.title")}</h2>
+      <h2 data-step="1">{t("extract.title")}</h2>
       <dl className="facts">
         <dt>{t("inspect.file")}</dt>
         <dd className="path">{project.sourcePath}</dd>
@@ -852,6 +852,13 @@ export default function ProjectView({
       )}
       {savedPath && <div className="ok">{t("export.saved", { path: savedPath })}</div>}
 
+      {entries.length === 0 && (
+        <div className="empty">
+          <strong>{t("extract.emptyTitle")}</strong>
+          {t("extract.emptyHint")}
+        </div>
+      )}
+
       {entries.length > 0 && (
         <>
           <div className="results-bar">
@@ -902,6 +909,13 @@ export default function ProjectView({
                 </tr>
               </thead>
               <tbody>
+                {shown.length === 0 && (
+                  <tr>
+                    <td className="empty-row" colSpan={hasResources ? 5 : 4}>
+                      {t("extract.none")}
+                    </td>
+                  </tr>
+                )}
                 {shown.map((e) => {
                   const issues = issuesByEntry[e.id] ?? [];
                   const worst = issues.some((i) => i.severity === "error")
@@ -945,14 +959,14 @@ export default function ProjectView({
               onUnmarkInternal={() => unmarkInternal(selected)}
             />
           ) : (
-            <p className="hint left">{t("editor.pick")}</p>
+            <p className="empty">{t("editor.pick")}</p>
           )}
         </>
       )}
 
       {settings && endpoint && (
         <div className="panel">
-          <h3>{t("translate.title")}</h3>
+          <h3 data-step="2">{t("translate.title")}</h3>
           <div className="scan-controls">
             <label>
               {t("translate.provider")}
@@ -1272,7 +1286,7 @@ export default function ProjectView({
 
       {entries.length > 0 && (
         <div className="panel">
-          <h3>{t("reinsert.title")}</h3>
+          <h3 data-step="3">{t("reinsert.title")}</h3>
           <p className="hint left">{t("reinsert.hint")}</p>
           <label className="checkline" title={t("reinsert.advancedHint")}>
             <input
@@ -1400,7 +1414,7 @@ export default function ProjectView({
           </button>
         </div>
         {glossary.length === 0 ? (
-          <p className="hint left">{t("glossary.empty")}</p>
+          <p className="empty">{t("glossary.empty")}</p>
         ) : (
           <ul className="glossary-list">
             {glossary.map((g) => (
