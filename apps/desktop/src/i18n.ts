@@ -112,6 +112,28 @@ const messages = {
     "translate.remoteAsk":
       "Para usar este provider, os textos do jogo são enviados para fora do seu computador (à OpenAI, no caso do ChatGPT). O arquivo do jogo não é enviado. Permitir?",
     "translate.remoteAllow": "Permitir e continuar",
+    "translate.providerClaudeKey": "Claude (chave de API)",
+    "translate.claudeKeyHint":
+      "Traduz com o Claude pela API da Anthropic, com a sua chave de API (criada no console da Anthropic). A chave fica no cofre do sistema, nunca no projeto. Os textos do jogo vão para a Anthropic, e o uso é cobrado por token na sua conta.",
+    "translate.priceInput": "US$ por milhão de tokens (entrada)",
+    "translate.priceOutput": "US$ por milhão de tokens (saída)",
+    "translate.priceHint":
+      "Preço do seu modelo, para a conta de gasto. Deixe 0 para usar a tabela dos modelos do Claude que o app conhece.",
+    "translate.priceUsed":
+      "Conta feita com US$ {input} (entrada) e US$ {output} (saída) por milhão de tokens. Confira na tabela de preços do provedor: o app não a atualiza sozinho.",
+    "translate.priceMissing":
+      "Sem preço informado: o app mostra só os tokens. Preencha os dois campos para ver o valor.",
+    "translate.estimate": "Calcular gasto",
+    "translate.estimating": "Calculando...",
+    "translate.estimateResult":
+      "Traduzir as {entries} frases pendentes são {batches} chamadas: cerca de {input} tokens de entrada e {output} de saída.",
+    "translate.estimateCost": "Custo estimado: US$ {cost}.",
+    "translate.estimateCalibrated":
+      "Entrada contada pelo próprio modelo. A saída é uma estimativa: modelo que raciocina antes de responder gasta mais saída do que isso. A memória de tradução pode reduzir o total.",
+    "translate.estimateRough":
+      "Estimativa por média de caracteres por token, com margem de erro grande. Modelo que raciocina antes de responder gasta mais saída. A memória de tradução pode reduzir o total.",
+    "translate.spent": "Cobrado nesta rodada: {input} tokens de entrada e {output} de saída.",
+    "translate.spentCost": "Cerca de US$ {cost}.",
     "translate.batchSize": "Frases por chamada",
     "translate.batchSizeHint":
       "Quantas frases vão em cada chamada à IA (1 a 50). Mais frases por chamada são menos chamadas, o que pesa menos no limite de uma assinatura; se as respostas começarem a falhar, diminua.",
@@ -333,6 +355,28 @@ const messages = {
     "translate.remoteAsk":
       "To use this provider, the game text is sent off your computer (to OpenAI, in the case of ChatGPT). The game file itself is not sent. Allow?",
     "translate.remoteAllow": "Allow and continue",
+    "translate.providerClaudeKey": "Claude (API key)",
+    "translate.claudeKeyHint":
+      "Translates with Claude through the Anthropic API, using your own API key (created in the Anthropic console). The key lives in the system keychain, never in the project. The game text is sent to Anthropic, and usage is billed per token to your account.",
+    "translate.priceInput": "US$ per million tokens (input)",
+    "translate.priceOutput": "US$ per million tokens (output)",
+    "translate.priceHint":
+      "Your model's price, for the spend estimate. Leave 0 to use the table of Claude models the app knows.",
+    "translate.priceUsed":
+      "Calculated with US$ {input} (input) and US$ {output} (output) per million tokens. Check the provider's price list: the app does not update it by itself.",
+    "translate.priceMissing":
+      "No price set: the app shows tokens only. Fill both fields to see the amount.",
+    "translate.estimate": "Estimate spend",
+    "translate.estimating": "Estimating...",
+    "translate.estimateResult":
+      "Translating the {entries} pending lines takes {batches} calls: about {input} input tokens and {output} output tokens.",
+    "translate.estimateCost": "Estimated cost: US$ {cost}.",
+    "translate.estimateCalibrated":
+      "Input counted by the model itself. Output is an estimate: a model that reasons before answering spends more output than this. Translation memory may lower the total.",
+    "translate.estimateRough":
+      "Estimated from an average of characters per token, with a wide margin. A model that reasons before answering spends more output. Translation memory may lower the total.",
+    "translate.spent": "Billed this round: {input} input tokens and {output} output tokens.",
+    "translate.spentCost": "About US$ {cost}.",
     "translate.batchSize": "Lines per call",
     "translate.batchSizeHint":
       "How many lines go in each call to the AI (1 to 50). More lines per call means fewer calls, which weighs less on a subscription limit; if answers start failing, lower it.",

@@ -97,6 +97,15 @@ impl TranslationProvider for MockProvider {
     async fn health_check(&self) -> Result<()> {
         Ok(())
     }
+
+    /// Cada chamada "cobra" 100 tokens de entrada e 40 de saida.
+    fn usage(&self) -> romtranslate_core::provider::Usage {
+        let calls = self.calls.load(Ordering::SeqCst) as u64;
+        romtranslate_core::provider::Usage {
+            input_tokens: calls * 100,
+            output_tokens: calls * 40,
+        }
+    }
 }
 
 fn opts() -> TranslateOptions {
@@ -280,6 +289,61 @@ async fn retry_recovers_and_exhaustion_counts_failed() {
     assert_eq!(summary2.failed, 1);
     assert_eq!(summary2.translated, 0);
     assert!(db2.load_entries().unwrap()[0].translated_text.is_none());
+}
+
+/// A estimativa monta os mesmos lotes da rodada: o tamanho que ela promete e
+/// o que o provider recebe, e o que ele cobra volta somado no resumo.
+#[tokio::test]
+async fn estimate_measures_the_round_before_it_runs_and_usage_is_summed_after() {
+    use romtranslate_core::pipeline::estimate_translation;
+    use romtranslate_core::provider::{build_system_prompt, build_user_prompt};
+    use romtranslate_core::types::TranslationStatus;
+
+    let tmp = TempDir::new("estimate");
+    let mut db = ProjectDb::open(&tmp.0).unwrap();
+    let mut lines: Vec<TextEntry> = (0..9)
+        .map(|i| entry(&format!("e{i}"), &format!("LINE NUMBER {i}")))
+        .collect();
+    // Nome interno e frase ja traduzida nao entram na conta.
+    let mut internal = entry("room", "LV4_31_01");
+    internal.status = TranslationStatus::Internal;
+    let mut done = entry("done", "ALREADY DONE");
+    done.translated_text = Some("JA FEITA".to_string());
+    lines.extend([internal, done]);
+    db.upsert_entries(&lines).unwrap();
+
+    let (estimate, sample) = estimate_translation(&db, &opts()).unwrap();
+    assert_eq!((estimate.entries, estimate.batches), (9, 3)); // lotes de 4
+    assert!(sample.is_some());
+    assert!(estimate.output_chars > 9 * "LINE NUMBER 0".len());
+
+    let provider = MockProvider::new(0);
+    let summary = run_translation(
+        &mut db,
+        None,
+        &provider,
+        "m",
+        &opts(),
+        &AtomicBool::new(false),
+        &no_progress(),
+    )
+    .await
+    .unwrap();
+    let sent: usize = provider
+        .requests
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|r| build_system_prompt(r).len() + build_user_prompt(r).len())
+        .sum();
+    assert_eq!(estimate.input_chars, sent);
+    assert_eq!(summary.translated, 9);
+    assert_eq!((summary.input_tokens, summary.output_tokens), (300, 120));
+
+    // Com tudo traduzido, nao sobra nada a estimar.
+    let (after, sample) = estimate_translation(&db, &opts()).unwrap();
+    assert_eq!((after.entries, after.batches, after.input_chars), (0, 0, 0));
+    assert!(sample.is_none());
 }
 
 /// Conta sem limite, sem login ou sem rede: o provider nao volta mais. A

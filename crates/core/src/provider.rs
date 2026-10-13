@@ -57,11 +57,25 @@ pub struct TranslationResponse {
     pub translations: Vec<TranslatedItem>,
 }
 
+/// Tokens que o provider disse ter cobrado, somados desde que foi criado.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Usage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
 #[async_trait]
 pub trait TranslationProvider: Send + Sync {
     fn id(&self) -> &'static str;
     async fn translate_batch(&self, request: &TranslationRequest) -> Result<TranslationResponse>;
     async fn health_check(&self) -> Result<()>;
+
+    /// O que as respostas declararam de consumo ate agora. Provider que nao
+    /// recebe essa conta (Codex CLI) fica em zero.
+    fn usage(&self) -> Usage {
+        Usage::default()
+    }
 }
 
 pub fn build_system_prompt(req: &TranslationRequest) -> String {

@@ -13,6 +13,7 @@ use romtranslate_core::export;
 use romtranslate_core::pipeline::{run_translation, TranslateOptions, TranslateSummary};
 use romtranslate_core::project::{self, CreateProjectArgs, OpenProjectReport};
 use romtranslate_core::provider::{GlossaryTerm, TranslationProvider};
+use romtranslate_core::providers::anthropic::AnthropicProvider;
 use romtranslate_core::providers::codex_cli::CodexCliProvider;
 use romtranslate_core::providers::ollama::OllamaProvider;
 use romtranslate_core::providers::openai_compat::OpenAiCompatProvider;
@@ -22,7 +23,7 @@ use romtranslate_core::types::{GameProject, TextEntry};
 use romtranslate_core::validate;
 use romtranslate_core::xray::{self, XrayReport};
 
-use settings::AppSettings;
+use settings::{ApiKey, AppSettings};
 
 /// Flag de cancelamento da traducao em andamento (uma por vez).
 struct TranslationState(Mutex<Option<Arc<AtomicBool>>>);
@@ -69,12 +70,29 @@ fn is_localhost(url: &str) -> bool {
         .any(|h| url.contains(h))
 }
 
+/// Claude pela API da Anthropic, com a chave guardada no cofre do sistema.
+fn anthropic(cfg: &AppSettings, cfg_dir: &Path) -> Result<AnthropicProvider, String> {
+    if !cfg.allow_remote_translation {
+        return Err(
+            "traducao remota desabilitada: a API do Claude recebe os textos do jogo — ative \
+             'permitir traducao remota' nas configuracoes"
+                .to_string(),
+        );
+    }
+    AnthropicProvider::new(
+        &cfg.anthropic.base_url,
+        &cfg.anthropic.model,
+        settings::load_api_key(cfg_dir, ApiKey::Anthropic),
+        cfg.timeout_secs,
+    )
+    .map_err(|e| e.to_string())
+}
+
 /// Monta o provider a partir dos settings, aplicando a guarda de privacidade
 /// (spec §18: traducao remota so com allow_remote_translation).
 fn build_provider(
     cfg: &AppSettings,
     cfg_dir: &Path,
-    api_key: Option<String>,
 ) -> Result<(Box<dyn TranslationProvider>, String), String> {
     match cfg.provider.as_str() {
         "ollama" => {
@@ -94,11 +112,15 @@ fn build_provider(
             let p = OpenAiCompatProvider::new(
                 base,
                 &cfg.openai_compatible.model,
-                api_key,
+                settings::load_api_key(cfg_dir, ApiKey::OpenAi),
                 cfg.timeout_secs,
             )
             .map_err(|e| e.to_string())?;
             Ok((Box::new(p), cfg.openai_compatible.model.clone()))
+        }
+        "anthropic" => {
+            let p = anthropic(cfg, cfg_dir)?;
+            Ok((Box::new(p), cfg.anthropic.model.clone()))
         }
         "codex_cli" => {
             // O Codex manda os textos pra OpenAI: mesma guarda do endpoint remoto.
@@ -337,42 +359,106 @@ async fn glossary_delete(project_dir: String, term: String) -> Result<(), String
 struct SettingsReport {
     settings: AppSettings,
     api_key_set: bool,
+    anthropic_key_set: bool,
+}
+
+fn settings_report(dir: &Path, settings: AppSettings) -> SettingsReport {
+    SettingsReport {
+        settings,
+        api_key_set: settings::load_api_key(dir, ApiKey::OpenAi).is_some(),
+        anthropic_key_set: settings::load_api_key(dir, ApiKey::Anthropic).is_some(),
+    }
 }
 
 #[tauri::command]
 fn get_settings(app: AppHandle) -> Result<SettingsReport, String> {
     let dir = config_dir(&app)?;
-    Ok(SettingsReport {
-        settings: settings::load_settings(&dir),
-        api_key_set: settings::load_api_key(&dir).is_some(),
-    })
+    Ok(settings_report(&dir, settings::load_settings(&dir)))
 }
 
+/// `api_key` / `anthropic_key`: `None` mantem a chave que ja esta guardada.
 #[tauri::command]
 fn save_settings(
     app: AppHandle,
     new_settings: AppSettings,
     api_key: Option<String>,
+    anthropic_key: Option<String>,
 ) -> Result<SettingsReport, String> {
     let dir = config_dir(&app)?;
     settings::save_settings(&dir, &new_settings)?;
     if let Some(key) = api_key {
-        settings::save_api_key(&dir, &key)?;
+        settings::save_api_key(&dir, ApiKey::OpenAi, &key)?;
     }
-    Ok(SettingsReport {
-        settings: new_settings,
-        api_key_set: settings::load_api_key(&dir).is_some(),
-    })
+    if let Some(key) = anthropic_key {
+        settings::save_api_key(&dir, ApiKey::Anthropic, &key)?;
+    }
+    Ok(settings_report(&dir, new_settings))
 }
 
 #[tauri::command]
 async fn test_provider(app: AppHandle) -> Result<String, String> {
     let dir = config_dir(&app)?;
     let cfg = settings::load_settings(&dir);
-    let api_key = settings::load_api_key(&dir);
-    let (provider, model) = build_provider(&cfg, &dir, api_key)?;
+    let (provider, model) = build_provider(&cfg, &dir)?;
     provider.health_check().await.map_err(|e| e.to_string())?;
     Ok(model)
+}
+
+/// O tamanho da rodada que "Traduzir pendentes" faria agora, em tokens.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct EstimateReport {
+    entries: usize,
+    batches: usize,
+    input_tokens: u64,
+    output_tokens: u64,
+    /// `true` = a conta de tokens foi calibrada pelo proprio modelo (API do
+    /// Claude); `false` = media de caracteres por token.
+    calibrated: bool,
+}
+
+#[tauri::command]
+async fn estimate_translation(
+    app: AppHandle,
+    project_dir: String,
+) -> Result<EstimateReport, String> {
+    let cfg_dir = config_dir(&app)?;
+    let cfg = settings::load_settings(&cfg_dir);
+    let batch_size = cfg.batch_size.clamp(1, 50);
+    let (estimate, sample) = blocking(move || {
+        let dir = PathBuf::from(project_dir);
+        let game = project::load_project(&dir)?;
+        let mut opts = TranslateOptions::new(game.target_language);
+        opts.source_language = game.source_language;
+        opts.batch_size = batch_size;
+        romtranslate_core::pipeline::estimate_translation(&ProjectDb::open(&dir)?, &opts)
+    })
+    .await?;
+
+    // Com a chave do Claude salva, o proprio modelo conta o primeiro lote (de
+    // graca) e a media de caracteres por token sai dele, nao de um chute.
+    let mut chars_per_token = romtranslate_core::pipeline::DEFAULT_CHARS_PER_TOKEN;
+    let mut calibrated = false;
+    if let (true, Some(sample)) = (cfg.provider == "anthropic", &sample) {
+        if let Ok(provider) = anthropic(&cfg, &cfg_dir) {
+            let chars = romtranslate_core::provider::build_system_prompt(sample).len()
+                + romtranslate_core::provider::build_user_prompt(sample).len();
+            if let Ok(tokens) = provider.count_input_tokens(sample).await {
+                if tokens > 0 {
+                    chars_per_token = chars as f64 / tokens as f64;
+                    calibrated = true;
+                }
+            }
+        }
+    }
+    let tokens = |chars: usize| (chars as f64 / chars_per_token).ceil() as u64;
+    Ok(EstimateReport {
+        entries: estimate.entries,
+        batches: estimate.batches,
+        input_tokens: tokens(estimate.input_chars),
+        output_tokens: tokens(estimate.output_chars),
+        calibrated,
+    })
 }
 
 // ---- Conta do ChatGPT pelo Codex CLI ----
@@ -467,8 +553,7 @@ async fn do_translate(
     let dir = PathBuf::from(project_dir);
     let cfg_dir = config_dir(app)?;
     let cfg = settings::load_settings(&cfg_dir);
-    let api_key = settings::load_api_key(&cfg_dir);
-    let (provider, model) = build_provider(&cfg, &cfg_dir, api_key)?;
+    let (provider, model) = build_provider(&cfg, &cfg_dir)?;
 
     let game = project::load_project(&dir).map_err(|e| e.to_string())?;
     let mut opts = TranslateOptions::new(game.target_language);
@@ -538,6 +623,7 @@ pub fn run() {
             get_settings,
             save_settings,
             test_provider,
+            estimate_translation,
             translate_project,
             cancel_translation,
             codex_account_status,

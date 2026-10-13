@@ -5,11 +5,11 @@ use async_trait::async_trait;
 use serde::Deserialize;
 use serde_json::json;
 
-use super::{error_for_status, http_client};
+use super::{error_for_status, http_client, UsageMeter};
 use crate::error::{CoreError, Result};
 use crate::provider::{
     build_system_prompt, build_user_prompt, parse_model_response, TranslationProvider,
-    TranslationRequest, TranslationResponse,
+    TranslationRequest, TranslationResponse, Usage,
 };
 
 pub struct OpenAiCompatProvider {
@@ -17,6 +17,7 @@ pub struct OpenAiCompatProvider {
     base_url: String,
     model: String,
     api_key: Option<String>,
+    meter: UsageMeter,
 }
 
 impl OpenAiCompatProvider {
@@ -36,6 +37,7 @@ impl OpenAiCompatProvider {
             base_url: base_url.trim_end_matches('/').to_string(),
             model: model.to_string(),
             api_key: api_key.filter(|k| !k.trim().is_empty()),
+            meter: UsageMeter::default(),
         })
     }
 
@@ -51,6 +53,16 @@ impl OpenAiCompatProvider {
 #[derive(Deserialize)]
 struct ChatCompletion {
     choices: Vec<Choice>,
+    /// Nem todo endpoint compativel informa.
+    usage: Option<Billed>,
+}
+
+#[derive(Deserialize)]
+struct Billed {
+    #[serde(default)]
+    prompt_tokens: u64,
+    #[serde(default)]
+    completion_tokens: u64,
 }
 
 #[derive(Deserialize)]
@@ -96,12 +108,20 @@ impl TranslationProvider for OpenAiCompatProvider {
             .json()
             .await
             .map_err(|e| CoreError::Provider(format!("resposta invalida do endpoint: {e}")))?;
+        if let Some(billed) = &completion.usage {
+            self.meter
+                .add(billed.prompt_tokens, billed.completion_tokens);
+        }
         let content = completion
             .choices
             .first()
             .map(|c| c.message.content.as_str())
             .ok_or_else(|| CoreError::Provider("resposta sem choices".to_string()))?;
         parse_model_response(content)
+    }
+
+    fn usage(&self) -> Usage {
+        self.meter.total()
     }
 
     async fn health_check(&self) -> Result<()> {

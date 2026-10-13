@@ -127,6 +127,19 @@ export interface TranslateSummary {
   cancelled: boolean;
   /** O provider parou de responder: o erro dele. A rodada foi interrompida. */
   stopped: string | null;
+  /** Tokens que o provider declarou ter cobrado na rodada (0 = não informa). */
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/** Tamanho da rodada que "Traduzir pendentes" faria agora. */
+export interface EstimateReport {
+  entries: number;
+  batches: number;
+  inputTokens: number;
+  outputTokens: number;
+  /** true = contado pelo próprio modelo; false = média de caracteres por token. */
+  calibrated: boolean;
 }
 
 export interface ProgressEvent {
@@ -150,10 +163,14 @@ export interface CodexCliSettings {
 }
 
 export interface AppSettings {
-  provider: "ollama" | "openai_compatible" | "codex_cli";
+  provider: "ollama" | "openai_compatible" | "anthropic" | "codex_cli";
   ollama: EndpointSettings;
   openaiCompatible: EndpointSettings;
+  anthropic: EndpointSettings;
   codexCli: CodexCliSettings;
+  /** US$ por milhão de tokens; 0 = não informado. */
+  priceInput: number;
+  priceOutput: number;
   allowRemoteTranslation: boolean;
   batchSize: number;
   timeoutSecs: number;
@@ -162,7 +179,28 @@ export interface AppSettings {
 export interface SettingsReport {
   settings: AppSettings;
   apiKeySet: boolean;
+  anthropicKeySet: boolean;
 }
+
+/**
+ * Preço de tabela da API da Anthropic, em US$ por milhão de tokens
+ * [entrada, saída], lido em 06/10/2026. Serve de padrão quando a pessoa não
+ * informa o preço; a tabela oficial é a que vale.
+ */
+export const CLAUDE_PRICES: Record<string, [number, number]> = {
+  "claude-fable-5-1": [10, 50],
+  "claude-fable-5": [10, 50],
+  "claude-opus-5-5": [4, 20],
+  "claude-opus-5": [5, 25],
+  "claude-opus-4-8": [5, 25],
+  "claude-opus-4-7": [5, 25],
+  "claude-opus-4-6": [5, 25],
+  "claude-sonnet-5-5": [2, 10],
+  "claude-sonnet-5": [2, 10],
+  "claude-sonnet-4-6": [3, 15],
+  "claude-haiku-5-5": [0.1, 0.5],
+  "claude-haiku-4-5": [1, 5],
+};
 
 export type Severity = "error" | "warning";
 

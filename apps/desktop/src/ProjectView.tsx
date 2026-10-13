@@ -13,6 +13,8 @@ import {
 } from "./util";
 import {
   AppSettings,
+  CLAUDE_PRICES,
+  EstimateReport,
   ExtractOutcome,
   GameProject,
   GlossaryTerm,
@@ -101,6 +103,10 @@ export default function ProjectView({
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [apiKeySet, setApiKeySet] = useState(false);
   const [apiKeyInput, setApiKeyInput] = useState("");
+  const [anthropicKeySet, setAnthropicKeySet] = useState(false);
+  const [anthropicKeyInput, setAnthropicKeyInput] = useState("");
+  const [estimate, setEstimate] = useState<EstimateReport | null>(null);
+  const [estimating, setEstimating] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   // Conta do ChatGPT em uso pelo Codex: null = ainda nao conferido.
@@ -163,6 +169,7 @@ export default function ProjectView({
       .then((r) => {
         setSettings(r.settings);
         setApiKeySet(r.apiKeySet);
+        setAnthropicKeySet(r.anthropicKeySet);
       })
       .catch((e) => setError(String(e)));
     const unlisten = listen<ProgressEvent>("translation-progress", (event) => {
@@ -375,10 +382,13 @@ export default function ProjectView({
       const report = await invoke<SettingsReport>("save_settings", {
         newSettings: current,
         apiKey: apiKeyInput ? apiKeyInput : null,
+        anthropicKey: anthropicKeyInput ? anthropicKeyInput : null,
       });
       setSettings(report.settings);
       setApiKeySet(report.apiKeySet);
       setApiKeyInput("");
+      setAnthropicKeySet(report.anthropicKeySet);
+      setAnthropicKeyInput("");
       return true;
     } catch (e) {
       setTranslateError(String(e));
@@ -436,6 +446,20 @@ export default function ProjectView({
       setTranslateError(String(e));
     }
     await refreshCodexAccount();
+  }
+
+  /** Quanto a rodada de agora custaria: lotes, tokens e, com preco, dolares. */
+  async function runEstimate() {
+    setEstimating(true);
+    setEstimate(null);
+    try {
+      if (!(await saveSettings())) return;
+      setEstimate(await invoke<EstimateReport>("estimate_translation", { projectDir }));
+    } catch (e) {
+      setTranslateError(String(e));
+    } finally {
+      setEstimating(false);
+    }
   }
 
   async function testProvider(current: AppSettings | null = settings) {
@@ -577,7 +601,7 @@ export default function ProjectView({
   }
 
   function updateEndpoint(
-    key: "ollama" | "openaiCompatible",
+    key: "ollama" | "openaiCompatible" | "anthropic",
     field: "baseUrl" | "model",
     value: string,
   ) {
@@ -610,12 +634,28 @@ export default function ProjectView({
   const shown = filtered.slice(0, RENDER_CAP);
   const selected = selectedId ? entries.find((e) => e.id === selectedId) : undefined;
   const hasResources = entries.some((e) => e.resourcePath);
-  const endpoint = settings
-    ? settings.provider === "ollama"
-      ? settings.ollama
-      : settings.openaiCompatible
-    : null;
-  const endpointKey = settings?.provider === "ollama" ? "ollama" : "openaiCompatible";
+  const endpointKey =
+    settings?.provider === "ollama"
+      ? "ollama"
+      : settings?.provider === "anthropic"
+        ? "anthropic"
+        : "openaiCompatible";
+  const endpoint = settings ? settings[endpointKey] : null;
+  // Gasto so faz sentido em provider cobrado por token com chave da pessoa.
+  const paidByToken =
+    settings?.provider === "anthropic" || settings?.provider === "openai_compatible";
+  // Preco informado vence; sem ele, a tabela dos modelos do Claude que a tela
+  // conhece; sem nenhum dos dois, a tela mostra so os tokens.
+  const prices: [number, number] | null = !settings
+    ? null
+    : settings.priceInput > 0 || settings.priceOutput > 0
+      ? [settings.priceInput, settings.priceOutput]
+      : settings.provider === "anthropic"
+        ? (CLAUDE_PRICES[settings.anthropic.model.trim()] ?? null)
+        : null;
+  const dollars = (inputTokens: number, outputTokens: number) =>
+    prices ? (inputTokens * prices[0] + outputTokens * prices[1]) / 1_000_000 : null;
+  const money = (value: number) => (value < 0.01 ? value.toFixed(4) : value.toFixed(2));
   // Nome interno do jogo nao e texto: fica fora da fila, contado na tela.
   const internal = entries.filter((e) => e.status === "internal").length;
   const pending = entries.filter((e) => !e.translatedText && e.status !== "internal").length;
@@ -927,6 +967,7 @@ export default function ProjectView({
               >
                 <option value="ollama">Ollama (local)</option>
                 <option value="openai_compatible">OpenAI-compatible</option>
+                <option value="anthropic">{t("translate.providerClaudeKey")}</option>
                 <option value="codex_cli">ChatGPT (Codex CLI)</option>
               </select>
             </label>
@@ -965,22 +1006,30 @@ export default function ProjectView({
               </>
             ) : (
               <>
-                <label>
-                  {t("translate.baseUrl")}
-                  <input
-                    type="text"
-                    size={28}
-                    value={endpoint.baseUrl}
-                    onChange={(e) => updateEndpoint(endpointKey, "baseUrl", e.target.value)}
-                  />
-                </label>
+                {settings.provider !== "anthropic" && (
+                  <label>
+                    {t("translate.baseUrl")}
+                    <input
+                      type="text"
+                      size={28}
+                      value={endpoint.baseUrl}
+                      onChange={(e) => updateEndpoint(endpointKey, "baseUrl", e.target.value)}
+                    />
+                  </label>
+                )}
                 <label>
                   {t("translate.model")}
                   <input
                     type="text"
                     size={18}
                     value={endpoint.model}
-                    placeholder={settings.provider === "ollama" ? "llama3.2:3b" : "gpt-5-mini"}
+                    placeholder={
+                      settings.provider === "ollama"
+                        ? "llama3.2:3b"
+                        : settings.provider === "anthropic"
+                          ? "claude-opus-5-5"
+                          : "gpt-5-mini"
+                    }
                     onChange={(e) => updateEndpoint(endpointKey, "model", e.target.value)}
                   />
                 </label>
@@ -1012,7 +1061,79 @@ export default function ProjectView({
                 />
               </label>
             )}
+            {settings.provider === "anthropic" && (
+              <label>
+                {t("translate.apiKey")}{" "}
+                {anthropicKeySet && <em>{t("translate.apiKeySet")}</em>}
+                <input
+                  type="password"
+                  size={22}
+                  value={anthropicKeyInput}
+                  placeholder="sk-ant-..."
+                  onChange={(e) => setAnthropicKeyInput(e.target.value)}
+                />
+              </label>
+            )}
           </div>
+          {settings.provider === "anthropic" && (
+            <p className="hint left">{t("translate.claudeKeyHint")}</p>
+          )}
+          {paidByToken && (
+            <>
+              <div className="scan-controls">
+                <label title={t("translate.priceHint")}>
+                  {t("translate.priceInput")}
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={settings.priceInput}
+                    onChange={(e) =>
+                      setSettings({ ...settings, priceInput: Math.max(0, Number(e.target.value) || 0) })
+                    }
+                  />
+                </label>
+                <label title={t("translate.priceHint")}>
+                  {t("translate.priceOutput")}
+                  <input
+                    type="number"
+                    min={0}
+                    step="0.01"
+                    value={settings.priceOutput}
+                    onChange={(e) =>
+                      setSettings({ ...settings, priceOutput: Math.max(0, Number(e.target.value) || 0) })
+                    }
+                  />
+                </label>
+                <button onClick={runEstimate} disabled={estimating || translating}>
+                  {estimating ? t("translate.estimating") : t("translate.estimate")}
+                </button>
+              </div>
+              <p className="hint left">
+                {prices
+                  ? t("translate.priceUsed", { input: prices[0], output: prices[1] })
+                  : t("translate.priceMissing")}
+              </p>
+              {estimate && (
+                <div className="warn">
+                  {t("translate.estimateResult", {
+                    entries: estimate.entries,
+                    batches: estimate.batches,
+                    input: estimate.inputTokens.toLocaleString(),
+                    output: estimate.outputTokens.toLocaleString(),
+                  })}
+                  {dollars(estimate.inputTokens, estimate.outputTokens) !== null &&
+                    ` ${t("translate.estimateCost", {
+                      cost: money(dollars(estimate.inputTokens, estimate.outputTokens) ?? 0),
+                    })}`}
+                  <br />
+                  {estimate.calibrated
+                    ? t("translate.estimateCalibrated")
+                    : t("translate.estimateRough")}
+                </div>
+              )}
+            </>
+          )}
           {settings.provider === "codex_cli" && (
             <>
               <p className="hint left">{t("translate.codexHint")}</p>
@@ -1128,6 +1249,19 @@ export default function ProjectView({
                 failed: summary.failed,
               })}
               {summary.cancelled && t("translate.summaryCancelled")}
+              {summary.inputTokens + summary.outputTokens > 0 && (
+                <>
+                  <br />
+                  {t("translate.spent", {
+                    input: summary.inputTokens.toLocaleString(),
+                    output: summary.outputTokens.toLocaleString(),
+                  })}
+                  {dollars(summary.inputTokens, summary.outputTokens) !== null &&
+                    ` ${t("translate.spentCost", {
+                      cost: money(dollars(summary.inputTokens, summary.outputTokens) ?? 0),
+                    })}`}
+                </>
+              )}
             </div>
           )}
         </div>

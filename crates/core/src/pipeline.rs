@@ -51,6 +51,112 @@ pub struct TranslateSummary {
     /// a rodada foi interrompida, e este e o erro que ele deu. O que nao foi
     /// tentado continua pendente.
     pub stopped: Option<String>,
+    /// Tokens que o provider declarou ter cobrado nesta rodada (zero quando
+    /// ele nao informa, como o Codex CLI).
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+}
+
+/// Caracteres por token usados quando nao ha contagem do proprio modelo.
+// ponytail: chute medio pra JSON em ingles. A API do Claude conta de verdade
+// (`AnthropicProvider::count_input_tokens`) e quem chama calibra por ela.
+pub const DEFAULT_CHARS_PER_TOKEN: f64 = 3.5;
+
+/// O tamanho da rodada que "Traduzir pendentes" faria agora, sem chamar o
+/// provider. A memoria de traducao nao entra na conta: o que ela resolver
+/// sai de graca, entao isto e um teto.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TranslationEstimate {
+    pub entries: usize,
+    pub batches: usize,
+    /// Tamanho de tudo o que seria enviado (prompt de sistema + itens).
+    pub input_chars: usize,
+    /// Tamanho esperado das respostas: a traducao costuma ficar perto do
+    /// original, mais o JSON em volta. Raciocinio do modelo nao esta aqui.
+    pub output_chars: usize,
+}
+
+/// Monta os mesmos lotes de `run_translation` e mede. Devolve tambem o
+/// primeiro pedido, pra quem quiser calibrar a conta de tokens por ele.
+pub fn estimate_translation(
+    db: &ProjectDb,
+    opts: &TranslateOptions,
+) -> Result<(TranslationEstimate, Option<TranslationRequest>)> {
+    let mut pending: Vec<TextEntry> = db
+        .load_entries()?
+        .into_iter()
+        .filter(|e| e.translated_text.is_none() && e.status != TranslationStatus::Internal)
+        .collect();
+    let mut tables = ProjectTables::new(db.project_dir());
+    let glossary = db.glossary_list()?;
+    pending.sort_by(|a, b| charset_group(a).cmp(&charset_group(b)));
+    let mut estimate = TranslationEstimate {
+        entries: pending.len(),
+        batches: 0,
+        input_chars: 0,
+        output_chars: 0,
+    };
+    let mut sample = None;
+    let batches = pending
+        .chunk_by(|a, b| charset_group(a) == charset_group(b))
+        .flat_map(|same_charset| same_charset.chunks(opts.batch_size.max(1)));
+    for batch in batches {
+        let charset = Charset::of(&batch[0], &mut tables)?;
+        let request = batch_request(batch, charset, &glossary, opts);
+        estimate.batches += 1;
+        estimate.input_chars += crate::provider::build_system_prompt(&request).len()
+            + crate::provider::build_user_prompt(&request).len();
+        estimate.output_chars += 20
+            + batch
+                .iter()
+                .map(|e| e.id.len() + e.source_text.len() * 12 / 10 + 40)
+                .sum::<usize>();
+        sample.get_or_insert(request);
+    }
+    Ok((estimate, sample))
+}
+
+/// O pedido de um lote: os itens, o glossario que aparece neles e, quando o
+/// texto e gravado por um conjunto de caracteres, a lista e o teto de cada um.
+fn batch_request(
+    batch: &[TextEntry],
+    charset: Option<Charset>,
+    glossary: &[GlossaryTerm],
+    opts: &TranslateOptions,
+) -> TranslationRequest {
+    let table = match charset {
+        Some(Charset::Table(table)) => Some(table),
+        _ => None,
+    };
+    TranslationRequest {
+        items: batch
+            .iter()
+            .map(|e| BatchItem {
+                id: e.id.clone(),
+                text: e.source_text.clone(),
+                context: e.context.clone(),
+                max_bytes: e.max_bytes,
+                // Texto de tabela sem ponteiro em tabela so e gravado no
+                // lugar: o espaco da original e o teto, e o modelo
+                // precisa saber dele. O que a traducao e obrigada a
+                // copiar do original (codigo de controle, placeholder)
+                // entra pelo que custa, nao pelo que o modelo conta.
+                max_chars: table
+                    .filter(|_| e.pointer_offsets().is_empty())
+                    .map(|table| {
+                        table.chars_that_fit_keeping(
+                            e.original_bytes.len(),
+                            &extract_tokens(&e.source_text),
+                        )
+                    }),
+            })
+            .collect(),
+        source_language: opts.source_language.clone(),
+        target_language: opts.target_language.clone(),
+        glossary: relevant_terms(glossary, batch),
+        charset: charset.map(Charset::chars),
+    }
 }
 
 /// Lotes seguidos que podem falhar (cada um ja com as suas tentativas) antes
@@ -93,7 +199,10 @@ pub async fn run_translation(
         failed: 0,
         cancelled: false,
         stopped: None,
+        input_tokens: 0,
+        output_tokens: 0,
     };
+    let billed_before = provider.usage();
     if total == 0 {
         return Ok(summary);
     }
@@ -153,34 +262,7 @@ pub async fn run_translation(
             Some(Charset::Table(table)) => Some(table),
             _ => None,
         };
-        let request = TranslationRequest {
-            items: batch
-                .iter()
-                .map(|e| BatchItem {
-                    id: e.id.clone(),
-                    text: e.source_text.clone(),
-                    context: e.context.clone(),
-                    max_bytes: e.max_bytes,
-                    // Texto de tabela sem ponteiro em tabela so e gravado no
-                    // lugar: o espaco da original e o teto, e o modelo
-                    // precisa saber dele. O que a traducao e obrigada a
-                    // copiar do original (codigo de controle, placeholder)
-                    // entra pelo que custa, nao pelo que o modelo conta.
-                    max_chars: table
-                        .filter(|_| e.pointer_offsets().is_empty())
-                        .map(|table| {
-                            table.chars_that_fit_keeping(
-                                e.original_bytes.len(),
-                                &extract_tokens(&e.source_text),
-                            )
-                        }),
-                })
-                .collect(),
-            source_language: opts.source_language.clone(),
-            target_language: opts.target_language.clone(),
-            glossary: relevant_terms(&glossary, batch),
-            charset: charset.map(Charset::chars),
-        };
+        let request = batch_request(batch, charset, &glossary, opts);
 
         match call_with_retry(provider, &request, opts).await {
             Ok(response) => {
@@ -240,6 +322,10 @@ pub async fn run_translation(
             phase: "translate",
         });
     }
+
+    let billed = provider.usage();
+    summary.input_tokens = billed.input_tokens - billed_before.input_tokens;
+    summary.output_tokens = billed.output_tokens - billed_before.output_tokens;
 
     db.record_run(
         provider.id(),

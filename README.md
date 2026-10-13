@@ -51,8 +51,11 @@ Prefere compilar do código? Veja [Rodando](#rodando).
   arquivo é denso (comprimido ou cifrado), e quantas das strings extraídas
   têm ponteiro em tabela e podem crescer;
 - **Tradução por IA**: Ollama (local, padrão), qualquer endpoint
-  OpenAI-compatible, ou a sua assinatura do ChatGPT pelo Codex CLI (sem chave
-  de API); batching, retry, cancelamento, progresso; **translation
+  OpenAI-compatible, o Claude pela API da Anthropic com a sua chave de API,
+  ou a sua assinatura do ChatGPT pelo Codex CLI (sem chave de API); batching,
+  retry, cancelamento, progresso. Com chave paga, o app **calcula o gasto**
+  antes (chamadas, tokens e, com o preço do modelo, o valor) e mostra o que o
+  provedor cobrou depois; **translation
   memory** e **glossário** por projeto (SQLite); tradução remota exige opt-in
   explícito de privacidade. Texto ASCII e texto de tabela vão com a lista dos
   caracteres que o jogo escreve, e nome interno do jogo (identificador) fica
