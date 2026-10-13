@@ -367,7 +367,7 @@ cargo run -p romtranslate-cli -- <comando>   # binário: romtranslate
 | `scan <projeto> [--encoding ascii\|utf8\|utf16_le\|utf16_be\|table] [--tbl arquivo] [--region início..fim] [--min-chars N] [--only-text]` | scanner genérico; `--region` restringe a busca a um trecho do arquivo (bytes, aceita `0x`) | generic scanner; `--region` limits the search to a byte range (`0x` accepted) |
 | `export <projeto> <arquivo> [--format json\|csv]` | as frases do projeto, com os ids | the project's entries, with their ids |
 | `estimate <projeto> [--batch N]` | tamanho da rodada de tradução, sem chamar o provider | size of the translation round, without calling the provider |
-| `translate <projeto> [--batch N]` | traduz as pendentes com o provider das configurações do app | translates pending entries with the provider from the app's settings |
+| `translate <projeto> [--batch N] [--parallel N] [--shorten-rounds N]` | traduz as pendentes com o provider das configurações do app; `--parallel` são as chamadas ao mesmo tempo (padrão 4) e `--shorten-rounds` quantas vezes a tradução que não coube volta ao provider (padrão 2; 0 desliga) | translates pending entries with the provider from the app's settings; `--parallel` is the number of simultaneous calls (default 4) and `--shorten-rounds` how many times a translation that does not fit goes back to the provider (default 2; 0 turns it off) |
 | `apply <projeto> <arquivo.tsv>` | grava traduções (`id<TAB>tradução` por linha) e valida | writes translations (`id<TAB>translation` per line) and validates |
 | `validate <projeto>` | valida, com a contagem por tipo de problema | validates, with a count per kind of issue |
 | `reinsert <projeto> [--policy block\|skip\|force]` | grava na cópia de trabalho e confere (padrão `skip`: frase com erro fica no original) | writes to the working copy and verifies (default `skip`: an entry with an error keeps the original) |
@@ -379,10 +379,10 @@ cargo run -p romtranslate-cli -- <comando>   # binário: romtranslate
   Errors go to stderr with exit code `1` (`2` for invalid arguments).*
 - `translate` lê as configurações do app (mesma pasta; `--config-dir` aponta
   outra), mostra o progresso no stderr e, se o provider parar, diz o motivo e
-  sai com `1`. Ctrl-C para depois do lote em andamento.
+  sai com `1`. Ctrl-C para depois das chamadas em andamento.
   *`translate` reads the app's settings (same folder; `--config-dir` points
   elsewhere), prints progress on stderr and, when the provider stops, says why
-  and exits `1`. Ctrl-C stops after the current batch.*
+  and exits `1`. Ctrl-C stops after the calls in flight.*
 
 O ciclo inteiro numa fixture sintética / *the whole cycle on a synthetic fixture*:
 

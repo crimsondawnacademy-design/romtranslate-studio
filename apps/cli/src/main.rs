@@ -120,6 +120,12 @@ enum Command {
         /// Frases por chamada, de 1 a 50 [padrao: o das configuracoes do app]
         #[arg(long, value_name = "N")]
         batch: Option<usize>,
+        /// Chamadas ao provider ao mesmo tempo
+        #[arg(long, value_name = "N", default_value_t = TranslateOptions::new("").parallel)]
+        parallel: usize,
+        /// Vezes que a traducao que nao coube na frase volta ao provider (0 = nao volta)
+        #[arg(long, value_name = "N", default_value_t = TranslateOptions::new("").shorten_rounds)]
+        shorten_rounds: u32,
     },
     /// Grava traducoes de um arquivo (uma por linha: id<TAB>traducao) e valida
     Apply {
@@ -419,7 +425,19 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             json["outputTokens"] = json!(output);
             Ok(Output::new(text, json))
         }
-        Command::Translate { project, batch } => translate(&project, batch, &config_dir()?),
+        Command::Translate {
+            project,
+            batch,
+            parallel,
+            shorten_rounds,
+        } => {
+            let cfg_dir = config_dir()?;
+            let cfg = settings::load_settings(&cfg_dir);
+            let mut opts = options(load(&project)?, batch.unwrap_or(cfg.batch_size));
+            opts.parallel = parallel;
+            opts.shorten_rounds = shorten_rounds;
+            translate(&project, &opts, &cfg, &cfg_dir)
+        }
         Command::Apply { project, tsv } => apply(&project, &tsv),
         Command::Validate { project } => {
             load(&project)?;
@@ -565,16 +583,18 @@ fn apply(project: &Path, tsv: &Path) -> Result<Output, Failure> {
     ))
 }
 
-fn translate(project: &Path, batch: Option<usize>, cfg_dir: &Path) -> Result<Output, Failure> {
-    let game = load(project)?;
-    let cfg = settings::load_settings(cfg_dir);
-    let (provider, model) = settings::build_provider(&cfg, cfg_dir)?;
-    let opts = options(game, batch.unwrap_or(cfg.batch_size));
+fn translate(
+    project: &Path,
+    opts: &TranslateOptions,
+    cfg: &settings::AppSettings,
+    cfg_dir: &Path,
+) -> Result<Output, Failure> {
+    let (provider, model) = settings::build_provider(cfg, cfg_dir)?;
     let mut db = ProjectDb::open(project)?;
     let mut global = settings::open_global_tm(cfg_dir);
     eprintln!(
-        "provider: {} ({model}), {} frases por chamada",
-        cfg.provider, opts.batch_size
+        "provider: {} ({model}), {} frases por chamada, {} chamadas ao mesmo tempo",
+        cfg.provider, opts.batch_size, opts.parallel
     );
 
     let cancel = Arc::new(AtomicBool::new(false));
@@ -585,10 +605,12 @@ fn translate(project: &Path, batch: Option<usize>, cfg_dir: &Path) -> Result<Out
     let summary = runtime.block_on(async {
         let flag = cancel.clone();
         tokio::spawn(async move {
-            // Primeiro Ctrl-C: para depois do lote em andamento, com o que ja
-            // foi traduzido gravado. Segundo: encerra na hora.
+            // Primeiro Ctrl-C: para depois das chamadas em andamento, com o
+            // que ja foi traduzido gravado. Segundo: encerra na hora.
             if tokio::signal::ctrl_c().await.is_ok() {
-                eprintln!("cancelando depois do lote em andamento (Ctrl-C de novo encerra agora)");
+                eprintln!(
+                    "cancelando depois das chamadas em andamento (Ctrl-C de novo encerra agora)"
+                );
                 flag.store(true, Ordering::Relaxed);
             }
             if tokio::signal::ctrl_c().await.is_ok() {
@@ -600,7 +622,7 @@ fn translate(project: &Path, batch: Option<usize>, cfg_dir: &Path) -> Result<Out
             global.as_mut(),
             provider.as_ref(),
             &model,
-            &opts,
+            opts,
             &cancel,
             &|p| eprintln!("  {} de {} ({})", p.done, p.total, p.phase),
         )

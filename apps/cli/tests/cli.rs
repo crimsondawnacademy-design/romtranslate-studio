@@ -289,8 +289,14 @@ fn bad_input_fails_with_a_clear_message() {
     }
 }
 
+/// A resposta que o provider de mentira da pra POTION na primeira vez: nao
+/// cabe no espaco da frase.
+const TOO_LONG: &str = "potion grande demais";
+
 /// Um "Ollama" local de mentira: responde cada pedido com a traducao de
-/// cada frase em minusculas (mesmo tamanho, mesmos placeholders).
+/// cada frase em minusculas (mesmo tamanho, mesmos placeholders). So POTION
+/// volta maior que o espaco — ate o pedido trazer o teto (`maxChars`, que em
+/// texto ASCII so a repergunta manda), e ai a resposta cabe.
 fn fake_ollama() -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
@@ -318,7 +324,10 @@ fn fake_ollama() -> String {
             let translations: Vec<Value> = items
                 .iter()
                 .map(|item| {
-                    let text = item["text"].as_str().unwrap().to_lowercase();
+                    let text = match item["text"].as_str().unwrap() {
+                        "POTION" if item["maxChars"].is_null() => TOO_LONG.to_string(),
+                        text => text.to_lowercase(),
+                    };
                     json!({ "id": item["id"], "translation": text })
                 })
                 .collect();
@@ -369,8 +378,13 @@ fn translate_uses_the_provider_from_the_app_settings() {
     assert_eq!(summary["stopped"], Value::Null);
     assert_eq!(summary["provider"], "ollama");
     assert_eq!(summary["model"], "fake");
+    // A que nao coube voltou ao provider e passou a caber.
+    assert_eq!(summary["shortened"], 1, "{summary}");
+    assert_eq!(summary["tooLong"], 0);
     // O progresso vai pro stderr: o stdout e so o resultado.
-    assert!(stderr(&output).contains("7 de 7"), "{}", stderr(&output));
+    let progress = stderr(&output);
+    assert!(progress.contains("7 de 7 (translate)"), "{progress}");
+    assert!(progress.contains("1 de 1 (shorten)"), "{progress}");
 
     let all = entries(&tmp, &project);
     let potion = all.iter().find(|e| e["sourceText"] == "POTION").unwrap();
@@ -382,6 +396,35 @@ fn translate_uses_the_provider_from_the_app_settings() {
         ok_json(&["estimate", &project, "--batch", "50"])["entries"],
         0
     );
+}
+
+#[test]
+fn translate_flags_reach_the_pipeline() {
+    let tmp = TempDir::new("flags");
+    let project = tmp.project("game.gba", &synth::make_gba_rom_with_pointers());
+    ok(&["extract", &project]);
+    let config = config_with_ollama(&tmp, &fake_ollama());
+
+    // Sem repergunta, a traducao que nao coube fica como veio, e contada.
+    let summary = ok_json(&[
+        "translate",
+        &project,
+        "--config-dir",
+        &config,
+        "--shorten-rounds",
+        "0",
+        "--parallel",
+        "1",
+    ]);
+    assert_eq!(summary["translated"], 7, "{summary}");
+    assert_eq!(summary["shortened"], 0);
+    assert_eq!(summary["tooLong"], 1);
+    let all = entries(&tmp, &project);
+    let potion = all.iter().find(|e| e["sourceText"] == "POTION").unwrap();
+    assert_eq!(potion["translatedText"], TOO_LONG);
+
+    let text = ok(&["validate", &project]);
+    assert!(text.contains("error/byte_overflow: 1"), "{text}");
 }
 
 #[test]
