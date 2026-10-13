@@ -43,7 +43,7 @@ impl TranslateOptions {
         TranslateOptions {
             source_language: None,
             target_language: target_language.into(),
-            batch_size: 10,
+            batch_size: 25,
             max_attempts: 3,
             retry_delay_ms: 1000,
             parallel: 4,
