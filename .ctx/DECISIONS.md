@@ -1427,3 +1427,38 @@ rede fora, sem o app precisar reconhecer a mensagem de cada provider.
 **Permissão de tradução remota:** continua sendo opt-in explícito (spec §18),
 mas deixou de ser um erro sem saída: a tela pergunta na hora e, com o sim,
 marca a permissão e refaz a ação que a pessoa tinha pedido.
+
+## 2026-10-12 — Claude entra por chave de API; Claude Code pela assinatura fica de fora até o mantenedor decidir
+
+**Contexto:** o Rhuan pediu pra conectar o Claude Code ao app, pra aceitar
+chave de API e pra calcular o gasto quando a chave for paga.
+
+**O que a Anthropic publica** (página "Legal and compliance" da documentação
+do Claude Code, lida em 12/10/2026):
+
+- o login OAuth é para quem comprou plano e serve ao uso do Claude Code e dos
+  outros apps da própria Anthropic;
+- quem constrói produto deve usar chave de API; terceiro não pode oferecer
+  login do Claude no seu app nem rotear pedidos pela credencial de plano dos
+  usuários, nem guardar ou intermediar essas credenciais;
+- isso não impede a pessoa de entrar com a própria assinatura no binário do
+  Claude Code sem modificação;
+- rodar o Claude Code dentro de um produto exige aceitar os Termos Comerciais
+  e cumprir duas condições: binário sem modificação (sem tirar nenhum método
+  de login) e cada pessoa autenticada com a própria credencial, cobrada dela.
+
+**Decisão 1 — feito:** provider `anthropic`, por chave de API. É o caminho
+indicado, sem ressalva.
+
+**Decisão 2 — não feito:** provider que chamaria o `claude -p` do usuário
+(como o do Codex CLI). Tecnicamente é igual, e o desenho cumpriria as duas
+condições. O que falta é o aceite dos Termos Comerciais por quem distribui o
+app, e isso é decisão do mantenedor. Sem ela, o código não entra.
+
+**Gasto:** a estimativa mede os mesmos lotes que a rodada montaria. Token de
+entrada é contado pelo próprio modelo quando há chave do Claude
+(`count_tokens` não cobra); nos outros casos é média de 3,5 caracteres por
+token. Token de saída é sempre estimativa, e modelo que raciocina antes de
+responder gasta mais que ela. Preço: o que a pessoa informar; sem isso, uma
+tabela dos modelos do Claude com a data em que foi lida — o app não a
+atualiza, e a tela diz isso.
