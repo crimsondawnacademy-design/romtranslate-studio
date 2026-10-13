@@ -158,7 +158,11 @@ const messages = {
       "{translated} traduzidas · {tmHits} da memória · {failed} falharam",
     "translate.summaryCancelled": " · cancelado",
     "translate.internal":
-      "{n} strings ficam de fora da tradução por serem nomes internos do jogo (sala, script: só maiúsculas, dígitos e sublinhado, sem espaço). Não vão para a IA e não são regravadas. Para vê-las, filtre por “nomes internos”; se alguma for texto do jogo, selecione-a e clique em “É texto do jogo”.",
+      "{n} strings ficam de fora da tradução: nomes internos do jogo (sala, script: só maiúsculas, dígitos e sublinhado, sem espaço) e trechos soltos fora das regiões de texto, que costumam ser dado de gráfico ou de som. Não vão para a IA e não são regravadas. Para vê-las, filtre por “nomes internos”; se alguma for texto do jogo, selecione-a e clique em “É texto do jogo”.",
+    "translate.cancelling": "Cancelando…",
+    "translate.saved": "Configuração salva.",
+    "extract.stray":
+      "{n} strings estão fora das regiões de texto do jogo e saíram da fila de tradução (a tradução automática que alguma tinha foi descartada, para não ser gravada por cima de dado do jogo). Elas aparecem no filtro “nomes internos”.",
     "translate.ascii":
       "Texto ASCII não tem letra acentuada: a IA é avisada disso e, se mesmo assim responder com acento ou com aspas e travessão tipográficos, o app grava a letra sem acento e o sinal simples, com um aviso na frase. O que não tem equivalente bloqueia a reinserção e a frase diz qual caractere é.",
     "glossary.title": "Glossário",
@@ -407,7 +411,11 @@ const messages = {
     "translate.summary": "{translated} translated · {tmHits} from memory · {failed} failed",
     "translate.summaryCancelled": " · cancelled",
     "translate.internal":
-      "{n} strings are left out of the translation because they are internal names of the game (room, script: only capitals, digits and underscores, no space). They are not sent to the AI and are not written back. To see them, filter by “internal names”; if one is game text, select it and click “It is game text”.",
+      "{n} strings are left out of the translation: internal names of the game (room, script: only capitals, digits and underscores, no space) and stray pieces outside the text regions, which are usually graphics or sound data. They are not sent to the AI and are not written back. To see them, filter by “internal names”; if one is game text, select it and click “It is game text”.",
+    "translate.cancelling": "Cancelling…",
+    "translate.saved": "Settings saved.",
+    "extract.stray":
+      "{n} strings are outside the game's text regions and left the translation queue (any machine translation they had was discarded, so it is not written over game data). They show up under the “internal names” filter.",
     "translate.ascii":
       "ASCII text has no accented letters: the AI is told so and, if it still answers with an accent or with typographic quotes and dashes, the app writes the plain letter and the plain sign, with a warning on the string. Anything with no equivalent blocks reinsertion and the string says which character it is.",
     "glossary.title": "Glossary",

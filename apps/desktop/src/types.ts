@@ -104,6 +104,8 @@ export interface ExtractOutcome {
   truncated: boolean;
   /** Entries antigas sem traducao que sairam do projeto por nao parecerem texto. */
   removed: number;
+  /** Fora das regiões de texto do arquivo: tiradas da tradução. */
+  stray: number;
 }
 
 export interface OpenProjectReport {

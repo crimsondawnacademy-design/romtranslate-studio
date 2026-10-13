@@ -2,7 +2,7 @@
 //! varios ao mesmo tempo, com retry/backoff, cancelamento e progresso; o que
 //! volta maior que o espaco da frase e repedido ao provider.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -270,6 +270,32 @@ pub async fn run_translation(
     // O que o provider respondeu nesta rodada: so isto e repedido na fase 3.
     let mut answered: HashSet<String> = HashSet::new();
     remaining.sort_by(|a, b| charset_group(a).cmp(&charset_group(b)));
+    // A mesma frase aparece varias vezes num jogo (menu, nome de item, fala
+    // repetida): so a primeira vai ao provider, e a traducao que ficar pra ela
+    // vale pras outras. Medido em 13/10/2026 num jogo real: 8.717 textos
+    // distintos em 11.161 frases — uma em cada cinco chamadas era repeticao.
+    // "A mesma" = mesmo texto, mesmo conjunto de caracteres e mesmo espaco.
+    let mut first_of: HashMap<(u8, String, String, usize, bool), String> = HashMap::new();
+    let mut copies: Vec<(TextEntry, String)> = Vec::new();
+    let mut unique: Vec<TextEntry> = Vec::with_capacity(remaining.len());
+    for entry in remaining {
+        let (kind, table_id) = charset_group(&entry);
+        let key = (
+            kind,
+            table_id.to_string(),
+            entry.source_text.clone(),
+            entry.max_bytes.unwrap_or(entry.original_bytes.len()),
+            entry.pointer_offsets().is_empty(),
+        );
+        match first_of.get(&key) {
+            Some(first) => copies.push((entry, first.clone())),
+            None => {
+                first_of.insert(key, entry.id.clone());
+                unique.push(entry);
+            }
+        }
+    }
+    let remaining = unique;
     let batches: Vec<&[TextEntry]> = remaining
         .chunk_by(|a, b| charset_group(a) == charset_group(b))
         .flat_map(|same_charset| same_charset.chunks(opts.batch_size.max(1)))
@@ -286,7 +312,10 @@ pub async fn run_translation(
             let charset = Charset::of(&batch[0], &mut tables)?;
             requests.push(batch_request(batch, charset, &glossary, opts));
         }
-        let responses = call_together(provider, &requests, opts).await;
+        let Some(responses) = call_together(provider, &requests, opts, cancel).await else {
+            summary.cancelled = true;
+            break;
+        };
 
         for (batch, response) in wave.iter().zip(responses) {
             let charset = Charset::of(&batch[0], &mut tables)?;
@@ -394,7 +423,10 @@ pub async fn run_translation(
                 }
                 requests.push(request);
             }
-            let responses = call_together(provider, &requests, opts).await;
+            let Some(responses) = call_together(provider, &requests, opts, cancel).await else {
+                summary.cancelled = true;
+                break;
+            };
 
             for (batch, response) in wave.iter().zip(responses) {
                 let charset = Charset::of(&batch[0], &mut tables)?;
@@ -432,6 +464,33 @@ pub async fn run_translation(
         }
     }
     summary.too_long = too_long_entries(db, &answered, &mut tables)?.len();
+
+    // As repeticoes recebem a traducao que ficou pra primeira (ja encurtada,
+    // se foi o caso). A que ficou sem resposta deixa as copias pendentes.
+    if !copies.is_empty() {
+        let translated: HashMap<String, String> = db
+            .load_entries()?
+            .into_iter()
+            .filter(|e| answered.contains(&e.id))
+            .filter_map(|e| e.translated_text.map(|text| (e.id, text)))
+            .collect();
+        for (copy, first) in &copies {
+            match translated.get(first) {
+                Some(text) => {
+                    db.update_translation(&copy.id, text, TranslationStatus::Machine)?;
+                    summary.translated += 1;
+                    done += 1;
+                }
+                None if !summary.cancelled && summary.stopped.is_none() => summary.failed += 1,
+                None => {}
+            }
+        }
+        on_progress(Progress {
+            done,
+            total,
+            phase: "translate",
+        });
+    }
 
     let billed = provider.usage();
     summary.input_tokens = billed.input_tokens - billed_before.input_tokens;
@@ -617,12 +676,15 @@ fn shorter_please(item: &mut BatchItem, entry: &TextEntry, charset: Option<Chars
 }
 
 /// Manda os pedidos ao provider ao mesmo tempo e devolve as respostas na
-/// ordem dos pedidos.
+/// ordem dos pedidos. `None` = cancelado no meio: as chamadas em andamento
+/// sao largadas na hora (o Codex CLI morre junto, o pedido HTTP e abortado) e
+/// as frases delas continuam pendentes.
 async fn call_together(
     provider: &dyn TranslationProvider,
     requests: &[TranslationRequest],
     opts: &TranslateOptions,
-) -> Vec<Result<crate::provider::TranslationResponse>> {
+    cancel: &AtomicBool,
+) -> Option<Vec<Result<crate::provider::TranslationResponse>>> {
     type Call<'a> =
         Pin<Box<dyn Future<Output = Result<crate::provider::TranslationResponse>> + Send + 'a>>;
     // O `join_all` do crate `futures`, sem a dependencia: os futuros andam
@@ -633,7 +695,16 @@ async fn call_together(
         .collect();
     let mut answers: Vec<Option<Result<crate::provider::TranslationResponse>>> =
         requests.iter().map(|_| None).collect();
-    std::future::poll_fn(|cx| {
+    // O relogio acorda a task mesmo com todas as chamadas paradas esperando o
+    // provider: e ele que faz o "Cancelar" valer em menos de um segundo, e nao
+    // so quando a chamada mais lenta da leva termina (ate 40 s no Codex CLI).
+    let mut clock = tokio::time::interval(Duration::from_millis(150));
+    clock.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let cancelled = std::future::poll_fn(|cx| {
+        while clock.poll_tick(cx).is_ready() {}
+        if cancel.load(Ordering::Relaxed) {
+            return Poll::Ready(true);
+        }
         let mut waiting = false;
         for (call, answer) in calls.iter_mut().zip(answers.iter_mut()) {
             let Some(future) = call else { continue };
@@ -648,11 +719,14 @@ async fn call_together(
         if waiting {
             Poll::Pending
         } else {
-            Poll::Ready(())
+            Poll::Ready(false)
         }
     })
     .await;
-    answers.into_iter().flatten().collect()
+    if cancelled {
+        return None;
+    }
+    Some(answers.into_iter().flatten().collect())
 }
 
 async fn call_with_retry(

@@ -205,6 +205,29 @@ impl ProjectDb {
         Ok(())
     }
 
+    /// Tira da traducao as entries soltas (`scan::stray_ids`): viram
+    /// `Internal`, que nao vai pro provider nem e regravado, e a traducao
+    /// automatica que alguma ja tinha recebido e descartada — ela seria
+    /// gravada por cima de dado do jogo. Entry revisada por uma pessoa fica
+    /// como esta. Devolve quantas mudaram.
+    pub fn mark_stray(&mut self, ids: &[String]) -> Result<usize> {
+        let internal = json_str(&TranslationStatus::Internal)?;
+        let reviewed = json_str(&TranslationStatus::Reviewed)?;
+        let tx = self.conn.transaction()?;
+        let mut changed = 0;
+        {
+            let mut stmt = tx.prepare(
+                "UPDATE entries SET status=?2, translated_text=NULL
+                 WHERE id=?1 AND status NOT IN (?2, ?3)",
+            )?;
+            for id in ids {
+                changed += stmt.execute(params![id, internal, reviewed])?;
+            }
+        }
+        tx.commit()?;
+        Ok(changed)
+    }
+
     /// A traducao automatica de `id` veio como `answer` e foi gravada como
     /// `written`: acentos que a tabela do jogo nao tem viraram a letra base.
     /// Fica fora de `entries.metadata` porque um novo scan troca a metadata.

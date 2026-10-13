@@ -3,6 +3,7 @@
 //! dos adapters estruturados, Camada B+). Deterministico: mesmo arquivo + mesma
 //! config => mesmas entries, na mesma ordem.
 
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -324,6 +325,76 @@ pub fn keep_text(entries: &mut Vec<TextEntry>) -> usize {
     before - entries.len()
 }
 
+/// Ids das entries SOLTAS: as que ficam fora das regioes onde o arquivo guarda
+/// o texto do jogo. Num cartucho, quase tudo o que passa em `looks_like_text`
+/// fora do banco de texto e dado de grafico, de som ou de tabela — e traducao
+/// gravada ali corrompe o jogo. Medido em 13/10/2026 num jogo real de GBA de
+/// 16 MiB: de 15.610 entries fora dos nomes internos, 4.415 estavam fora do
+/// banco de texto (308 KiB contiguos) e nenhuma delas era fala.
+///
+/// A regra: o arquivo e cortado em blocos e conta-se, em cada um, quantas
+/// entries tem cara de frase (12+ caracteres, com espaco). Bloco com pelo
+/// menos 1/8 do bloco mais cheio e regiao de texto; os vizinhos dela tambem
+/// valem, porque um banco comeca e termina no meio de um bloco. Fica de fora:
+/// entry com arquivo proprio (disco, sistema de arquivos), nome interno e
+/// entry com ponteiro em tabela — ponteiro e evidencia mais forte que posicao.
+///
+/// So age quando o arquivo tem um banco nitido (100+ frases e 70% de todas as
+/// frases dentro das regioes). Sem isso devolve vazio: jogo pequeno ou com o
+/// texto espalhado fica como esta. E heuristica, calibrada num jogo so.
+pub fn stray_ids(entries: &[TextEntry]) -> Vec<String> {
+    const SENTENCE_CHARS: usize = 12;
+    const BANK_SENTENCES: usize = 100;
+
+    let candidates: Vec<(&TextEntry, u64)> = entries
+        .iter()
+        .filter(|e| e.resource_path.is_none() && e.status != TranslationStatus::Internal)
+        .filter_map(|e| e.offset.map(|offset| (e, offset)))
+        .collect();
+    let Some(top) = candidates.iter().map(|(_, offset)| *offset).max() else {
+        return Vec::new();
+    };
+    // ponytail: tres tamanhos de bloco pelo tamanho do arquivo. Banco menor
+    // que um bloco ainda aparece (o bloco dele e o mais cheio); dois bancos
+    // pequenos e distantes num arquivo grande podem ficar abaixo do corte —
+    // medir num jogo assim antes de trocar por agrupamento de verdade.
+    let block: u64 = match top {
+        t if t >= 4 << 20 => 64 << 10,
+        t if t >= 512 << 10 => 16 << 10,
+        _ => 4 << 10,
+    };
+    let is_sentence = |e: &TextEntry| {
+        e.source_text.chars().count() >= SENTENCE_CHARS && e.source_text.trim().contains(' ')
+    };
+    let mut sentences: HashMap<u64, usize> = HashMap::new();
+    for (entry, offset) in &candidates {
+        if is_sentence(entry) {
+            *sentences.entry(offset / block).or_default() += 1;
+        }
+    }
+    let fullest = sentences.values().copied().max().unwrap_or(0);
+    let dense: HashSet<u64> = sentences
+        .iter()
+        .filter(|(_, n)| **n >= (fullest / 8).max(SENTENCE_CHARS))
+        .map(|(block, _)| *block)
+        .collect();
+    let inside: usize = dense.iter().map(|block| sentences[block]).sum();
+    let all: usize = sentences.values().sum();
+    if inside < BANK_SENTENCES || inside * 10 < all * 7 {
+        return Vec::new();
+    }
+    let near_text = |b: u64| {
+        dense.contains(&b)
+            || dense.contains(&(b + 1))
+            || b.checked_sub(1).is_some_and(|p| dense.contains(&p))
+    };
+    candidates
+        .into_iter()
+        .filter(|(entry, offset)| !near_text(offset / block) && entry.pointers().is_empty())
+        .map(|(entry, _)| entry.id.clone())
+        .collect()
+}
+
 /// Run bruto achado por um scanner, relativo ao inicio da janela.
 struct Run {
     offset: usize,
@@ -609,5 +680,85 @@ mod tests {
                 ("START".to_string(), TranslationStatus::Untranslated),
             ]
         );
+    }
+
+    /// Arquivo de 1 MiB com um banco de 150 frases a partir de 512 KiB e
+    /// sequencias curtas espalhadas pelo resto, como grafico que caiu em
+    /// byte imprimivel.
+    fn rom_with_a_text_bank() -> Vec<u8> {
+        let mut data = vec![0u8; 1 << 20];
+        let mut at = 0x80000;
+        for i in 0..150 {
+            let line = format!("The old bridge fell again, try number {i}.");
+            data[at..at + line.len()].copy_from_slice(line.as_bytes());
+            at += line.len() + 1;
+        }
+        // Sem digito nem sublinhado: com eles seria nome interno, que a regra
+        // nem olha.
+        for (i, at) in (0x1000..0x70000).step_by(0x3000).enumerate() {
+            let junk = format!("Grid{}", (b'a' + (i % 26) as u8) as char);
+            data[at..at + junk.len()].copy_from_slice(junk.as_bytes());
+        }
+        // Uma frase sozinha, longe do banco: tambem e solta.
+        let lone = b"This line sits alone, far away.";
+        data[0x20000..0x20000 + lone.len()].copy_from_slice(lone);
+        data
+    }
+
+    #[test]
+    fn entries_outside_the_text_bank_are_stray_and_the_bank_is_not() {
+        let entries = scan_bytes(&rom_with_a_text_bank(), &ScanConfig::default())
+            .unwrap()
+            .entries;
+        let stray = stray_ids(&entries);
+
+        let in_bank = |e: &&TextEntry| e.offset.is_some_and(|o| o >= 0x80000);
+        let bank: Vec<&TextEntry> = entries.iter().filter(in_bank).collect();
+        assert_eq!(bank.len(), 150);
+        assert!(bank.iter().all(|e| !stray.contains(&e.id)));
+        // Tudo o que esta fora do banco saiu: o lixo curto e a frase sozinha.
+        let outside = entries.len() - bank.len();
+        assert!(outside > 30, "a fixture precisa de lixo espalhado");
+        assert_eq!(stray.len(), outside);
+    }
+
+    #[test]
+    fn pointer_internal_name_and_file_entries_are_never_stray() {
+        let mut entries = scan_bytes(&rom_with_a_text_bank(), &ScanConfig::default())
+            .unwrap()
+            .entries;
+        let far: Vec<usize> = entries
+            .iter()
+            .enumerate()
+            .filter(|(_, e)| e.offset.is_some_and(|o| o < 0x70000))
+            .map(|(i, _)| i)
+            .take(3)
+            .collect();
+        entries[far[0]].metadata = serde_json::json!({ "pointers": [0x40] });
+        entries[far[1]].status = TranslationStatus::Internal;
+        entries[far[2]].resource_path = Some("DATA/TEXT.BIN".to_string());
+        assert!(
+            !entries[far[0]].pointers().is_empty(),
+            "o ponteiro tem que ser lido"
+        );
+        let kept: Vec<String> = far.iter().map(|i| entries[*i].id.clone()).collect();
+
+        let stray = stray_ids(&entries);
+
+        assert!(kept.iter().all(|id| !stray.contains(id)));
+        assert!(!stray.is_empty());
+    }
+
+    #[test]
+    fn file_without_a_clear_text_bank_has_no_stray_entries() {
+        // Poucas frases, espalhadas: nao ha banco, a regra nao age.
+        let mut data = vec![0u8; 1 << 20];
+        for (i, at) in (0x1000..0xF0000).step_by(0x8000).enumerate() {
+            let line = format!("A short line of text number {i}.");
+            data[at..at + line.len()].copy_from_slice(line.as_bytes());
+        }
+        let entries = scan_bytes(&data, &ScanConfig::default()).unwrap().entries;
+        assert!(entries.len() >= 20);
+        assert!(stray_ids(&entries).is_empty());
     }
 }

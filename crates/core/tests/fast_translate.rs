@@ -17,7 +17,7 @@ use romtranslate_core::provider::{
     TranslatedItem, TranslationProvider, TranslationRequest, TranslationResponse,
 };
 use romtranslate_core::synth;
-use romtranslate_core::types::{Platform, TextEntry, TranslationStatus};
+use romtranslate_core::types::{Platform, TextEncoding, TextEntry, TranslationStatus};
 use romtranslate_core::validate::{validate_project_db, IssueKind};
 
 struct TempDir(PathBuf);
@@ -329,4 +329,93 @@ async fn provider_down_stops_the_round_after_the_first_wave() {
     assert_eq!(provider.requests().len(), 4);
     assert_eq!(summary.failed, 4);
     assert_eq!(pending(&db).len(), waiting);
+}
+
+/// Entry ASCII solta, sem jogo por tras: so o que o pipeline olha.
+fn entry(id: &str, text: &str) -> TextEntry {
+    TextEntry {
+        id: id.to_string(),
+        resource_path: None,
+        offset: None,
+        original_bytes: text.as_bytes().to_vec(),
+        source_text: text.to_string(),
+        translated_text: None,
+        context: None,
+        max_bytes: Some(text.len()),
+        encoding: TextEncoding::Ascii,
+        status: TranslationStatus::Untranslated,
+        metadata: serde_json::Value::Null,
+    }
+}
+
+#[tokio::test]
+async fn repeated_line_goes_to_the_provider_once_and_every_copy_gets_the_translation() {
+    let tmp = TempDir::new("twins");
+    let dir = tmp.0.join("twins.rtsproj");
+    fs::create_dir_all(&dir).unwrap();
+    let mut db = ProjectDb::open(&dir).unwrap();
+    db.upsert_entries(&[
+        entry("a", "Welcome back!"),
+        entry("b", "Save the game?"),
+        entry("c", "Welcome back!"),
+        entry("d", "Welcome back!"),
+    ])
+    .unwrap();
+    let provider = FakeProvider::new(Answer::LongThenShort);
+
+    let (summary, _) = translate(&mut db, &provider, &options(10, 1)).await;
+
+    // Dois textos distintos: e isso que o provider ve, na ida e na repergunta.
+    let requests = provider.requests();
+    assert!(requests.iter().all(|r| r.items.len() == 2));
+    assert_eq!(summary.translated, 4);
+    assert_eq!(summary.failed, 0);
+    // As copias ficam com a traducao final da primeira (a curta, da repergunta).
+    for e in db.load_entries().unwrap() {
+        assert_eq!(e.translated_text.as_deref(), Some(SHORT), "{}", e.id);
+    }
+}
+
+#[tokio::test]
+async fn cancel_drops_the_calls_in_flight_instead_of_waiting_for_them() {
+    /// Provider que nunca responde a tempo: uma chamada do Codex CLI leva 25
+    /// a 40 s, e era isso que o "Cancelar" esperava.
+    struct Stuck;
+    #[async_trait]
+    impl TranslationProvider for Stuck {
+        fn id(&self) -> &'static str {
+            "stuck"
+        }
+        async fn translate_batch(&self, _: &TranslationRequest) -> Result<TranslationResponse> {
+            tokio::time::sleep(Duration::from_secs(60)).await;
+            Err(CoreError::Provider("nao devia chegar aqui".to_string()))
+        }
+        async fn health_check(&self) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    let tmp = TempDir::new("cancel");
+    let mut db = ProjectDb::open(&tmp.project()).unwrap();
+    let waiting = pending(&db).len();
+    let cancel = AtomicBool::new(false);
+    let opts = options(4, 4);
+    let started = std::time::Instant::now();
+
+    let run = run_translation(&mut db, None, &Stuck, "stuck", &opts, &cancel, &|_| {});
+    let click = async {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        cancel.store(true, Ordering::SeqCst);
+    };
+    let (summary, ()) = tokio::join!(run, click);
+    let summary = summary.unwrap();
+
+    assert!(summary.cancelled);
+    assert!(
+        started.elapsed() < Duration::from_secs(3),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(summary.translated, 0);
+    assert_eq!(pending(&db).len(), waiting, "nada foi perdido nem gravado");
 }

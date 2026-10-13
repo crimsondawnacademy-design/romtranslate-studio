@@ -342,8 +342,9 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             load(&project)?;
             let outcome = extract_project(&project)?;
             let mut text = format!(
-                "gravadas: {}, descartadas (nao parecem texto): {}, removidas do projeto antigo: {}",
-                outcome.saved, outcome.discarded, outcome.removed
+                "gravadas: {}, descartadas (nao parecem texto): {}, removidas do projeto antigo: {}, \
+                 fora das regioes de texto (ficam fora da traducao): {}",
+                outcome.saved, outcome.discarded, outcome.removed, outcome.stray
             );
             if outcome.truncated {
                 text.push_str("\ncortou no teto: pode haver mais texto");

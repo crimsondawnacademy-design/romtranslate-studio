@@ -57,6 +57,9 @@ pub struct ExtractOutcome {
     /// Entries antigas, sem traducao, que sairam do banco por nao parecerem
     /// texto (`ProjectDb::remove_stale_junk`).
     pub removed: usize,
+    /// Entries fora das regioes de texto do arquivo, tiradas da traducao
+    /// (`scan::stray_ids`): ficam como `Internal`, com desfazer por entry.
+    pub stray: usize,
 }
 
 /// Extracao estruturada do arquivo de origem de um projeto, gravada no banco.
@@ -74,10 +77,12 @@ pub fn extract_project(project_dir: &Path) -> Result<ExtractOutcome> {
     let mut db = ProjectDb::open(project_dir)?;
     let saved = db.upsert_entries(&extraction.entries)?;
     let removed = db.remove_stale_junk(&extraction.entries)?;
+    let stray = db.mark_stray(&crate::scan::stray_ids(&extraction.entries))?;
     Ok(ExtractOutcome {
         saved,
         discarded: extraction.discarded,
         truncated: extraction.truncated,
         removed,
+        stray,
     })
 }

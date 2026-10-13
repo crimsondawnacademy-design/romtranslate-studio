@@ -79,6 +79,8 @@ export default function ProjectView({
     discarded: number;
     /** So a extracao estruturada tira entry antiga do projeto. */
     removed: number;
+    /** Fora das regioes de texto: tiradas da traducao pela extracao estruturada. */
+    stray: number;
     structured: boolean;
   } | null>(null);
   const [encoding, setEncoding] = useState<ScanEncoding>("ascii");
@@ -121,6 +123,8 @@ export default function ProjectView({
   const [translateError, setTranslateError] = useState<string | null>(null);
 
   const [translating, setTranslating] = useState(false);
+  // "Cancelar" foi clicado e a rodada ainda nao devolveu o resumo.
+  const [cancelling, setCancelling] = useState(false);
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
   const [summary, setSummary] = useState<TranslateSummary | null>(null);
 
@@ -224,6 +228,7 @@ export default function ProjectView({
         truncated: outcome.truncated,
         discarded: outcome.discarded,
         removed: 0,
+        stray: 0,
         structured: false,
       });
       await reloadEntries();
@@ -294,6 +299,7 @@ export default function ProjectView({
         truncated: outcome.truncated,
         discarded: outcome.discarded,
         removed: outcome.removed,
+        stray: outcome.stray,
         structured: true,
       });
       await reloadEntries();
@@ -511,6 +517,7 @@ export default function ProjectView({
       else setTranslateError(String(e));
     } finally {
       setTranslating(false);
+      setCancelling(false);
       setProgress(null);
     }
   }
@@ -561,10 +568,12 @@ export default function ProjectView({
   }
 
   async function cancelTranslation() {
+    setCancelling(true);
     try {
       await invoke("cancel_translation");
     } catch (e) {
-      setError(String(e));
+      setCancelling(false);
+      setTranslateError(String(e));
     }
   }
 
@@ -849,6 +858,9 @@ export default function ProjectView({
       )}
       {scanInfo && scanInfo.removed > 0 && (
         <p className="hint left">{t("extract.removedOld", { n: scanInfo.removed })}</p>
+      )}
+      {scanInfo && scanInfo.stray > 0 && (
+        <p className="hint left">{t("extract.stray", { n: scanInfo.stray })}</p>
       )}
       {savedPath && <div className="ok">{t("export.saved", { path: savedPath })}</div>}
 
@@ -1210,12 +1222,20 @@ export default function ProjectView({
             </label>
           )}
           <div className="actions">
-            <button onClick={() => saveSettings()}>{t("translate.saveSettings")}</button>
+            <button
+              onClick={async () => {
+                if (await saveSettings()) setTestResult(t("translate.saved"));
+              }}
+            >
+              {t("translate.saveSettings")}
+            </button>
             <button onClick={() => testProvider()} disabled={testing || translating}>
               {testing ? t("translate.testing") : t("translate.test")}
             </button>
             {translating ? (
-              <button onClick={cancelTranslation}>{t("translate.cancel")}</button>
+              <button onClick={cancelTranslation} disabled={cancelling}>
+                {cancelling ? t("translate.cancelling") : t("translate.cancel")}
+              </button>
             ) : (
               <button
                 className="primary"
@@ -1247,11 +1267,13 @@ export default function ProjectView({
             <div className="progress-row">
               <progress value={progress?.done ?? 0} max={progress?.total ?? 1} />
               <span>
-                {progress
-                  ? `${progress.done}/${progress.total} — ${t(
-                      `translate.phase.${progress.phase}` as MessageId,
-                    )}`
-                  : t("translate.running")}
+                {cancelling
+                  ? t("translate.cancelling")
+                  : progress
+                    ? `${progress.done}/${progress.total} — ${t(
+                        `translate.phase.${progress.phase}` as MessageId,
+                      )}`
+                    : t("translate.running")}
               </span>
             </div>
           )}
