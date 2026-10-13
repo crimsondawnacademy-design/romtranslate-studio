@@ -7,7 +7,40 @@ branch: main
 ultimo_commit: c2cec40 (2026-10-13)
 versao_publicada: v0.1.5
 numero: 4
+adendo: 2026-10-13 à noite (v0.1.6 e japonês) — ler antes do resto
 ---
+
+> ## Adendo de 13/10/2026 à noite — o que mudou depois deste handoff
+>
+> O corpo abaixo descreve a v0.1.5. Depois dele, no mesmo dia:
+>
+> - **v0.1.6 publicada** (tag em `4f09522`): disco de PS2, PS1 e PSP
+>   reconhecido mesmo com o índice de arquivos depois dos 128 KiB do probe
+>   (primeiro bug relatado por alguém de fora, com um DVD de PS2 de 2,7 GiB);
+>   extração de disco grande sem estourar a memória e sem encher o projeto de
+>   lixo; Shift-JIS; texto comprimido LZ77 no GBA.
+> - **No `main`, depois da tag (sem binário):** japonês em códigos de 16 bits
+>   na ordem JIS (`crates/core/src/kuten.rs`), com a tabela gerada e gravada
+>   no projeto; letra em largura inteira na gravação por tabela;
+>   `ProjectDb::get_entry` por linha.
+> - **A prioridade do mantenedor passou a ser jogo em japonês.** O primeiro
+>   jogo japonês real medido não usa Shift-JIS: o app lê 11.676 mensagens dele
+>   pelo formato de 16 bits. Gravar de volta é o gargalo (2 bytes por letra,
+>   frase que não muda de lugar, kanji de lista própria saindo trocados) e
+>   ninguém viu uma tradução dessas rodando.
+> - **Módulos novos:** `adapters/packed.rs` (texto em bloco LZ77), `sjis.rs`
+>   (Shift-JIS e a regra de texto japonês, `Script`), `kuten.rs`.
+>   `ScanConfig` ganhou `japanese` e `skip_noise`; `Extraction` ganhou
+>   `tables`; `GameInput` ganhou `whole()`.
+> - **Armadilhas novas:** disco sintético montado por nós repete as nossas
+>   suposições de layout (conferir com imagem de outra ferramenta:
+>   `hdiutil makehybrid -iso -udf`); "jogo japonês" não é um formato (medir
+>   num jogo real antes de escrever leitor); publicar o release antes de todos
+>   os jobs terminarem faz o `tauri-action` abrir um SEGUNDO rascunho com os
+>   arquivos que faltavam (mover os arquivos pela API e apagar o rascunho).
+>
+> Detalhes, medições e o que não foi conferido: `.ctx/STATE.md`, "Feito nesta
+> sessão" e próximo passo 0d; decisões de 13/10 no fim do `.ctx/DECISIONS.md`.
 
 # HANDOFF 4 — RomTranslate Studio
 
