@@ -1462,3 +1462,56 @@ token. Token de saída é sempre estimativa, e modelo que raciocina antes de
 responder gasta mais que ela. Preço: o que a pessoa informar; sem isso, uma
 tabela dos modelos do Claude com a data em que foi lida — o app não a
 atualiza, e a tela diz isso.
+
+## 2026-10-13 — CLI do core: casca em `apps/cli`, e a configuração do app passa a morar no core
+
+**Contexto:** todo teste em jogo real pediu um programa sem tela chamando o
+core; foi escrito e apagado três vezes (achado 11 do teste de 13/10). A spec
+§19 pede a CLI e a §4 a põe em `apps/cli`.
+
+**Decisão 1 — onde e como:** crate `romtranslate-cli` em `apps/cli` (a pasta
+da spec; a sugestão de `crates/cli` foi trocada por ela), binário
+`romtranslate`. Um comando por função que o botão do app chama, sem lógica
+própria: `inspect`, `create`, `extract`, `scan`, `estimate`, `translate`,
+`apply`, `validate`, `reinsert`, `patch`, e `export` — que não estava no
+pedido e entrou porque o `apply` precisa dos ids das frases e sem ele o ciclo
+não fecha pela CLI. `clap` é a dependência que a spec §3 nomeia. Os valores de
+`--encoding`, `--policy` e `--format` são lidos pelo nome que o core já dá aos
+enums no serde: a lista aceita é a do core, sem cópia na CLI.
+
+**Decisão 2 — configuração no core:** `settings.rs` saiu de
+`apps/desktop/src-tauri/src/` e foi para `crates/core/src/settings.rs`, junto
+de `build_provider`, `anthropic`, `codex_cli` e `open_global_tm`, que estavam
+no `lib.rs` do app. A janela e a CLI leem o mesmo `settings.toml`, montam o
+mesmo provider e passam pela mesma guarda de tradução remota. O core continua
+sem Tauri: ele recebe a pasta de configuração de quem chama. Quem acha a pasta
+é a casca — o app pelo Tauri, a CLI por `dirs::config_dir()/<identifier>`, a
+mesma conta que o Tauri faz, com um teste que compara o identificador com o
+`tauri.conf.json`.
+
+**Alternativas consideradas:**
+- crate à parte só para configuração — mesma árvore de dependências e um crate
+  a mais; fica para quando o core for dividido como a spec desenha.
+- a CLI depender do crate do app — puxaria o Tauri inteiro.
+
+**Custo:** o core ganhou `toml` e `keyring`. No Linux o cofre é o Secret
+Service por `zbus`, sem biblioteca de sistema (conferido na árvore de
+dependências do alvo Linux, não compilando lá); o job `rust` do CI compila
+mais coisa. As funções movidas continuam devolvendo `String` no erro, como no
+app, pra as mensagens da tela não mudarem — destoa do `CoreError` do resto do
+core.
+
+**Contrato de saída:** texto por padrão e `--json` (uma linha no stdout).
+Erro: mensagem no stderr e saída 1; argumento inválido, saída 2 (do `clap`).
+Relatório com problema não é erro do comando — `validate` com erros e
+`reinsert` com frase pulada saem 0; quem automatiza lê o JSON. `translate`
+sai 1 quando a rodada para ou é cancelada, depois de imprimir o resumo, pra um
+script não seguir para a reinserção com a fila pela metade.
+
+**Limites assumidos:** (1) o `apply` lê uma frase por linha, sem escape —
+tradução com quebra de linha de verdade não cabe no TSV; (2) o `estimate` da
+CLI usa sempre a média de caracteres por token, sem a calibração pelo Claude
+que a tela faz; (3) as mensagens são em português sem acento, como as do
+core, e não passam pelo i18n da interface; (4) no macOS o cofre do sistema
+pode pedir permissão na primeira vez que a CLI ler uma chave de API gravada
+pelo app — não foi exercitado.

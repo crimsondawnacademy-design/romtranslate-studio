@@ -280,11 +280,12 @@ crates/core/src/
   fileio.rs         leitura por mapeamento em memória
   export.rs hash.rs types.rs error.rs
   synth.rs          arquivos sintéticos de teste (nenhum byte de jogo real)
+  settings.rs       configurações, chaves de API e build_provider (veio do app em 13/10)
 crates/core/tests/  25 arquivos de teste de integração
 crates/core/examples/gen_fixtures.rs   grava 21 arquivos sintéticos em disco
+apps/cli/           CLI `romtranslate` (13/10): src/main.rs e tests/cli.rs
 apps/desktop/src-tauri/src/
   lib.rs            os 30 comandos expostos à interface
-  settings.rs       configurações e chaves de API
 apps/desktop/src/
   App.tsx           tela inicial: escolher ou arrastar, inspecionar, criar ou abrir projeto
   ProjectView.tsx   a tela do projeto inteira
