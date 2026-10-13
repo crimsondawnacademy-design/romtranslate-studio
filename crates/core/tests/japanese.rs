@@ -370,3 +370,244 @@ fn a_disc_file_in_shift_jis_is_read_and_written_back() {
     assert_eq!(applied.bytes[at + 27..at + 31], [0; 4]);
     assert_eq!(applied.bytes.len(), iso.len());
 }
+
+// --- Texto em codigos de 16 bits na ordem do JIS (`kuten`) ---
+
+mod jis16 {
+    use super::*;
+    use romtranslate_core::kuten;
+    use romtranslate_core::reinsert::{reinsert_project_with, ErrorPolicy};
+    use romtranslate_core::synth::{JIS16_NAMES, JIS16_SCRIPT_AT};
+    use romtranslate_core::tbl::{ProjectTables, TblTable};
+
+    fn table_encoding() -> TextEncoding {
+        TextEncoding::Table(kuten::TABLE_ID.to_string())
+    }
+
+    fn project(tmp: &TempDir) -> (PathBuf, Vec<u8>) {
+        let rom = synth::make_gba_rom_jis16();
+        let source = tmp.0.join("game.gba");
+        fs::write(&source, &rom).unwrap();
+        let dir = tmp.0.join("game.rtsproj");
+        create_project(CreateProjectArgs {
+            source_path: source,
+            platform: Platform::Gba,
+            adapter_id: GbaAdapter.id().to_string(),
+            source_language: Some("ja".to_string()),
+            target_language: "pt-BR".to_string(),
+            project_dir: dir.clone(),
+        })
+        .unwrap();
+        (dir, rom)
+    }
+
+    /// As unidades de 16 bits de `bytes`, lidas de volta pela tabela do JIS.
+    fn read_units(bytes: &[u8]) -> String {
+        bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| u16::from_le_bytes(*pair))
+            .map(|code| match code {
+                synth::JIS16_SPACE => " ".to_string(),
+                code if code >= 0xFF00 => format!("[{code:04X}]"),
+                code => kuten::decode(code).map_or("?".to_string(), String::from),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_messages_come_out_whole_with_the_table_that_reads_them() {
+        let rom = synth::make_gba_rom_jis16();
+        let out = GbaAdapter.extract(&rom).unwrap();
+        let japanese: Vec<&TextEntry> = out
+            .entries
+            .iter()
+            .filter(|e| e.encoding == table_encoding())
+            .collect();
+        assert_eq!(japanese.len(), 120 + JIS16_NAMES.len());
+
+        // A mensagem inteira, com a quebra de linha como codigo no meio; os
+        // codigos do fim (espera o botao, fim) ficam fora da entry.
+        let first = by_text(&out.entries, &synth::jis16_message(0));
+        assert_eq!(first.offset, Some(JIS16_SCRIPT_AT as u64));
+        assert_eq!(first.max_bytes, Some(first.original_bytes.len()));
+        assert_eq!(first.original_bytes.len(), 27 * 2);
+        assert_eq!(read_units(&first.original_bytes), synth::jis16_message(0));
+        by_text(&out.entries, &synth::jis16_message(119));
+        // Nome curto entre dois 0xFFFF tambem sai.
+        for name in JIS16_NAMES {
+            assert_eq!(by_text(&out.entries, name).encoding, table_encoding());
+        }
+        // O texto do jogo vem na frente, e a tabela vem junto.
+        assert_eq!(out.entries[0].encoding, table_encoding());
+        assert_eq!(out.tables.len(), 1);
+        assert_eq!(out.tables[0].0, kuten::TABLE_ID);
+        let table = TblTable::parse(&out.tables[0].1).unwrap();
+        assert_eq!(
+            table.encode(&synth::jis16_message(0)).unwrap(),
+            first.original_bytes
+        );
+
+        // Num jogo assim o que o scanner de 8 bits le sai da fila.
+        let ascii = by_text(&out.entries, "WELCOME TO THE VILLAGE!");
+        assert_eq!(ascii.status, TranslationStatus::Internal);
+        assert!(japanese
+            .iter()
+            .all(|e| e.status == TranslationStatus::Untranslated));
+    }
+
+    #[test]
+    fn a_game_without_this_encoding_gets_no_table() {
+        for rom in [
+            synth::make_gba_rom_japanese(),
+            synth::make_gba_rom_with_junk(),
+        ] {
+            let out = GbaAdapter.extract(&rom).unwrap();
+            assert!(out.tables.is_empty());
+            assert!(!out.entries.iter().any(|e| e.encoding == table_encoding()));
+        }
+        assert!(kuten::extract(&synth::make_gba_rom_japanese()).is_none());
+    }
+
+    #[test]
+    fn plain_letters_are_written_in_their_full_width_form() {
+        let table = TblTable::parse(&kuten::table_text(Some(synth::JIS16_SPACE))).unwrap();
+        // "a" nao existe na tabela japonesa; "ａ" existe, e e o que e gravado.
+        let bytes = table.encode("Ola, vila!").unwrap();
+        assert_eq!(bytes.len(), 10 * 2);
+        assert_eq!(read_units(&bytes), "Ｏｌａ， ｖｉｌａ！");
+        // Acento sai; o que nem em largura inteira existe e erro que diz qual.
+        assert_eq!(
+            table.drop_missing_accents("coração").as_deref(),
+            Some("coracao")
+        );
+        assert_eq!(table.drop_missing_accents("vila"), None);
+        let err = table.encode("ação").unwrap_err().to_string();
+        assert!(err.contains("'ç'"), "{err}");
+        // A lista pro prompt e o ASCII que a tabela escreve, nao os 7 mil
+        // caracteres dela.
+        let charset = table.charset();
+        assert!(charset.len() < 100, "{}", charset.len());
+        assert!(charset.contains('a') && charset.contains('Z') && charset.contains('!'));
+        assert!(!charset.contains('あ'));
+        // 2 bytes por letra: num espaco de 20 bytes cabem 10.
+        assert_eq!(table.chars_that_fit(20), 10);
+
+        // Tabela com a letra comum fica com ela, sem trocar nada.
+        let small = TblTable::parse("41=A\n42=a\n43=ａ\n20= ").unwrap();
+        assert_eq!(small.encode("Aa").unwrap(), [0x41, 0x42]);
+        assert_eq!(small.charset(), " Aaａ");
+    }
+
+    #[test]
+    fn a_translation_that_fits_goes_back_and_the_rest_is_an_error() {
+        let tmp = TempDir::new("jis16");
+        let (dir, rom) = project(&tmp);
+        let outcome = extract_project(&dir).unwrap();
+        assert_eq!(outcome.jis16, 120 + JIS16_NAMES.len());
+        assert!(dir.join("tables/jis16.tbl").is_file());
+        // A tabela do projeto nao e sobrescrita numa segunda extracao.
+        fs::write(dir.join("tables/jis16.tbl"), "AC00= \n1B01=あ\n").unwrap();
+        extract_project(&dir).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join("tables/jis16.tbl")).unwrap(),
+            "AC00= \n1B01=あ\n"
+        );
+        fs::remove_file(dir.join("tables/jis16.tbl")).unwrap();
+        extract_project(&dir).unwrap();
+
+        let fits = "◆O povo[FF01]trabalha feliz.";
+        let long = "◆O povo todo da vila[FF01]trabalha muito feliz hoje.";
+        set_translations(
+            &dir,
+            &[
+                (&synth::jis16_message(0), fits),
+                (&synth::jis16_message(1), long),
+                (&synth::jis16_message(2), "◆O povo canta."),
+            ],
+        );
+        let report = validate_project_db(&mut ProjectDb::open(&dir).unwrap()).unwrap();
+        let entries = ProjectDb::open(&dir).unwrap().load_entries().unwrap();
+        let issues_of = |text: &str| -> Vec<IssueKind> {
+            let id = &by_text(&entries, text).id;
+            report
+                .issues
+                .iter()
+                .filter(|i| &i.entry_id == id && i.severity == Severity::Error)
+                .map(|i| i.kind)
+                .collect()
+        };
+        assert_eq!(issues_of(&synth::jis16_message(0)), []);
+        // Nao cabe: cada letra ocupa 2 bytes e a frase nao muda de lugar.
+        assert!(issues_of(&synth::jis16_message(1)).contains(&IssueKind::ByteOverflow));
+        // Sem a quebra de linha do original.
+        assert!(issues_of(&synth::jis16_message(2)).contains(&IssueKind::PlaceholderMismatch));
+
+        let outcome = reinsert_project_with(&dir, ErrorPolicy::Skip).unwrap();
+        assert_eq!(outcome.apply.applied, 1);
+        assert_eq!(outcome.skipped_errors, 2);
+        let working = fs::read(&outcome.working_path).unwrap();
+        let at = JIS16_SCRIPT_AT;
+        // A mensagem tinha 27 unidades: a traducao ocupa 23 e 4 espacos do
+        // jogo completam o campo; os codigos do fim continuam logo depois.
+        assert_eq!(
+            read_units(&working[at..at + 60]),
+            "◆Ｏ ｐｏｖｏ[FF01]ｔｒａｂａｌｈａ ｆｅｌｉｚ．    [FF03][FF00][FFFF]"
+        );
+        assert_eq!(working[at + 60..], rom[at + 60..]);
+        assert_eq!(working[0x1000..at], rom[0x1000..at]);
+
+        // A tabela do projeto e a que valida: acento sai pela mesma regra.
+        let mut tables = ProjectTables::new(&dir);
+        let table = tables.get(kuten::TABLE_ID).unwrap();
+        assert_eq!(table.drop_missing_accents("está").as_deref(), Some("esta"));
+    }
+
+    #[tokio::test]
+    async fn the_ai_is_asked_in_plain_letters_with_the_space_of_each_line() {
+        let tmp = TempDir::new("jis16-ia");
+        let (dir, _) = project(&tmp);
+        extract_project(&dir).unwrap();
+        let provider = FakeProvider {
+            answers: HashMap::new(),
+            requests: Mutex::new(Vec::new()),
+        };
+        let opts = TranslateOptions {
+            source_language: Some("ja".to_string()),
+            ..TranslateOptions::new("pt-BR")
+        };
+        let mut db = ProjectDb::open(&dir).unwrap();
+        run_translation(
+            &mut db,
+            None,
+            &provider,
+            "fake-model",
+            &opts,
+            &AtomicBool::new(false),
+            &|_| {},
+        )
+        .await
+        .unwrap();
+        let requests = provider.requests.lock().unwrap().clone();
+        let request = requests
+            .iter()
+            .find(|r| r.items.iter().any(|i| i.text == synth::jis16_message(0)))
+            .expect("a primeira mensagem foi pedida");
+        let charset = request.charset.as_deref().expect("lista de caracteres");
+        assert!(charset.len() < 100 && charset.contains('a') && !charset.contains('あ'));
+        // 27 unidades: 26 letras e a quebra de linha, que o modelo conta como
+        // os 6 caracteres de "[FF01]".
+        let item = request
+            .items
+            .iter()
+            .find(|i| i.text == synth::jis16_message(0))
+            .unwrap();
+        assert_eq!(item.max_chars, Some(26 + 6));
+        // O texto de 8 bits do cartucho nao vai pra IA.
+        assert!(!requests
+            .iter()
+            .flat_map(|r| r.items.iter())
+            .any(|i| i.text == "WELCOME TO THE VILLAGE!"));
+    }
+}

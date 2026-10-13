@@ -241,6 +241,7 @@ impl GameAdapter for SnesAdapter {
             entries,
             discarded: outcome.discarded,
             truncated: outcome.truncated,
+            ..Extraction::default()
         })
     }
 

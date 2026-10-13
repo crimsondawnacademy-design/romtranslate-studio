@@ -16,6 +16,9 @@
 //! um bloco (os literais do stream) e descartada. Na volta o bloco e
 //! recomprimido: fica no lugar se couber, vai pro fim do ROM se tiver
 //! ponteiro em tabela, e fica como no original se nao tiver nenhum dos dois.
+//!
+//! Japones: Shift-JIS e lido ao lado do ASCII, e o texto em codigos de 16
+//! bits na ordem do JIS (`crate::kuten`) entra com a tabela dele gerada.
 
 use std::collections::HashSet;
 
@@ -27,7 +30,9 @@ use super::pointers::{
 use crate::adapter::{AppliedImage, Extraction, GameAdapter, GameInput, VerificationReport};
 use crate::error::{CoreError, Result};
 use crate::scan::{keep_text, scan_bytes, ScanConfig, ScanEncoding, MAX_ENTRIES};
-use crate::types::{AdapterCapabilities, Platform, ProbeResult, SupportLevel, TextEntry};
+use crate::types::{
+    AdapterCapabilities, Platform, ProbeResult, SupportLevel, TextEntry, TranslationStatus,
+};
 
 pub struct GbaAdapter;
 
@@ -114,12 +119,30 @@ fn extract_capped(data: &[u8], cap: usize) -> Result<Extraction> {
         entries.push(e);
     }
 
+    // Texto japones em codigos de 16 bits: e o texto do jogo, vai na frente
+    // (o teto corta o fim) e nenhuma outra leitura fica com os bytes dele.
+    let mut tables = Vec::new();
+    if let Some(found) = crate::kuten::extract(data) {
+        discarded += packed::drop_overlapping(&mut entries, &found.spans);
+        // Num jogo que guarda o texto assim, o que o scanner de 8 bits le e
+        // quase tudo dado: sem ponteiro em tabela, sai da fila de traducao
+        // (com desfazer por entry). No jogo medido em 13/10/2026 eram 6.396
+        // strings ASCII, 386 delas vizinhas do texto e por isso fora do
+        // alcance de `stray_ids`; na amostra conferida nenhuma era fala.
+        for e in entries.iter_mut().filter(|e| e.pointers().is_empty()) {
+            e.status = TranslationStatus::Internal;
+        }
+        entries.splice(0..0, found.entries);
+        tables.push((crate::kuten::TABLE_ID.to_string(), found.table));
+    }
+
     let truncated = entries.len() > cap || packed.truncated;
     entries.truncate(cap);
     Ok(Extraction {
         entries,
         discarded,
         truncated,
+        tables,
     })
 }
 

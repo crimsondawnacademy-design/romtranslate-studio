@@ -90,6 +90,8 @@ export default function ProjectView({
     stray: number;
     /** Das salvas, quantas estavam dentro de blocos comprimidos. */
     packed: number;
+    /** Das salvas, quantas sao japones em codigos de 16 bits (tabela gerada). */
+    jis16: number;
     structured: boolean;
   } | null>(null);
   const [encoding, setEncoding] = useState<ScanEncoding>("ascii");
@@ -239,6 +241,7 @@ export default function ProjectView({
         removed: 0,
         stray: 0,
         packed: 0,
+        jis16: 0,
         structured: false,
       });
       await reloadEntries();
@@ -311,6 +314,7 @@ export default function ProjectView({
         removed: outcome.removed,
         stray: outcome.stray,
         packed: outcome.packed,
+        jis16: outcome.jis16,
         structured: true,
       });
       await reloadEntries();
@@ -681,6 +685,9 @@ export default function ProjectView({
   const pending = entries.filter((e) => !e.translatedText && e.status !== "internal").length;
   const hasAscii = entries.some((e) => e.encoding === "ascii");
   const hasJapanese = entries.some((e) => e.encoding === "shift_jis");
+  const hasJis16 = entries.some(
+    (e) => typeof e.encoding === "object" && e.encoding.table === "jis16",
+  );
 
   return (
     <section className="card">
@@ -876,6 +883,9 @@ export default function ProjectView({
       )}
       {scanInfo && scanInfo.packed > 0 && (
         <p className="hint left">{t("extract.packed", { n: scanInfo.packed })}</p>
+      )}
+      {scanInfo && scanInfo.jis16 > 0 && (
+        <p className="hint left">{t("extract.jis16", { n: scanInfo.jis16 })}</p>
       )}
       {savedPath && <div className="ok">{t("export.saved", { path: savedPath })}</div>}
 
@@ -1224,6 +1234,7 @@ export default function ProjectView({
           )}
           {hasAscii && <p className="hint left">{t("translate.ascii")}</p>}
           {hasJapanese && <p className="hint left">{t("translate.japanese")}</p>}
+          {hasJis16 && <p className="hint left">{t("translate.jis16")}</p>}
           {internal > 0 && <p className="hint left">{t("translate.internal", { n: internal })}</p>}
           {settings.provider !== "ollama" && (
             <label className="checkline">

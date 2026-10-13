@@ -80,13 +80,15 @@ pub fn encode(text: &str) -> Result<Vec<u8>, char> {
 }
 
 /// Hiragana ou katakana de largura inteira: a marca mais forte de que uma
-/// sequencia e texto japones, e nao dado que por acaso forma kanji.
+/// sequencia e texto japones, e nao dado que por acaso forma kanji. So as
+/// silabas: as marcas soltas dos dois blocos (゛ ゜ ゝ ゞ ・ ー ヽ ヾ) sao
+/// sinais, e dado binario forma "、セ゛" e "・゛" o tempo todo.
 pub fn is_kana(c: char) -> bool {
-    matches!(c, '\u{3041}'..='\u{309F}' | '\u{30A1}'..='\u{30FF}')
+    matches!(c, '\u{3041}'..='\u{3096}' | '\u{30A1}'..='\u{30FA}')
 }
 
 pub fn is_hiragana(c: char) -> bool {
-    matches!(c, '\u{3041}'..='\u{309F}')
+    matches!(c, '\u{3041}'..='\u{3096}')
 }
 
 pub fn is_kanji(c: char) -> bool {
@@ -100,9 +102,16 @@ pub fn is_rare_kanji(lead: u8, trail: u8) -> bool {
     (lead, trail) >= (0x98, 0x9F)
 }
 
-/// Pontuacao japonesa e as formas de largura inteira do ASCII.
+/// Pontuacao japonesa, as marcas soltas dos blocos de kana (o traco de vogal
+/// longa entre elas) e as formas de largura inteira do ASCII.
 fn is_wide_sign(c: char) -> bool {
-    matches!(c, '\u{3000}'..='\u{303F}' | '\u{FF01}'..='\u{FF5E}')
+    matches!(
+        c,
+        '\u{3000}'..='\u{303F}'
+            | '\u{3099}'..='\u{309F}'
+            | '\u{30FB}'..='\u{30FF}'
+            | '\u{FF01}'..='\u{FF5E}'
+    )
 }
 
 /// O que uma sequencia tem de cada tipo de caractere, contado sem guardar o
@@ -121,6 +130,9 @@ pub struct Script {
     plain: usize,
     /// Caracteres iguais ao anterior.
     repeats: usize,
+    /// Caracteres vizinhos do anterior na tabela (o codigo seguinte ou o
+    /// de antes).
+    steps: usize,
     /// Kanji do nivel 2 do JIS, quando quem conta leu os bytes.
     rare: usize,
     last: Option<char>,
@@ -133,6 +145,10 @@ impl Script {
     pub fn push(&mut self, c: char) {
         self.chars += 1;
         self.repeats += usize::from(self.last == Some(c));
+        self.steps += usize::from(
+            self.last
+                .is_some_and(|last| (last as u32).abs_diff(c as u32) == 1),
+        );
         self.last = Some(c);
         if is_kana(c) {
             self.kana += 1;
@@ -192,6 +208,7 @@ impl Script {
                 && self.kana * 4 >= script
                 && script * 3 >= n
                 && self.repeats * 2 <= n
+                && self.steps * 2 <= n
                 && self.rare * 4 <= self.kanji
                 && odd * 10 <= n
                 && (odd == 0 || n >= 10)
@@ -214,7 +231,11 @@ impl Script {
 ///   japonesa em pelo menos um terco da string; 3+ kana, ou entao nada alem
 ///   de escrita japonesa, pontuacao dela e espaco; no maximo metade dos
 ///   caracteres repetindo o anterior (mapa de tiles de 16 bits vira "ァァァァ"
-///   por milhares de caracteres); no maximo um quarto dos kanji no nivel 2
+///   por milhares de caracteres), e no maximo metade sendo o vizinho do
+///   anterior na tabela (uma tabela de valores em sequencia vira
+///   "ァアィイゥウェエ": num RPG japones de GBA de 32 MiB eram quase todas as
+///   303 sequencias que passavam, contra 5 frases de verdade); no maximo um
+///   quarto dos kanji no nivel 2
 ///   do JIS (os raros, metade da tabela: so quem le os bytes confere isto);
 ///   e quase nada do que a tabela tem e jogo
 ///   nao usa (katakana de meia largura, grego, cirilico, simbolo ASCII
@@ -306,10 +327,25 @@ mod tests {
             "あ",
             "亜あ",
             "ぁ#$%&'()",
+            // O que ruido e dado em sequencia formam (medido em 13/10/2026).
+            "あAB",
+            "ABCDEFGHあい",
+            "頃パ錫パｽ",
+            "Z4ぱぽ0潟",
+            "}qヤプ",
+            "ァァァァァァブァァァァァァシジァァァァァァ",
+            "ァアィイゥウェエォオカガキクグケゲコゴ",
+            "ミマポボホペベヘプブフピビヒパバハノネヌ",
+            "、セ゛",
         ] {
             assert_eq!(looks_japanese(text), Some(false), "{text}");
         }
         assert_eq!(looks_japanese("NEW GAME"), None);
+        // So marcas soltas: nao ha silaba nenhuma, quem julga e a regra geral.
+        for marks in ["ーー", "・゛"] {
+            assert_eq!(looks_japanese(marks), None, "{marks}");
+            assert!(!crate::scan::looks_like_text(marks), "{marks}");
+        }
         // "亜" abre o nivel 1 (0x889F) e "弌" o nivel 2 (0x989F).
         assert_eq!(
             encode("亜腕弌").unwrap(),

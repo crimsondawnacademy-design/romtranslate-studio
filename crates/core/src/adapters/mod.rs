@@ -63,6 +63,9 @@ pub struct ExtractOutcome {
     pub stray: usize,
     /// Das salvas, quantas estavam dentro de blocos comprimidos.
     pub packed: usize,
+    /// Das salvas, quantas sao texto japones em codigos de 16 bits, lido pela
+    /// tabela que a extracao montou (`kuten`).
+    pub jis16: usize,
 }
 
 /// Extracao estruturada do arquivo de origem de um projeto, gravada no banco.
@@ -77,6 +80,10 @@ pub fn extract_project(project_dir: &Path) -> Result<ExtractOutcome> {
     // mmap: DVD de PS2 (>2 GiB) extrai sem carregar o arquivo em RAM.
     let data = crate::fileio::read_view(&game.source_path)?;
     let extraction = adapter.extract(&data)?;
+    for (id, text) in &extraction.tables {
+        crate::tbl::ensure_table(project_dir, id, text)?;
+    }
+    let jis16 = crate::types::TextEncoding::Table(crate::kuten::TABLE_ID.to_string());
     let mut db = ProjectDb::open(project_dir)?;
     let saved = db.upsert_entries(&extraction.entries)?;
     let removed = db.remove_stale_junk(&extraction.entries)?;
@@ -91,6 +98,11 @@ pub fn extract_project(project_dir: &Path) -> Result<ExtractOutcome> {
             .entries
             .iter()
             .filter(|e| packed::is_packed(e))
+            .count(),
+        jis16: extraction
+            .entries
+            .iter()
+            .filter(|e| e.encoding == jis16)
             .count(),
     })
 }

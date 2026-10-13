@@ -343,8 +343,14 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             let outcome = extract_project(&project)?;
             let mut text = format!(
                 "gravadas: {}, descartadas (nao parecem texto): {}, removidas do projeto antigo: {}, \
-                 fora das regioes de texto (ficam fora da traducao): {}, de blocos comprimidos: {}",
-                outcome.saved, outcome.discarded, outcome.removed, outcome.stray, outcome.packed
+                 fora das regioes de texto (ficam fora da traducao): {}, de blocos comprimidos: {}, \
+                 em japones de 16 bits (tabela gerada): {}",
+                outcome.saved,
+                outcome.discarded,
+                outcome.removed,
+                outcome.stray,
+                outcome.packed,
+                outcome.jis16
             );
             if outcome.truncated {
                 text.push_str("\ncortou no teto: pode haver mais texto");

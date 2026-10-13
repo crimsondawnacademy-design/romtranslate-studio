@@ -17,6 +17,18 @@ use crate::types::{TextEncoding, TextEntry};
 
 /// Subdiretorio do projeto com as tabelas de caracteres dele.
 pub const TABLES_DIR: &str = "tables";
+/// Acima disto a lista de caracteres da tabela nao vai inteira pro prompt.
+const PROMPT_CHARSET_MAX: usize = 400;
+
+/// A forma de largura inteira de um caractere ASCII imprimivel: "a" -> "ａ",
+/// "!" -> "！" (o bloco U+FF01..U+FF5E e o ASCII deslocado). O espaco nao
+/// entra: cada tabela tem o dela.
+fn wide_form(ch: char) -> Option<char> {
+    ('!'..='~')
+        .contains(&ch)
+        .then(|| char::from_u32(ch as u32 + 0xFEE0))
+        .flatten()
+}
 
 #[derive(Debug, Clone)]
 pub struct TblTable {
@@ -96,30 +108,50 @@ impl TblTable {
     // existem (sem "c"), "abc" da erro mesmo cabendo como "a"+"bc". Tabela
     // real traz os caracteres avulsos; programacao dinamica se aparecer uma
     // que nao traga.
+    ///
+    /// Tabela japonesa nao tem a letra "a": tem "ａ", a de largura inteira.
+    /// O caractere ASCII que falta e gravado nessa forma (`wide_form`), e e
+    /// assim que ele sera lido de volta.
     pub fn encode(&self, text: &str) -> Result<Vec<u8>> {
         let mut out = Vec::new();
+        // O texto como a tabela vai le-lo de volta.
+        let mut written = String::with_capacity(text.len());
         let mut rest = text;
-        while !rest.is_empty() {
-            let Some((end, bytes)) = self.longest_text(rest) else {
-                let ch = rest.chars().next().unwrap_or_default();
+        while let Some(ch) = rest.chars().next() {
+            if let Some((end, bytes)) = self.longest_text(rest) {
+                out.extend_from_slice(bytes);
+                written.push_str(&rest[..end]);
+                rest = &rest[end..];
+                continue;
+            }
+            let wide =
+                wide_form(ch).and_then(|w| Some((w, self.reverse.get(w.to_string().as_str())?)));
+            let Some((wide, bytes)) = wide else {
                 let position = text[..text.len() - rest.len()].chars().count() + 1;
                 return Err(CoreError::Tbl(format!(
                     "o caractere {ch:?} (posicao {position}) nao existe na tabela"
                 )));
             };
             out.extend_from_slice(bytes);
-            rest = &rest[end..];
+            written.push(wide);
+            rest = &rest[ch.len_utf8()..];
         }
         // Chave de 2+ bytes que comeca por outra chave: os bytes certos, lado
         // a lado, podem ser lidos como outro texto.
         let read_back = self.decode(&out);
-        if read_back.as_deref() != Some(text) {
+        if read_back.as_deref() != Some(written.as_str()) {
             return Err(CoreError::Tbl(format!(
-                "tabela ambigua: \"{text}\" gravado seria lido de volta como \"{}\"",
+                "tabela ambigua: \"{written}\" gravado seria lido de volta como \"{}\"",
                 read_back.unwrap_or_default()
             )));
         }
         Ok(out)
+    }
+
+    /// A tabela escreve `ch`, como ele e ou na forma de largura inteira.
+    fn writes(&self, ch: char) -> bool {
+        let has = |c: char| self.reverse.contains_key(c.to_string().as_str());
+        has(ch) || wide_form(ch).is_some_and(has)
     }
 
     /// A maior entrada da tabela no comeco de `rest`: onde ela termina e os
@@ -142,6 +174,12 @@ impl TblTable {
     /// vai pro prompt de traducao. Entrada de varios caracteres ("[FIM]",
     /// "th") fica de fora: codigo de controle o tradutor copia do original,
     /// e dupla de letras e so compressao.
+    ///
+    /// Tabela com mais de `PROMPT_CHARSET_MAX` caracteres (a japonesa
+    /// inteira tem quase 7 mil) nao cabe num prompt: ai a lista e o ASCII
+    /// imprimivel que ela escreve, como ele e ou em largura inteira.
+    // ponytail: vale pra traduzir pra idioma de alfabeto latino. Traducao
+    // PRA japones com uma tabela dessas ficaria sem os kana na lista.
     pub fn charset(&self) -> String {
         let mut chars: Vec<char> = self
             .reverse
@@ -151,6 +189,9 @@ impl TblTable {
                 chars.next().filter(|_| chars.next().is_none())
             })
             .collect();
+        if chars.len() > PROMPT_CHARSET_MAX {
+            return (' '..='~').filter(|c| self.writes(*c)).collect();
+        }
         chars.sort_unstable();
         chars.into_iter().collect()
     }
@@ -208,11 +249,14 @@ impl TblTable {
                 rest = &rest[end..];
                 continue;
             }
-            let plain = plain_equivalent(ch).filter(|plain| {
-                plain
-                    .chars()
-                    .all(|c| self.reverse.contains_key(c.to_string().as_str()))
-            });
+            // Caractere que so existe em largura inteira fica como veio: e
+            // `encode` que o grava nessa forma.
+            if self.writes(ch) {
+                out.push(ch);
+                rest = &rest[ch.len_utf8()..];
+                continue;
+            }
+            let plain = plain_equivalent(ch).filter(|plain| plain.chars().all(|c| self.writes(c)));
             match plain {
                 Some(plain) => out.push_str(&plain),
                 None => out.push(ch),
@@ -354,6 +398,20 @@ pub fn adopt_table(project_dir: &Path, source: &Path) -> Result<PathBuf> {
         Err(e) => return Err(CoreError::io(&dest, e)),
     }
     Ok(dest)
+}
+
+/// Grava a tabela `id` no projeto se ele ainda nao tem uma com esse nome: e
+/// a tabela que a extracao montou sozinha. A que ja existe fica como esta —
+/// pode ter sido completada a mao.
+pub fn ensure_table(project_dir: &Path, id: &str, text: &str) -> Result<()> {
+    let dir = project_dir.join(TABLES_DIR);
+    let dest = dir.join(format!("{id}.tbl"));
+    if dest.exists() {
+        return Ok(());
+    }
+    TblTable::parse(text)?;
+    fs::create_dir_all(&dir).map_err(|e| CoreError::io(&dir, e))?;
+    fs::write(&dest, text).map_err(|e| CoreError::io(&dest, e))
 }
 
 /// O que se grava no lugar de um caractere que a fonte do jogo nao tem,

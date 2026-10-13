@@ -232,6 +232,36 @@ opção `shift_jis`, que lê tudo sem filtrar. **Nenhum jogo japonês real passo
 por isto.** Jogo de cartucho que usa tabela de caracteres própria (quase todo
 NES e SNES) continua pedindo a tabela.
 
+**Jogo em japonês com códigos de 16 bits (ordem JIS)**: nem todo jogo
+japonês usa Shift-JIS. O primeiro jogo japonês real medido (um RPG de Game
+Boy Advance de 32 MiB, em 13/10/2026, só em contagens) guarda as falas em
+códigos de 16 bits que são a posição do caractere na tabela JIS X 0208
+(`(linha - 1) * 94 + (coluna - 1)`, em little-endian), com os comandos do
+jogo de `0xFF00` para cima, `0xFFFF` fechando a mensagem e um código próprio
+fazendo o papel do espaço entre palavras. O scanner Shift-JIS acha nele 5
+frases, todas mensagens de erro dos programadores. A extração do Game Boy
+Advance agora reconhece esse formato sozinha (`crates/core/src/kuten.rs`):
+se o arquivo tem pelo menos 100 frases lidas assim, ela extrai as mensagens
+inteiras (os comandos do meio viram `[FFxx]` no texto, e a tradução tem que
+mantê-los), descobre o código do espaço (o código fora da tabela que mais
+aparece entre dois kana) e grava no projeto a tabela `tables/jis16.tbl`,
+por onde a validação, a tradução e a reinserção passam como em qualquer
+texto de tabela. No jogo medido: 11.483 mensagens na fila (862 KiB de
+texto), 878 sequências fora das regiões de texto e 6.593 strings de 8 bits
+(ASCII e Shift-JIS) tiradas da fila, porque num jogo assim o que o scanner
+de 8 bits lê é quase tudo dado. No jogo ocidental de GBA e em ruído, nada é
+reconhecido. **Gravar de volta** é onde aperta: a tabela japonesa não tem a
+letra "a", tem a de largura inteira "ａ", então cada letra da tradução
+ocupa 2 bytes e é gravada nessa forma (`TblTable::encode`), sem acento; e
+como a frase não muda de lugar, a tradução pode ter no máximo o mesmo número
+de letras que o original tem de caracteres, o que do japonês para o
+português quase nunca basta. No texto do próprio jogo aparecem 25 das 26
+maiúsculas de largura inteira e só 13 das 26 minúsculas: não há prova de que
+a fonte do jogo tenha todas. **Ninguém viu uma tradução gravada assim rodando
+num emulador.** O que falta para esse jogo virar jogável em português é o
+que falta em geral: frase que muda de lugar (tabela de ponteiros relativos)
+e fonte (letra estreita e acentuada).
+
 **Texto ASCII traduzido para idioma com acento**: num jogo que guarda o
 texto em ASCII (é o que a extração estruturada lê; no DS, também UTF-16),
 letra acentuada não existe. O lote de strings ASCII vai para a IA com a lista

@@ -104,6 +104,7 @@ impl GameAdapter for NesAdapter {
             entries,
             discarded: outcome.discarded,
             truncated: outcome.truncated,
+            ..Extraction::default()
         })
     }
 

@@ -1721,3 +1721,38 @@ onde a densidade não separa nada); DS; os scanners UTF-16, Shift-JIS cru e de
 tabela, que ainda montam a lista inteira. Rótulo curto e esparso dentro de
 código de executável é descartado junto. Calibrado em ruído, não em disco de
 jogo real.
+
+
+## 2026-10-13 — Japonês de 16 bits na ordem JIS: tabela gerada, não encoding novo
+
+**Contexto:** o primeiro jogo japonês real medido (RPG de GBA, 32 MiB) não usa
+Shift-JIS. As falas são códigos de 16 bits = posição do caractere na tabela
+JIS X 0208, com comandos do jogo de `0xFF00` pra cima e um código próprio
+como espaço. O Shift-JIS da v0.1.6 lê dele 5 mensagens de erro de programador.
+
+**Decisão:**
+- **Vira texto de TABELA, com o `.tbl` gerado** (`kuten::table_text`), e não
+  um `TextEncoding` novo. Validação, lista de caracteres do prompt, teto por
+  frase e reinserção já existiam pra tabela; e o usuário pode completar o
+  arquivo à mão (caractere próprio do jogo num buraco da tabela).
+- **Leitor próprio, alinhado em 2 bytes** (`kuten::extract`), não o scanner
+  de tabela: lido byte a byte, o `0xFF` de um comando casa com o byte seguinte
+  e desalinha a mensagem inteira em kanji.
+- **Mensagem inteira por entry.** Comando no meio vira `[FFxx]`, que a
+  validação já trata como marcador a preservar; os das pontas ficam de fora.
+  A IA traduz a fala, não pedaços de linha.
+- **O espaço é descoberto:** o código fora da tabela que mais aparece entre
+  dois kana (100+ vezes).
+- **Só vale com 100+ frases**, e aí o que o scanner de 8 bits leu sem ponteiro
+  em tabela sai da fila: num jogo assim é quase tudo dado.
+- **Letra em largura inteira na gravação por tabela** (`wide_form`): a tabela
+  japonesa não tem "a", tem "ａ". Vale pra qualquer `.tbl`, não só este.
+
+**O que NÃO foi provado:** ninguém viu uma tradução gravada assim rodando.
+Uma letra custa 2 bytes e a frase não muda de lugar, então a tradução tem que
+ter o número de letras do original. Só a base 0 em little-endian, e só o GBA.
+Comando com parâmetro pode deixar o parâmetro aparecer como caractere.
+
+**Lição:** "jogo japonês" não é um formato. Antes de escrever leitor, medir
+num jogo real: uma busca estatística de 16 bits achou em minutos o que a
+suposição (Shift-JIS) não acharia nunca.

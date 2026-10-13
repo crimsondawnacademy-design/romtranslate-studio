@@ -108,6 +108,8 @@ export interface ExtractOutcome {
   stray: number;
   /** Das salvas, quantas estavam dentro de blocos comprimidos. */
   packed: number;
+  /** Das salvas, quantas sao japones em codigos de 16 bits, lido por tabela gerada. */
+  jis16: number;
 }
 
 export interface OpenProjectReport {

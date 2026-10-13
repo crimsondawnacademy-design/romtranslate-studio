@@ -161,7 +161,7 @@
     get_settings: () => ({ settings, apiKeySet: false, anthropicKeySet: true }),
     save_settings: ({ newSettings }) => ((settings = newSettings), { settings, apiKeySet: false, anthropicKeySet: true }),
     scan_project: () => ({ entries, truncated: false, scannedBytes: project.sourceSize, discarded: 212, tblPath: null }),
-    extract_structured: () => ({ saved: entries.length, discarded: 18, truncated: false, removed: 0, stray: 0, packed: 0 }),
+    extract_structured: () => ({ saved: entries.length, discarded: 18, truncated: false, removed: 0, stray: 0, packed: 0, jis16: 0 }),
     xray_project: () => ({
       size: project.sourceSize,
       denseBytes: 2600000,

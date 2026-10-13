@@ -865,6 +865,90 @@ pub fn make_ps2_iso_japanese() -> Vec<u8> {
     )
 }
 
+/// Quem faz e o que faz, nas mensagens (inventadas) de `make_gba_rom_jis16`:
+/// cada mensagem e um sujeito, uma quebra de linha e um predicado.
+pub const JIS16_SUBJECTS: [&str; 12] = [
+    "むらの ひとは",
+    "たびびとは",
+    "こどもたちは",
+    "としよりは",
+    "みせの おやじは",
+    "となりの ねこは",
+    "ふねの せんちょうは",
+    "もりの きこりは",
+    "やまの かりうどは",
+    "まちの パンやは",
+    "みなとの りょうしは",
+    "おかの ひつじかいは",
+];
+pub const JIS16_PREDICATES: [&str; 10] = [
+    "きょうも げんきに はたらいている。",
+    "あさから うたを うたっている。",
+    "まだ ねむそうに している。",
+    "あたらしい はしを つくっている。",
+    "とおくの うみを ながめている。",
+    "おおきな こえで わらっている。",
+    "しずかに ほんを よんでいる。",
+    "たのしそうに おどっている。",
+    "ゆっくり さんぽを している。",
+    "おいしい スープを つくっている。",
+];
+/// Nomes curtos da tabela de itens de `make_gba_rom_jis16`.
+pub const JIS16_NAMES: [&str; 4] = ["リンゴ", "パン", "くすり", "ランプ"];
+/// O codigo que o cartucho usa como espaco entre palavras (fora do JIS).
+pub const JIS16_SPACE: u16 = 0x00AC;
+/// Onde comeca o roteiro de `make_gba_rom_jis16`.
+pub const JIS16_SCRIPT_AT: usize = 0x2000;
+
+/// A mensagem `i` de `make_gba_rom_jis16`, como a extracao a le: o losango,
+/// o sujeito, a quebra de linha (`[FF01]`) e o predicado.
+pub fn jis16_message(i: usize) -> String {
+    format!(
+        "◆{}[FF01]{}",
+        JIS16_SUBJECTS[i / JIS16_PREDICATES.len()],
+        JIS16_PREDICATES[i % JIS16_PREDICATES.len()]
+    )
+}
+
+/// GBA de 64 KiB com o texto em codigos de 16 bits na ordem do JIS
+/// (`crate::kuten`): em 0x1000 os nomes de `JIS16_NAMES`, cada um fechado
+/// por 0xFFFF; em `JIS16_SCRIPT_AT` as 120 mensagens de `jis16_message`,
+/// cada uma seguida de 0xFF03 0xFF00 (espera o botao) e 0xFFFF. O espaco
+/// entre palavras e `JIS16_SPACE`. O ASCII de `make_gba_rom` continua la.
+pub fn make_gba_rom_jis16() -> Vec<u8> {
+    let mut rom = make_gba_rom("JIS16");
+    rom.resize(64 * 1024, 0);
+    let units = |text: &str| -> Vec<u16> {
+        text.chars()
+            .map(|c| match c {
+                ' ' => JIS16_SPACE,
+                c => crate::kuten::encode(c).expect("caractere da fixture existe no JIS"),
+            })
+            .collect()
+    };
+    let bytes = |codes: &[u16]| -> Vec<u8> { codes.iter().flat_map(|c| c.to_le_bytes()).collect() };
+
+    let mut names = vec![0xFFFF];
+    for name in JIS16_NAMES {
+        names.extend(units(name));
+        names.push(0xFFFF);
+    }
+    plant(&mut rom, 0x1000, &bytes(&names));
+
+    let mut script = Vec::new();
+    for subject in JIS16_SUBJECTS {
+        for predicate in JIS16_PREDICATES {
+            script.push(crate::kuten::encode('◆').expect("losango"));
+            script.extend(units(subject));
+            script.push(0xFF01);
+            script.extend(units(predicate));
+            script.extend([0xFF03, 0xFF00, 0xFFFF]);
+        }
+    }
+    plant(&mut rom, JIS16_SCRIPT_AT, &bytes(&script));
+    rom
+}
+
 /// Texto de verdade do `make_gba_rom_with_junk`, na ordem em que aparece.
 pub const JUNK_ROM_PHRASES: [&str; 3] = [
     "The old bridge is out. Take the forest road.",

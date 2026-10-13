@@ -114,6 +114,10 @@ pub struct Extraction {
     pub discarded: usize,
     /// A varredura parou num teto (`scan::MAX_ENTRIES`): pode haver mais texto.
     pub truncated: bool,
+    /// Tabelas de caracteres que a extracao montou sozinha, (id, conteudo do
+    /// `.tbl`): as entries de encoding `Table(id)` sao lidas e regravadas por
+    /// elas. Quem tem o projeto as grava em `tables/` (`tbl::ensure_table`).
+    pub tables: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, Serialize)]

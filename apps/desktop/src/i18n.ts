@@ -165,10 +165,14 @@ const messages = {
       "{n} strings estão fora das regiões de texto do jogo e saíram da fila de tradução (a tradução automática que alguma tinha foi descartada, para não ser gravada por cima de dado do jogo). Elas aparecem no filtro “nomes internos”.",
     "extract.packed":
       "{n} frases estavam dentro de blocos comprimidos (LZ77). A tradução de cada uma precisa caber no espaço da original; na reinserção o bloco é recomprimido.",
+    "extract.jis16":
+      "{n} frases estão em japonês, em códigos de 16 bits na ordem da tabela japonesa padrão (JIS). O app montou a tabela de letras sozinho e guardou no projeto (tables/jis16.tbl). O que o scanner comum leu neste jogo saiu da fila de tradução: num jogo assim é quase tudo dado, e aparece no filtro “nomes internos”.",
     "translate.ascii":
       "Texto ASCII não tem letra acentuada: a IA é avisada disso e, se mesmo assim responder com acento ou com aspas e travessão tipográficos, o app grava a letra sem acento e o sinal simples, com um aviso na frase. O que não tem equivalente bloqueia a reinserção e a frase diz qual caractere é.",
     "translate.japanese":
       "Texto em japonês (Shift-JIS): a tradução é gravada com as letras comuns, sem acento, porque a tabela japonesa não tem letra acentuada. Japonês diz muito em poucos bytes, então a frase que não pode mudar de lugar precisa caber no espaço da original, e a IA já recebe esse limite. Palavra escrita só em kanji, sem kana, ainda não é lida.",
+    "translate.jis16":
+      "Japonês em códigos de 16 bits: cada letra da tradução ocupa o espaço de um caractere japonês (2 bytes) e é gravada na forma larga que a tabela japonesa tem, sem acento. A frase precisa caber no espaço da original, então a tradução pode ter no máximo o mesmo número de letras, e a IA recebe esse limite. Os códigos entre colchetes, como [FF01], são comandos do jogo (quebra de linha, pausa): a tradução tem que mantê-los.",
     "glossary.title": "Glossário",
     "glossary.term": "Termo",
     "glossary.translation": "Tradução",
@@ -424,10 +428,14 @@ const messages = {
       "{n} strings are outside the game's text regions and left the translation queue (any machine translation they had was discarded, so it is not written over game data). They show up under the “internal names” filter.",
     "extract.packed":
       "{n} lines were inside compressed blocks (LZ77). Each translation must fit the space of its original; on reinsertion the block is compressed again.",
+    "extract.jis16":
+      "{n} lines are in Japanese, as 16-bit codes in the order of the standard Japanese table (JIS). The app built the letter table by itself and saved it in the project (tables/jis16.tbl). What the plain scanner read in this game left the translation queue: in a game like this it is almost all data, and it shows up under the “internal names” filter.",
     "translate.ascii":
       "ASCII text has no accented letters: the AI is told so and, if it still answers with an accent or with typographic quotes and dashes, the app writes the plain letter and the plain sign, with a warning on the string. Anything with no equivalent blocks reinsertion and the string says which character it is.",
     "translate.japanese":
       "Japanese text (Shift-JIS): the translation is written with plain letters, no accents, because the Japanese table has no accented letters. Japanese says a lot in few bytes, so a line that cannot move must fit the space of its original, and the AI is told that limit up front. A word written only in kanji, with no kana, is not read yet.",
+    "translate.jis16":
+      "Japanese in 16-bit codes: each letter of the translation takes the space of one Japanese character (2 bytes) and is written in the wide form the Japanese table has, without accents. A line must fit the space of its original, so the translation can have at most the same number of letters, and the AI is told that limit. Codes in brackets, like [FF01], are game commands (line break, pause): the translation must keep them.",
     "glossary.title": "Glossary",
     "glossary.term": "Term",
     "glossary.translation": "Translation",
