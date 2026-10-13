@@ -5,6 +5,7 @@ pub(crate) mod inplace;
 pub(crate) mod iso9660;
 pub mod nds;
 pub mod nes;
+pub(crate) mod packed;
 pub(crate) mod pointers;
 pub mod ps1;
 pub mod ps2;
@@ -60,6 +61,8 @@ pub struct ExtractOutcome {
     /// Entries fora das regioes de texto do arquivo, tiradas da traducao
     /// (`scan::stray_ids`): ficam como `Internal`, com desfazer por entry.
     pub stray: usize,
+    /// Das salvas, quantas estavam dentro de blocos comprimidos.
+    pub packed: usize,
 }
 
 /// Extracao estruturada do arquivo de origem de um projeto, gravada no banco.
@@ -84,5 +87,10 @@ pub fn extract_project(project_dir: &Path) -> Result<ExtractOutcome> {
         truncated: extraction.truncated,
         removed,
         stray,
+        packed: extraction
+            .entries
+            .iter()
+            .filter(|e| packed::is_packed(e))
+            .count(),
     })
 }

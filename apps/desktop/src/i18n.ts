@@ -163,6 +163,8 @@ const messages = {
     "translate.saved": "Configuração salva.",
     "extract.stray":
       "{n} strings estão fora das regiões de texto do jogo e saíram da fila de tradução (a tradução automática que alguma tinha foi descartada, para não ser gravada por cima de dado do jogo). Elas aparecem no filtro “nomes internos”.",
+    "extract.packed":
+      "{n} frases estavam dentro de blocos comprimidos (LZ77). A tradução de cada uma precisa caber no espaço da original; na reinserção o bloco é recomprimido.",
     "translate.ascii":
       "Texto ASCII não tem letra acentuada: a IA é avisada disso e, se mesmo assim responder com acento ou com aspas e travessão tipográficos, o app grava a letra sem acento e o sinal simples, com um aviso na frase. O que não tem equivalente bloqueia a reinserção e a frase diz qual caractere é.",
     "glossary.title": "Glossário",
@@ -206,7 +208,7 @@ const messages = {
     "xray.noEntries":
       "Nenhuma string extraída ainda. Rode a extração estruturada para ver quantas traduções podem passar do tamanho original.",
     "xray.lz77":
-      "Blocos comprimidos (LZ77): {blocks}, com {packed} guardando {unpacked}. Blocos com texto: {withText}, cerca de {strings} frases que nenhum scanner do app enxerga ainda.",
+      "Blocos comprimidos (LZ77): {blocks}, com {packed} guardando {unpacked}. Trechos com cara de texto dentro deles: cerca de {strings}, em {withText} blocos. No Game Boy Advance a extração estruturada lê os blocos que são mesmo texto; o resto costuma ser gráfico.",
     "xray.lz77None":
       "Nenhum bloco LZ77 (tipo 0x10, o do GBA e do DS) encontrado. Outros compressores não são detectados.",
     "xray.lz77Truncated": "A busca parou no teto de trabalho: pode haver mais blocos.",
@@ -242,6 +244,8 @@ const messages = {
       "Este arquivo é para o seu uso. Para compartilhar a tradução, exporte o patch: quem tem o jogo original aplica o patch e chega no mesmo arquivo.",
     "reinsert.applied": "{applied} traduções aplicadas · {kept} mantidas no original",
     "reinsert.relocated": "{n} realocadas, com os ponteiros atualizados",
+    "reinsert.packedLeftOut":
+      "{n} traduções de blocos comprimidos ficaram de fora: o bloco regravado ficou maior que o original e o jogo não tem tabela de ponteiros para ele mudar de lugar. Encurte o texto desses blocos e reinsira.",
     "reinsert.advanced": "Modo avançado: reinserir mesmo com erros de validação",
     "reinsert.advancedHint":
       "As entries marcadas com erro entram do jeito que estão — placeholder quebrado ou texto que não cabe pode corromper o jogo. Use só se souber o que está fazendo.",
@@ -416,6 +420,8 @@ const messages = {
     "translate.saved": "Settings saved.",
     "extract.stray":
       "{n} strings are outside the game's text regions and left the translation queue (any machine translation they had was discarded, so it is not written over game data). They show up under the “internal names” filter.",
+    "extract.packed":
+      "{n} lines were inside compressed blocks (LZ77). Each translation must fit the space of its original; on reinsertion the block is compressed again.",
     "translate.ascii":
       "ASCII text has no accented letters: the AI is told so and, if it still answers with an accent or with typographic quotes and dashes, the app writes the plain letter and the plain sign, with a warning on the string. Anything with no equivalent blocks reinsertion and the string says which character it is.",
     "glossary.title": "Glossary",
@@ -459,7 +465,7 @@ const messages = {
     "xray.noEntries":
       "No strings extracted yet. Run the structured extraction to see how many translations may outgrow the original.",
     "xray.lz77":
-      "Compressed blocks (LZ77): {blocks}, with {packed} holding {unpacked}. Blocks with text: {withText}, about {strings} lines no scanner in the app can see yet.",
+      "Compressed blocks (LZ77): {blocks}, with {packed} holding {unpacked}. Text-looking pieces inside them: about {strings}, in {withText} blocks. On Game Boy Advance the structured extraction reads the blocks that really are text; the rest is usually graphics.",
     "xray.lz77None":
       "No LZ77 block (type 0x10, the GBA and DS one) found. Other compressors are not detected.",
     "xray.lz77Truncated": "The search stopped at its work limit: there may be more blocks.",
@@ -495,6 +501,8 @@ const messages = {
       "This file is for your own use. To share the translation, export the patch: anyone who owns the original game applies it and gets the same file.",
     "reinsert.applied": "{applied} translations applied · {kept} kept original",
     "reinsert.relocated": "{n} relocated, with pointers updated",
+    "reinsert.packedLeftOut":
+      "{n} translations in compressed blocks were left out: the rewritten block came out larger than the original and the game has no pointer table that lets it move. Shorten the text in those blocks and reinsert.",
     "reinsert.advanced": "Advanced mode: reinsert even with validation errors",
     "reinsert.advancedHint":
       "Entries flagged with errors go in as-is — broken placeholders or oversized text may corrupt the game. Use only if you know what you are doing.",

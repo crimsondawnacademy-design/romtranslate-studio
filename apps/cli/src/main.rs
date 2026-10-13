@@ -343,8 +343,8 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             let outcome = extract_project(&project)?;
             let mut text = format!(
                 "gravadas: {}, descartadas (nao parecem texto): {}, removidas do projeto antigo: {}, \
-                 fora das regioes de texto (ficam fora da traducao): {}",
-                outcome.saved, outcome.discarded, outcome.removed, outcome.stray
+                 fora das regioes de texto (ficam fora da traducao): {}, de blocos comprimidos: {}",
+                outcome.saved, outcome.discarded, outcome.removed, outcome.stray, outcome.packed
             );
             if outcome.truncated {
                 text.push_str("\ncortou no teto: pode haver mais texto");
@@ -450,7 +450,7 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             load(&project)?;
             let outcome = reinsert_project_with(&project, policy)?;
             let mut text = format!(
-                "arquivo traduzido: {}\naplicadas: {} ({} em outro lugar, com o ponteiro reapontado), no original: {}, fora da extracao estruturada: {}\npuladas por erro: {}, gravadas com erro: {}\nverificacao: {}",
+                "arquivo traduzido: {}\naplicadas: {} ({} em outro lugar, com o ponteiro reapontado), no original: {}, fora da extracao estruturada: {}\npuladas por erro: {}, gravadas com erro: {}, de bloco comprimido que nao coube: {}\nverificacao: {}",
                 outcome.working_path.display(),
                 outcome.apply.applied,
                 outcome.apply.relocated,
@@ -458,6 +458,7 @@ fn run(cli: Cli) -> Result<Output, Failure> {
                 outcome.apply.ignored_generic,
                 outcome.skipped_errors,
                 outcome.forced_errors,
+                outcome.apply.packed_left_out,
                 if outcome.verification.ok { "ok" } else { "FALHOU" }
             );
             for problem in &outcome.verification.problems {

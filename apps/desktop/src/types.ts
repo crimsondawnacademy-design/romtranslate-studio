@@ -106,6 +106,8 @@ export interface ExtractOutcome {
   removed: number;
   /** Fora das regiões de texto do arquivo: tiradas da tradução. */
   stray: number;
+  /** Das salvas, quantas estavam dentro de blocos comprimidos. */
+  packed: number;
 }
 
 export interface OpenProjectReport {
@@ -252,6 +254,8 @@ export interface ApplyReport {
   keptOriginal: number;
   ignoredGeneric: number;
   relocated: number;
+  /** Traducoes de bloco comprimido que nao couberam: o bloco ficou como no original. */
+  packedLeftOut: number;
 }
 
 export interface VerificationReport {

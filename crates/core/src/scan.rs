@@ -343,7 +343,6 @@ pub fn keep_text(entries: &mut Vec<TextEntry>) -> usize {
 /// frases dentro das regioes). Sem isso devolve vazio: jogo pequeno ou com o
 /// texto espalhado fica como esta. E heuristica, calibrada num jogo so.
 pub fn stray_ids(entries: &[TextEntry]) -> Vec<String> {
-    const SENTENCE_CHARS: usize = 12;
     const BANK_SENTENCES: usize = 100;
 
     let candidates: Vec<(&TextEntry, u64)> = entries
@@ -363,12 +362,9 @@ pub fn stray_ids(entries: &[TextEntry]) -> Vec<String> {
         t if t >= 512 << 10 => 16 << 10,
         _ => 4 << 10,
     };
-    let is_sentence = |e: &TextEntry| {
-        e.source_text.chars().count() >= SENTENCE_CHARS && e.source_text.trim().contains(' ')
-    };
     let mut sentences: HashMap<u64, usize> = HashMap::new();
     for (entry, offset) in &candidates {
-        if is_sentence(entry) {
+        if is_sentence(&entry.source_text) {
             *sentences.entry(offset / block).or_default() += 1;
         }
     }
@@ -393,6 +389,13 @@ pub fn stray_ids(entries: &[TextEntry]) -> Vec<String> {
         .filter(|(entry, offset)| !near_text(offset / block) && entry.pointers().is_empty())
         .map(|(entry, _)| entry.id.clone())
         .collect()
+}
+
+const SENTENCE_CHARS: usize = 12;
+
+/// Tem cara de frase: 12+ caracteres, com espaco no meio.
+pub(crate) fn is_sentence(text: &str) -> bool {
+    text.chars().count() >= SENTENCE_CHARS && text.trim().contains(' ')
 }
 
 /// Run bruto achado por um scanner, relativo ao inicio da janela.

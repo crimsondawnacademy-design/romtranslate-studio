@@ -16,6 +16,12 @@ const WINDOW: usize = 4096;
 /// O tamanho mora em 24 bits: nenhum bloco passa de 16 MiB descomprimido —
 /// o proprio formato limita a "bomba" de um bloco.
 pub const MAX_UNPACKED: usize = 0x00FF_FFFF;
+/// Abaixo disto um "bloco" valido e coincidencia barata demais.
+pub const MIN_UNPACKED: usize = 32;
+pub const MIN_MATCHES: usize = 2;
+/// Teto de bytes descomprimidos numa varredura inteira, tentativas falhas
+/// inclusas: arquivo com milhares de headers falsos nao trava o app.
+pub const SCAN_BUDGET: usize = 256 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Unpacked {
@@ -88,44 +94,91 @@ pub fn unpack_within(src: &[u8], budget: &mut usize) -> Option<Unpacked> {
     })
 }
 
+/// Visita, em ordem de posicao, cada bloco valido de `data` (descomprime
+/// inteiro, `MIN_UNPACKED`+ bytes, `MIN_MATCHES`+ copias). Devolve `true` se
+/// parou por falta de `budget`: ha arquivo alem do que foi olhado.
+// ponytail: so offsets multiplos de 4 — o BIOS exige a origem alinhada
+// (GBATEK), e e o que derruba falso positivo. Bloco guardado desalinhado
+// dentro de um arquivo proprio do jogo passa batido. So o tipo 0x10; o 0x11
+// (LZ11, DS mais novo) entra quando houver fonte primaria e fixture.
+pub fn each_block(
+    data: &[u8],
+    budget: &mut usize,
+    mut visit: impl FnMut(usize, &Unpacked),
+) -> bool {
+    let mut at = 0;
+    while at + 4 <= data.len() {
+        if *budget == 0 {
+            return true;
+        }
+        let block = (data[at] == 0x10)
+            .then(|| unpack_within(&data[at..], budget))
+            .flatten()
+            .filter(|b| b.data.len() >= MIN_UNPACKED && b.matches >= MIN_MATCHES);
+        let Some(block) = block else {
+            at += 4;
+            continue;
+        };
+        visit(at, &block);
+        at += block.packed_len.next_multiple_of(4);
+    }
+    false
+}
+
 /// Comprime no mesmo formato. `None` se `data` nao cabe nos 24 bits do header.
+///
+/// Escolha otima das copias (programacao dinamica de tras pra frente: literal
+/// custa 9 bits, copia 17), nao gulosa: o resultado nunca e maior que o de um
+/// compressor guloso sobre os mesmos dados. E o que deixa um bloco do jogo,
+/// regravado com texto do mesmo tamanho, caber no espaco que ja ocupava.
 pub fn pack(data: &[u8]) -> Option<Vec<u8>> {
     if data.len() > MAX_UNPACKED {
         return None;
     }
-    let mut out = vec![
-        0x10,
-        data.len() as u8,
-        (data.len() >> 8) as u8,
-        (data.len() >> 16) as u8,
-    ];
+    let n = data.len();
+    let longest: Vec<(u8, u16)> = (0..n).map(|i| longest_match(data, i)).collect();
+    // cost[i] = bits pra codificar data[i..]; take[i] = bytes do bloco em i.
+    let mut cost = vec![0u32; n + 1];
+    let mut take = vec![1u8; n];
+    for i in (0..n).rev() {
+        cost[i] = cost[i + 1] + 9;
+        // Copia mais curta, na mesma distancia, tambem vale.
+        for len in MIN_MATCH..=longest[i].0 as usize {
+            if cost[i + len] + 17 < cost[i] {
+                cost[i] = cost[i + len] + 17;
+                take[i] = len as u8;
+            }
+        }
+    }
+    let mut out = vec![0x10, n as u8, (n >> 8) as u8, (n >> 16) as u8];
     let mut i = 0;
-    while i < data.len() {
+    while i < n {
         let flags_at = out.len();
         out.push(0);
         for bit in (0..8).rev() {
-            if i >= data.len() {
+            if i >= n {
                 break;
             }
-            let (len, dist) = longest_match(data, i);
+            let len = take[i] as usize;
             if len >= MIN_MATCH {
+                let disp = longest[i].1 as usize - 1;
                 out[flags_at] |= 1 << bit;
-                out.push((((len - MIN_MATCH) as u8) << 4) | ((dist - 1) >> 8) as u8);
-                out.push((dist - 1) as u8);
-                i += len;
+                out.push((((len - MIN_MATCH) as u8) << 4) | (disp >> 8) as u8);
+                out.push(disp as u8);
             } else {
                 out.push(data[i]);
-                i += 1;
             }
+            i += len;
         }
     }
     out.resize(out.len().next_multiple_of(4), 0);
     Some(out)
 }
 
-// ponytail: busca gulosa O(n * janela) — sobra pra fixture e bloco de texto;
-// trocar por hash-chain se um dia comprimir megabytes.
-fn longest_match(data: &[u8], at: usize) -> (usize, usize) {
+// ponytail: busca O(n * janela) em toda posicao — um bloco de texto de 64 KiB
+// sai em menos de um segundo; trocar por hash-chain se um dia comprimir
+// megabytes de uma vez.
+fn longest_match(data: &[u8], at: usize) -> (u8, u16) {
     let mut best = (0, 0);
     // dist >= 2: a variante do BIOS que escreve em VRAM nao le disp=0 (GBATEK).
     for dist in 2..=at.min(WINDOW) {
@@ -133,8 +186,11 @@ fn longest_match(data: &[u8], at: usize) -> (usize, usize) {
         while len < MAX_MATCH && at + len < data.len() && data[at + len - dist] == data[at + len] {
             len += 1;
         }
-        if len > best.0 {
-            best = (len, dist);
+        if len > best.0 as usize {
+            best = (len as u8, dist as u16);
+            if len == MAX_MATCH {
+                break;
+            }
         }
     }
     best
@@ -170,6 +226,35 @@ mod tests {
             assert_eq!(unpack(&packed).unwrap().data, input);
         }
         assert!(pack(&text).unwrap().len() < text.len() / 4);
+    }
+
+    #[test]
+    fn optimal_parse_beats_taking_the_longest_copy_first() {
+        // Em "bcdeXabcbcdeY" a copia mais longa a partir do "a" final (abc)
+        // impede a de 4 (bcde) logo depois: o guloso gasta 2 literais a mais.
+        let mut data = b"abc_bcde_".to_vec();
+        data.extend(b"abcde");
+        let packed = pack(&data).unwrap();
+        assert_eq!(unpack(&packed).unwrap().data, data);
+        // 9 literais + literal "a" + copia de 4: 10 + 2 + 2 bytes de flags.
+        assert_eq!(unpack(&packed).unwrap().packed_len, 4 + 14);
+    }
+
+    #[test]
+    fn each_block_finds_aligned_blocks_and_reports_the_budget() {
+        let script = b"The quick brown fox jumps over the lazy dog. ".repeat(40);
+        let block = pack(&script).unwrap();
+        let mut data = vec![0u8; 8];
+        data.extend(&block);
+        data.extend(&block);
+        let mut seen = Vec::new();
+        let mut budget = usize::MAX;
+        assert!(!each_block(&data, &mut budget, |at, b| seen.push((at, b.data.len()))));
+        assert_eq!(seen, [(8, script.len()), (8 + block.len(), script.len())]);
+        let mut short = script.len() + 10;
+        let mut count = 0;
+        assert!(each_block(&data, &mut short, |_, _| count += 1));
+        assert_eq!(count, 1);
     }
 
     #[test]

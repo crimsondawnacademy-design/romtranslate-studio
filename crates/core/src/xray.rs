@@ -23,12 +23,6 @@ const BLOCK: usize = 4096;
 // 6 e 7, dado comprimido ou cifrado acima de 7.5. 7.2 separa bem em fixture;
 // e o botao a girar se um jogo real cair na fronteira.
 pub const DENSE_BITS: f64 = 7.2;
-/// Abaixo disto um "bloco" valido e coincidencia barata demais.
-const MIN_UNPACKED: usize = 32;
-const MIN_MATCHES: usize = 2;
-/// Teto de bytes descomprimidos numa varredura inteira, tentativas falhas
-/// inclusas: arquivo com milhares de headers falsos nao trava o app.
-const UNPACK_BUDGET: usize = 256 * 1024 * 1024;
 const MAX_LISTED: usize = 50;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -80,7 +74,7 @@ pub fn xray(data: &[u8], entries: &[TextEntry]) -> XrayReport {
         size: data.len() as u64,
         dense_bytes,
         blank_bytes,
-        lz77: scan_lz77(data, UNPACK_BUDGET),
+        lz77: scan_lz77(data, lz77::SCAN_BUDGET),
         entries: entries.len(),
         relocatable: entries.iter().filter(|e| !e.pointers().is_empty()).count(),
     }
@@ -121,29 +115,12 @@ fn density(data: &[u8]) -> (u64, u64) {
     (dense, blank)
 }
 
-// ponytail: so offsets multiplos de 4 — o BIOS exige a origem alinhada
-// (GBATEK), e e o que derruba falso positivo. Bloco guardado desalinhado
-// dentro de um arquivo proprio do jogo passa batido. So o tipo 0x10; o 0x11
-// (LZ11, DS mais novo) entra quando houver fonte primaria e fixture.
 fn scan_lz77(data: &[u8], mut budget: usize) -> Lz77Summary {
     let mut summary = Lz77Summary::default();
-    let mut at = 0;
-    while at + 4 <= data.len() {
-        if budget == 0 {
-            summary.truncated = true;
-            break;
-        }
-        let block = (data[at] == 0x10)
-            .then(|| lz77::unpack_within(&data[at..], &mut budget))
-            .flatten()
-            .filter(|b| b.data.len() >= MIN_UNPACKED && b.matches >= MIN_MATCHES);
-        let Some(block) = block else {
-            at += 4;
-            continue;
-        };
-        // O mesmo que a extracao leria se o bloco nao estivesse comprimido:
-        // o minimo de caracteres padrao do scanner e a regra de texto dele.
-        let min_chars = ScanConfig::default().min_chars;
+    // O mesmo que a extracao leria se o bloco nao estivesse comprimido: o
+    // minimo de caracteres padrao do scanner e a regra de texto dele.
+    let min_chars = ScanConfig::default().min_chars;
+    summary.truncated = lz77::each_block(data, &mut budget, |at, block| {
         let strings = ascii_texts(&block.data)
             .iter()
             .filter(|t| t.len() >= min_chars && looks_like_text(t))
@@ -161,8 +138,7 @@ fn scan_lz77(data: &[u8], mut budget: usize) -> Lz77Summary {
                 strings,
             });
         }
-        at += block.packed_len.next_multiple_of(4);
-    }
+    });
     summary
 }
 

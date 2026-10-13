@@ -683,6 +683,58 @@ pub fn make_gba_rom_with_lz77() -> (Vec<u8>, usize) {
     (rom, 0x1000)
 }
 
+/// Falas do bloco comprimido em 0x1000 de `make_gba_rom_with_lz77_table`:
+/// quase iguais entre si, pra comprimir muito e crescer quando traduzidas.
+pub const LZ77_TABLE_LINES: [&str; 3] = [
+    "Welcome to the village, traveler.",
+    "Welcome to the village, stranger.",
+    "Welcome to the village, my friend.",
+];
+/// As do bloco em 0x2000 (o outro alvo da tabela).
+pub const LZ77_TABLE_OTHER: [&str; 2] = [
+    "The shop opens at dawn every day.",
+    "The shop closes at dusk every day.",
+];
+/// As do bloco em 0x3000, que nenhum ponteiro alcanca.
+pub const LZ77_LOOSE_LINES: [&str; 3] = [
+    "The gate is closed until morning.",
+    "The gate is closed until evening.",
+    "The gate is closed until the bell.",
+];
+/// A unica frase do bloco de "grafico" em 0x5000.
+pub const LZ77_TILE_PHRASE: &str = "PRESS START TO PLAY";
+
+/// GBA de 64 KiB com quatro blocos LZ77: 0x1000 e 0x2000 (texto, alvos de uma
+/// tabela de 2 ponteiros de ROM em 0x800), 0x3000 (texto, sem ponteiro) e
+/// 0x5000 (2 KiB de padrao de tile com uma frase so no meio — nao e texto).
+pub fn make_gba_rom_with_lz77_table() -> Vec<u8> {
+    let mut rom = make_gba_rom("LZTABLE");
+    rom.resize(64 * 1024, 0);
+    let script = |lines: &[&str]| -> Vec<u8> {
+        let text: Vec<u8> = lines
+            .iter()
+            .flat_map(|line| line.bytes().chain([0]))
+            .collect();
+        crate::lz77::pack(&text).expect("script cabe em 24 bits")
+    };
+    plant(&mut rom, 0x1000, &script(&LZ77_TABLE_LINES));
+    plant(&mut rom, 0x2000, &script(&LZ77_TABLE_OTHER));
+    plant(&mut rom, 0x3000, &script(&LZ77_LOOSE_LINES));
+    let mut tiles: Vec<u8> = (0..2048usize)
+        .map(|i| 0x80 | ((i % 64) * 7 % 16) as u8 | ((((i % 64) * 3 % 8) as u8) << 4))
+        .collect();
+    tiles[1024..1024 + LZ77_TILE_PHRASE.len()].copy_from_slice(LZ77_TILE_PHRASE.as_bytes());
+    plant(
+        &mut rom,
+        0x5000,
+        &crate::lz77::pack(&tiles).expect("tiles cabem em 24 bits"),
+    );
+    for (i, target) in [0x1000u32, 0x2000].into_iter().enumerate() {
+        rom[0x800 + i * 4..0x804 + i * 4].copy_from_slice(&(0x0800_0000 + target).to_le_bytes());
+    }
+    rom
+}
+
 /// Texto de verdade do `make_gba_rom_with_junk`, na ordem em que aparece.
 pub const JUNK_ROM_PHRASES: [&str; 3] = [
     "The old bridge is out. Take the forest road.",

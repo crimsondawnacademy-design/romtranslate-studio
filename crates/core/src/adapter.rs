@@ -75,6 +75,10 @@ pub struct ApplyReport {
     /// Das aplicadas, quantas foram gravadas em outro lugar com os ponteiros
     /// reapontados (nao cabiam no espaco original).
     pub relocated: usize,
+    /// Traducoes de bloco comprimido que ficaram de fora: o bloco regravado
+    /// ficou maior que o original e nao tem ponteiro em tabela pra mudar de
+    /// lugar. O bloco inteiro fica como estava.
+    pub packed_left_out: usize,
 }
 
 /// Imagem modificada em memoria + relatorio. O caller decide onde gravar

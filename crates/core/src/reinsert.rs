@@ -175,6 +175,14 @@ fn reinsert(
         let original =
             fs::read(&project.source_path).map_err(|e| CoreError::io(&project.source_path, e))?;
         let applied = adapter.apply_text(&original, &entries)?;
+        if policy == ErrorPolicy::Block && applied.report.packed_left_out > 0 {
+            return Err(CoreError::Project(format!(
+                "{} traducoes estao em blocos comprimidos que, regravados, ficaram maiores que \
+                 o original e nao tem ponteiro em tabela pra mudar de lugar — encurte o texto \
+                 desses blocos (ou reinsira pulando as frases com erro)",
+                applied.report.packed_left_out
+            )));
+        }
         fs::write(&tmp, &applied.bytes).map_err(|e| CoreError::io(&tmp, e))?;
         applied.report
     } else {

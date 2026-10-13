@@ -81,6 +81,8 @@ export default function ProjectView({
     removed: number;
     /** Fora das regioes de texto: tiradas da traducao pela extracao estruturada. */
     stray: number;
+    /** Das salvas, quantas estavam dentro de blocos comprimidos. */
+    packed: number;
     structured: boolean;
   } | null>(null);
   const [encoding, setEncoding] = useState<ScanEncoding>("ascii");
@@ -229,6 +231,7 @@ export default function ProjectView({
         discarded: outcome.discarded,
         removed: 0,
         stray: 0,
+        packed: 0,
         structured: false,
       });
       await reloadEntries();
@@ -300,6 +303,7 @@ export default function ProjectView({
         discarded: outcome.discarded,
         removed: outcome.removed,
         stray: outcome.stray,
+        packed: outcome.packed,
         structured: true,
       });
       await reloadEntries();
@@ -862,6 +866,9 @@ export default function ProjectView({
       {scanInfo && scanInfo.stray > 0 && (
         <p className="hint left">{t("extract.stray", { n: scanInfo.stray })}</p>
       )}
+      {scanInfo && scanInfo.packed > 0 && (
+        <p className="hint left">{t("extract.packed", { n: scanInfo.packed })}</p>
+      )}
       {savedPath && <div className="ok">{t("export.saved", { path: savedPath })}</div>}
 
       {entries.length === 0 && (
@@ -1372,6 +1379,12 @@ export default function ProjectView({
                   <>
                     <br />
                     {t("reinsert.relocated", { n: reinsertOutcome.apply.relocated })}
+                  </>
+                )}
+                {reinsertOutcome.apply.packedLeftOut > 0 && (
+                  <>
+                    <br />
+                    {t("reinsert.packedLeftOut", { n: reinsertOutcome.apply.packedLeftOut })}
                   </>
                 )}
               </div>

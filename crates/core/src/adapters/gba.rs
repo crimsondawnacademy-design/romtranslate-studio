@@ -10,9 +10,16 @@
 //! Ponteiro isolado (literal pool) nao conta, e ponteiro pros espelhos de
 //! wait-state (0x0A/0x0C000000) nao e reconhecido. O header checksum e
 //! recalculado (traduzir o titulo em 0xA0 o afetaria).
+//!
+//! Texto comprimido (`adapters::packed`): as frases de dentro dos blocos
+//! LZ77 tipo 0x10 tambem saem na extracao, e a string crua que cai dentro de
+//! um bloco (os literais do stream) e descartada. Na volta o bloco e
+//! recomprimido: fica no lugar se couber, vai pro fim do ROM se tiver
+//! ponteiro em tabela, e fica como no original se nao tiver nenhum dos dois.
 
 use std::collections::HashSet;
 
+use super::packed;
 use super::pointers::{
     ensure_pointers_untouched, find_pointer_tables, is_terminated, mark_relocatable, relocate,
     PointerFormat,
@@ -90,8 +97,23 @@ fn extract_capped(data: &[u8], cap: usize) -> Result<Extraction> {
             e.context = Some("in-place: traducao limitada ao espaco original".to_string());
         }
     }
-    let discarded = keep_text(&mut entries);
-    let truncated = entries.len() > cap;
+    let mut discarded = keep_text(&mut entries);
+
+    let packed = packed::extract(data);
+    discarded += packed::drop_overlapping(&mut entries, &packed.blocks);
+    // Tabela de ponteiros pros BLOCOS: 2+ ponteiros de ROM seguidos, cada um
+    // pro inicio de um bloco comprimido valido.
+    let block_starts: HashSet<usize> = packed.blocks.iter().map(|b| b.0).collect();
+    let block_tables = find_pointer_tables(data, &ROM_POINTERS, &block_starts);
+    for mut e in packed.entries {
+        let block = e.metadata["lz77"]["block"].as_u64().unwrap_or(0) as usize;
+        if let Some(pointers) = block_tables.get(&block) {
+            packed::set_block_pointers(&mut e, pointers);
+        }
+        entries.push(e);
+    }
+
+    let truncated = entries.len() > cap || packed.truncated;
     entries.truncate(cap);
     Ok(Extraction {
         entries,
@@ -119,7 +141,7 @@ impl GameAdapter for GbaAdapter {
             extract: true,
             reinsert: true, // in-place; relocacao so com ponteiros em tabela
             patch: true,
-            compression: false,
+            compression: true, // LZ77 tipo 0x10
             pointer_relocation: true,
             font_table: false,
             experimental: true,
@@ -194,18 +216,36 @@ impl GameAdapter for GbaAdapter {
                 "gba: arquivo menor que o header do cartucho".to_string(),
             ));
         }
-        let plan = super::inplace::plan_in_place(data, entries, true)?;
+        let raw: Vec<TextEntry> = entries
+            .iter()
+            .filter(|e| !packed::is_packed(e))
+            .cloned()
+            .collect();
+        let mut plan = super::inplace::plan_in_place(data, &raw, true)?;
+        let blocks = packed::plan(data, entries)?;
+        // Projeto extraido antes do texto comprimido pode ter traducao de
+        // string crua DENTRO de um bloco: ela perde, o bloco e que vale.
+        let writes = plan.writes.len();
+        plan.writes
+            .retain(|(offset, patch)| !blocks.covers(*offset, patch.len()));
+        let dropped = writes - plan.writes.len();
+        plan.report.applied -= dropped;
+        plan.report.ignored_generic += dropped;
+
         let mut out = data.to_vec();
-        for (offset, patch) in &plan.writes {
+        for (offset, patch) in plan.writes.iter().chain(&blocks.writes) {
             out[*offset..offset + patch.len()].copy_from_slice(patch);
         }
         ensure_pointers_untouched(data, &out, entries)?;
+        plan.relocations.extend(blocks.relocations);
         relocate(&mut out, &plan.relocations, ROM_POINTERS.base, MAX_ROM_LEN)?;
         out[CHECKSUM_OFFSET] = header_checksum(&out);
-        Ok(AppliedImage {
-            bytes: out,
-            report: plan.report,
-        })
+        let mut report = plan.report;
+        report.applied += blocks.report.applied;
+        report.kept_original += blocks.report.kept_original;
+        report.relocated += blocks.report.relocated;
+        report.packed_left_out = blocks.report.packed_left_out;
+        Ok(AppliedImage { bytes: out, report })
     }
 
     fn verify(&self, data: &[u8]) -> Result<VerificationReport> {
