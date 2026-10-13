@@ -1386,3 +1386,44 @@ escrever arquivo de credencial nenhum.
 só diz "Logged in using ChatGPT", e ler o `auth.json` pra descobrir quebraria
 a regra de não tocar em token). Se o navegador não abrir sozinho, o endereço
 do login só aparece na mensagem de erro; falta mostrá-lo na tela.
+
+## 2026-10-12 — Reinserção: a tela pula a frase com erro em vez de bloquear o jogo
+
+**Contexto:** a spec §14 manda erro de validação bloquear a reinserção, com um
+"modo avançado" que força. Num jogo real isso não entrega nada: no teste com
+o Minish Cap, 1 a 4 de cada 30 traduções ficam maiores que a linha; em 15 mil
+linhas são centenas de erros, e todas teriam de ser corrigidas à mão antes de
+sair um único arquivo.
+
+**Decisão:** `reinsert::ErrorPolicy` com três valores. `Block` é o da spec e
+continua sendo o de `reinsert_project(dir, false)`. `Force` é o modo avançado.
+`Skip` é novo e é o padrão da interface: a tradução reprovada (status Error),
+ou maior que o espaço numa string sem ponteiro em tabela, não é gravada — a
+frase fica como no original — e todo o resto entra.
+
+**Por que isso respeita a intenção da spec:** o bloqueio existe pra não gravar
+dado inválido. `Skip` também não grava: ele só deixa de gravar menos coisa. O
+resultado diz quantas frases ficaram no original, e o status delas no banco
+não muda, então o filtro de erro continua mostrando o que corrigir.
+
+**Custo:** o jogo sai com frases em inglês no meio, sem aviso dentro do jogo.
+A tela avisa quantas; quem quiser o comportamento antigo tem o `Block` no core
+(a interface não o expõe hoje).
+
+## 2026-10-12 — Tradução para quando o provider para de responder
+
+**Contexto:** medido em 12/10: a conta do ChatGPT bateu no limite de uso no
+meio do dia. O Codex devolve erro em 2 segundos; a rodada contava "falha" e
+seguia pro próximo lote, com 3 tentativas cada. Numa fila de 15 mil linhas
+isso é mais de mil lotes falhando por horas, e a tela só mostrava o número.
+
+**Decisão:** depois de 2 lotes seguidos que falham (cada um já com as suas
+tentativas), a rodada para e devolve o erro do provider em
+`TranslateSummary.stopped`. Um lote que falha sozinho não para nada: o
+contador zera quando o seguinte responde. Não há lista de "erros fatais" por
+texto — a regra vale pra conta no limite, login vencido, Ollama desligado e
+rede fora, sem o app precisar reconhecer a mensagem de cada provider.
+
+**Permissão de tradução remota:** continua sendo opt-in explícito (spec §18),
+mas deixou de ser um erro sem saída: a tela pergunta na hora e, com o sim,
+marca a permissão e refaz a ação que a pessoa tinha pedido.
