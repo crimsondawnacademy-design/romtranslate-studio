@@ -1,0 +1,148 @@
+<p align="center">
+  <img src="apps/desktop/src/assets/logo.svg" alt="RomTranslate Studio" width="120">
+</p>
+
+<h1 align="center">RomTranslate Studio</h1>
+
+<p align="center">
+  <b>Traduza jogos retrô com IA, no seu computador.</b><br>
+  Arraste o arquivo do jogo, revise a tradução, exporte um patch. A sua ROM não sai da sua máquina.
+</p>
+
+<p align="center">
+  <a href="https://github.com/crimsondawnacademy-design/romtranslate-studio/releases"><img alt="Versão mais recente" src="https://img.shields.io/github/v/release/crimsondawnacademy-design/romtranslate-studio?include_prereleases&label=baixar"></a>
+  <a href="https://github.com/crimsondawnacademy-design/romtranslate-studio/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/crimsondawnacademy-design/romtranslate-studio/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="Licença MIT" src="https://img.shields.io/badge/licen%C3%A7a-MIT-blue"></a>
+  <a href="https://github.com/crimsondawnacademy-design/romtranslate-studio/stargazers"><img alt="Estrelas" src="https://img.shields.io/github/stars/crimsondawnacademy-design/romtranslate-studio?style=social"></a>
+</p>
+
+<p align="center">
+  <a href="README.md">Read in English</a>
+</p>
+
+![Tela de projeto do RomTranslate Studio com as falas extraídas, as traduções e o estado da validação](docs/assets/screenshot.png)
+
+<p align="center"><i>Projeto de demonstração com dados inventados. Nenhum conteúdo de jogo real fica neste repositório.</i></p>
+
+## O que ele faz
+
+1. **Detecta** a plataforma do arquivo que você arrasta (11 formatos, mostrando a evidência que usou).
+2. **Extrai** o texto e descarta os bytes que só parecem texto.
+3. **Traduz** com a IA que você escolher, vários lotes ao mesmo tempo, dizendo ao modelo quanto espaço cada fala tem.
+4. **Valida** cada fala: marcadores, códigos de controle, caracteres que o jogo escreve e tamanho. O que não cabe volta sozinho para a IA.
+5. **Reinsere** numa cópia de trabalho e confere. O arquivo original nunca é modificado.
+6. **Exporta um patch** (IPS ou BPS), que você compartilha no lugar do jogo.
+
+Se gostou da ideia, uma estrela ajuda outras pessoas a acharem o projeto.
+
+## Funciona mesmo?
+
+É software alpha, e isto é o que foi medido até agora, num jogo comercial de Game Boy Advance do cartucho do próprio mantenedor (só números; nenhum dado do jogo está neste repositório):
+
+| Medida | Resultado |
+|---|---|
+| Trechos de texto traduzidos e regravados | 10.705 |
+| Mensagens com os códigos de controle idênticos byte a byte | 3.699 de 3.699 |
+| Bytes alterados fora de texto de mensagem | 0 |
+| O jogo liga com a tradução; abertura e primeiro diálogo conferidos num emulador | sim |
+| Falas da IA que passam na validação, ChatGPT pelo Codex CLI, com repergunta automática | 199 de 200 |
+| Velocidade com 4 lotes em paralelo | 200 falas em 86 s |
+
+O que isso **não** prova: ninguém jogou esse jogo até o fim com a tradução, só um jogo real passou pelo processo inteiro, e a versão com acento precisou de tabela de caracteres e de região do texto indicadas à mão. Veja [o que ainda não faz](#o-que-ainda-não-faz).
+
+## Baixar
+
+Pegue o instalador do seu sistema na [versão mais recente](https://github.com/crimsondawnacademy-design/romtranslate-studio/releases):
+
+| Sistema | Arquivo |
+|---|---|
+| macOS (Apple Silicon ou Intel) | `.dmg` |
+| Windows | `-setup.exe` ou `.msi` |
+| Linux | `.deb`, `.rpm` ou `.AppImage` |
+
+Os binários não são assinados (é projeto pessoal e certificado é pago), então o sistema reclama na primeira vez:
+
+- **macOS** diz que o app está danificado. Depois de arrastar para Aplicativos, rode `xattr -cr "/Applications/RomTranslate Studio.app"`.
+- **Windows** SmartScreen: "Mais informações" e depois "Executar assim mesmo".
+- **Linux**: `chmod +x RomTranslate*.AppImage`.
+
+Só o instalador de macOS foi aberto e usado por uma pessoa até agora. Os de Windows e Linux são compilados pelo CI e ainda precisam de alguém que teste: se você testar, [abra uma issue](https://github.com/crimsondawnacademy-design/romtranslate-studio/issues) contando o que aconteceu.
+
+## Escolha a sua IA
+
+| Provedor | Custo | Observações |
+|---|---|---|
+| **Ollama** | grátis, roda no seu computador | Nada sai da sua máquina. Modelo pequeno tem dificuldade de manter a fala curta. |
+| **Assinatura do ChatGPT** pelo Codex CLI | o plano que você já tem, sem chave de API | O login é feito de dentro do app. Vale o limite de uso do seu plano. |
+| **Claude** (API da Anthropic) | a sua chave de API | O app calcula o gasto antes da rodada e mostra o que foi cobrado depois. |
+| Qualquer endpoint **compatível com a API da OpenAI** | a sua chave | OpenRouter, LM Studio, gateway da empresa. |
+
+Tudo o que não é local pede a sua permissão explícita: o app diz qual texto vai sair, e só as falas extraídas saem, nunca o arquivo do jogo.
+
+## Consoles
+
+Toda plataforma real é **experimental**. Jogos usam motores, compressões e tabelas de caracteres diferentes, então não há promessa de suporte universal.
+
+| Plataforma | Extrai | Reinsere | Tradução maior que o original |
+|---|---|---|---|
+| Game Boy Advance | sim | no lugar, checksum do header recalculado | sim, para texto apontado por tabela de ponteiros |
+| Nintendo DS | sim, ASCII e UTF-16 por arquivo | no lugar, CRC do header recalculado | sim, o arquivo cresce e a FAT é reapontada |
+| NES | sim, ASCII ou tabela `.tbl` | no lugar | não |
+| Super Nintendo | sim | no lugar, checksum interno recalculado | não |
+| GameCube | sim, por arquivo | no lugar | não |
+| PlayStation 1 (ISO, BIN raw, `.cue`) | sim, por arquivo | no lugar, EDC/ECC do setor regenerado | pouco, na sobra do último setor |
+| PlayStation 2 (inclui DVD acima de 2 GiB) | sim, por arquivo | no lugar | não |
+| PSP | sim, por arquivo | no lugar | não |
+| Wii, Wii U | só detecção | não | não |
+
+"No lugar" quer dizer que a tradução ocupa o espaço da fala original. A matriz completa, com o que cada coluna significa e os limites conhecidos, está em [docs/DETALHES.md](docs/DETALHES.md).
+
+## O que ainda não faz
+
+- Texto dentro de bloco comprimido é contado (LZ77 no GBA e no DS), mas não extraído.
+- Não lê Shift-JIS, então jogo em japonês fica de fora por enquanto.
+- Não edita fonte nem texto desenhado como imagem (tela de título, alguns menus).
+- A maior parte do texto só pode ter o tamanho do original. Crescer depende de uma tabela de ponteiros que o app reconheça; tabela indicada pelo usuário está no roteiro.
+- Escolher a região do texto e a tabela de caracteres de um jogo de cartucho ainda é trabalho manual.
+
+## Para quem gosta de fuçar
+
+- A **busca relativa** descobre a tabela de caracteres do jogo a partir de uma palavra que você sabe que aparece nele, e grava o `.tbl`.
+- O **Raio-X** mostra o que o app não lê: blocos comprimidos, áreas densas, quantas falas podem crescer.
+- **Linha de comando**: cada passo também roda sem a janela, a partir do código: `cargo run -p romtranslate-cli -- --help`. Os comandos estão em [docs/DETALHES.md](docs/DETALHES.md#sem-a-janela-cli).
+- **Escreva um adapter** para uma plataforma ou motor novo: [docs/ADAPTERS.md](docs/ADAPTERS.md).
+
+## Compilar do código
+
+Você precisa de Rust estável, Node 20 ou mais novo, pnpm e das [dependências de sistema do Tauri 2](https://tauri.app/start/prerequisites/).
+
+```bash
+git clone https://github.com/crimsondawnacademy-design/romtranslate-studio.git
+cd romtranslate-studio
+pnpm install
+pnpm dev
+```
+
+Para testar sem jogo, `cargo run -p romtranslate-core --example gen_fixtures` grava arquivos sintéticos em `fixtures/generated/`.
+
+## Regras da casa
+
+- **Patch primeiro.** Compartilhe o patch, nunca o jogo. O app trabalha com arquivos que você já tem e não baixa ROM.
+- **Local primeiro.** O arquivo do jogo fica no seu computador.
+- **Nenhuma ROM comercial, BIOS ou chave** neste repositório, nos testes ou nas issues. As fixtures são sintéticas.
+- **Nada declarado sem teste.** Uma capacidade só entra na lista quando um teste de ida e volta prova.
+
+## Contribuir
+
+Erro, jogo que não funcionou, plataforma que você quer: as [issues](https://github.com/crimsondawnacademy-design/romtranslate-studio/issues) estão abertas, e o [CONTRIBUTING.md](CONTRIBUTING.md) explica como mandar código. Nunca anexe ROM comercial.
+
+## Apoie o projeto
+
+O RomTranslate Studio é gratuito, tem licença MIT e é feito no tempo livre. Se ele te ajudou:
+
+- **Dê uma estrela no repositório.** Não custa nada e é o que faz o projeto aparecer.
+- **Pix:** chave `13982286871` (telefone).
+
+## Licença
+
+[MIT](LICENSE). A licença cobre só este software: não dá direito sobre nenhum jogo, marca ou tradução de obra de terceiros.

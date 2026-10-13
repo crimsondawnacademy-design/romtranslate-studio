@@ -1,441 +1,148 @@
-# RomTranslate Studio
+<p align="center">
+  <img src="apps/desktop/src/assets/logo.svg" alt="RomTranslate Studio" width="120">
+</p>
 
-> Local-first, AI-assisted game translation toolkit.
+<h1 align="center">RomTranslate Studio</h1>
 
-Ferramenta desktop open source para extrair, traduzir, revisar e reaplicar textos em
-jogos compatíveis, com IA local (Ollama) ou APIs configuráveis, gerando **patches** (IPS/BPS)
-em vez de cópias modificadas.
+<p align="center">
+  <b>Translate retro games with AI, on your own computer.</b><br>
+  Drop a game file, review the translation, export a patch. Your ROM never leaves your machine.
+</p>
 
-**Status: alpha.** O pipeline completo funciona de ponta a ponta:
-detecção → extração → tradução com IA → validação/revisão → reinserção em
-cópia de trabalho → **patch IPS ou BPS** com manifest.
+<p align="center">
+  <a href="https://github.com/crimsondawnacademy-design/romtranslate-studio/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/crimsondawnacademy-design/romtranslate-studio?include_prereleases&label=download"></a>
+  <a href="https://github.com/crimsondawnacademy-design/romtranslate-studio/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/crimsondawnacademy-design/romtranslate-studio/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue"></a>
+  <a href="https://github.com/crimsondawnacademy-design/romtranslate-studio/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/crimsondawnacademy-design/romtranslate-studio?style=social"></a>
+</p>
 
-![Tela de projeto do RomTranslate Studio: extração de strings de um ISO de PS2 com traduções, statuses e validação](docs/assets/screenshot.png)
+<p align="center">
+  <a href="README.pt-BR.md">Leia em português</a>
+</p>
 
-*Projeto fictício de demonstração — nenhum dado de jogo real.*
+![RomTranslate Studio project screen with extracted lines, translations and validation status](docs/assets/screenshot.png)
 
-## Baixar
+<p align="center"><i>Demo project with made-up data. No real game content is stored in this repository.</i></p>
 
-Binários prontos saem em
-[Releases](https://github.com/crimsondawnacademy-design/romtranslate-studio/releases):
-`.dmg` para macOS (Apple Silicon e Intel), `-setup.exe` ou `.msi` para Windows,
-`.deb`, `.rpm` ou `.AppImage` para Linux — prefira `.deb`/`.rpm` (~6 MB); o
-AppImage roda sem instalar, mas pesa ~80 MB porque embute as dependências.
+## What it does
 
-Os binários **não são assinados** — projeto pessoal, e certificado de
-desenvolvedor é pago. Na primeira execução o sistema reclama; é esperado:
+1. **Detects** the platform of the file you drop in (11 formats, with the evidence it used).
+2. **Extracts** the text, throwing away the bytes that only look like text.
+3. **Translates** with the AI you choose, several batches at a time, telling the model how much room each line has.
+4. **Validates** every line: placeholders, control codes, characters the game can write, and size. Lines that do not fit go back to the AI automatically.
+5. **Reinserts** into a working copy and checks it. Your original file is never modified.
+6. **Exports a patch** (IPS or BPS) that you can share instead of the game.
 
-- **macOS** ("o app está danificado"): depois de arrastar pra Aplicativos, rode
-  no Terminal `xattr -cr "/Applications/RomTranslate Studio.app"`
-- **Windows** (SmartScreen): "Mais informações" → "Executar assim mesmo"
-- **Linux**: `chmod +x RomTranslate*.AppImage`
+If you like the idea, a star helps other people find the project.
 
-Prefere compilar do código? Veja [Rodando](#rodando).
+## Does it actually work?
 
-## O que funciona hoje
+It is alpha software, and this is what has been measured so far, on one commercial Game Boy Advance game from the maintainer's own cartridge dump (numbers only; no game data is in this repository):
 
-- **Detecção** de plataforma com confiança e evidências em 11 formatos (GBA,
-  NES, SNES, NDS, GameCube, Wii, Wii U, PS1, PS2, PSP e a fixture sintética
-  RTSF);
-- **Extração**: scanner genérico (ASCII, UTF-8, UTF-16 LE/BE, tabelas `.tbl`)
-  para descoberta + extração estruturada com limites reais nos adapters que a
-  suportam. Sequência de bytes imprimíveis que não parece texto (gráfico,
-  código, tabela) é descartada antes do teto de 100 mil strings, e a tela diz
-  quantas foram;
-- **Busca relativa**: jogo de cartucho quase nunca usa ASCII. Digite uma
-  palavra que você sabe que aparece no jogo e o app descobre onde o alfabeto
-  dele começa e monta o `.tbl` (letras e espaço; números e pontuação você
-  completa no arquivo). A tradução é regravada no jogo pela mesma tabela;
-- **Raio-X**: mostra o que o app *não* lê no arquivo — blocos comprimidos em
-  LZ77 (o do GBA e do DS) e quantas frases estão presas neles, quanto do
-  arquivo é denso (comprimido ou cifrado), e quantas das strings extraídas
-  têm ponteiro em tabela e podem crescer;
-- **Tradução por IA**: Ollama (local, padrão), qualquer endpoint
-  OpenAI-compatible, o Claude pela API da Anthropic com a sua chave de API,
-  ou a sua assinatura do ChatGPT pelo Codex CLI (sem chave de API); batching,
-  retry, cancelamento, progresso. Com chave paga, o app **calcula o gasto**
-  antes (chamadas, tokens e, com o preço do modelo, o valor) e mostra o que o
-  provedor cobrou depois; **translation
-  memory** e **glossário** por projeto (SQLite); tradução remota exige opt-in
-  explícito de privacidade. Texto ASCII e texto de tabela vão com a lista dos
-  caracteres que o jogo escreve, e nome interno do jogo (identificador) fica
-  fora da fila;
-- **Validação e revisão**: placeholders/control codes/tags, limite de bytes no
-  encoding destino, editor com filtros e statuses; erros bloqueiam a reinserção;
-- **Reinserção** em working copy verificada — o arquivo original **nunca** é
-  modificado;
-- **Patch IPS ou BPS** + `manifest.json` + CSV de traduções, com round-trip
-  interno conferido antes de exportar. Compatível com Lunar IPS, Floating IPS,
-  beat, RetroArch e afins; o BPS valida por CRC que o patch é para o arquivo
-  certo e suporta qualquer tamanho.
+| Measured | Result |
+|---|---|
+| Text segments translated and written back | 10,705 |
+| Messages whose control codes stayed byte-identical | 3,699 of 3,699 |
+| Bytes changed outside message text | 0 |
+| Game boots with the translation, intro and first dialogue checked in an emulator | yes |
+| AI lines that pass validation, ChatGPT through the Codex CLI, with automatic re-ask | 199 of 200 |
+| Speed with 4 batches in parallel | 200 lines in 86 s |
 
-## Matriz de compatibilidade
+What that does **not** prove: nobody has played that game to the end with the translation, only one real game has been through the whole process, and the accented build needed a character table and a text region set by hand. See [what it cannot do yet](#what-it-cannot-do-yet).
 
-Jogos usam engines, compressões e tabelas diferentes — **não prometemos suporte
-universal**. O que cada plataforma tem hoje:
+## Download
 
-| Plataforma | Detecção | Scan genérico | Extração estruturada | Reinserção | Patch |
-|---|---|---|---|---|---|
-| Fixture RTSF (demo) | ✅ | ✅ | ✅ completa | ✅ com relocação + ponteiros | ✅ |
-| Game Boy Advance | ✅ | ✅ | ⚠️ experimental (detecta tabelas de ponteiros) | ⚠️ experimental (in-place + **relocação** de strings com ponteiro em tabela) | ✅ (BPS se o ROM de 16 MiB crescer) |
-| Nintendo DS | ✅ (CRC do header) | ✅ | ⚠️ experimental (por arquivo do filesystem, ASCII + UTF-16) | ⚠️ experimental (in-place + **relocação**: o arquivo cresce e a FAT é reapontada) | ✅ (BPS acima de 16 MiB) |
-| NES | ✅ | ✅ | ⚠️ experimental (in-place; jogos com tabela própria: use `.tbl`) | ⚠️ experimental (in-place; texto lido por `.tbl` volta pela tabela) | ✅ |
-| Super Nintendo | ✅ | ✅ | ⚠️ experimental (in-place) | ⚠️ experimental (in-place, checksum interno recalculado) | ✅ |
-| GameCube | ✅ (magic + FST) | — | ⚠️ experimental (por arquivo do filesystem FST) | ⚠️ experimental (in-place) | ✅ (BPS p/ ISO real) |
-| Wii | ✅ (ISO e WBFS) | — | — | — | — |
-| Wii U | ✅ (WUX e RPX/RPL) | — | — | — | — |
-| PlayStation (PS1) | ✅ (ISO 9660 + SYSTEM.CNF) | ✅ | ⚠️ experimental (por arquivo; BIN raw por setor) | ⚠️ experimental (in-place + **relocação** na sobra do setor final; BIN raw com EDC/ECC regenerado)* | ✅ |
-| PlayStation 2 | ✅ (BOOT2 no SYSTEM.CNF) | ✅ | ⚠️ experimental (por arquivo; DVD inteiro via mmap, sem teto de RAM) | ⚠️ experimental (in-place; >2 GiB em streaming) | ✅ (BPS, round-trip streaming) |
-| PSP | ✅ (UMD + PARAM.SFO com título) | ✅ | ⚠️ experimental (por arquivo) | ⚠️ experimental (in-place) | ✅ (BPS) |
+Get the installer for your system from the [latest release](https://github.com/crimsondawnacademy-design/romtranslate-studio/releases):
 
-\* BIN raw de PS1 (2352 bytes/setor): a reinserção regenera o EDC/ECC
-(ECMA-130) de cada setor alterado, e o verify confere o EDC da imagem inteira.
-Dump multi-track? Abra o **`.cue`**: o app resolve o track de dados sozinho
-(layout Redump — dados como primeiro track do FILE) e os tracks de áudio
-ficam intactos — o verify ignora setores sem sync. A working copy e o patch
-são do BIN de dados; o `.cue` original continua valendo pra ele.
+| System | File |
+|---|---|
+| macOS (Apple Silicon or Intel) | `.dmg` |
+| Windows | `-setup.exe` or `.msi` |
+| Linux | `.deb`, `.rpm` or `.AppImage` |
 
-O export escolhe o formato sozinho: **IPS** quando cabe (máxima
-compatibilidade) e **BPS** para arquivos maiores ou que encolhem — o BPS ainda
-valida por CRC-32 que o patch está sendo aplicado no arquivo certo. Partições
-de disco Wii são cifradas: extração exigiria keys, que este projeto não inclui.
+The binaries are not code-signed (this is a personal project and certificates are paid), so the system complains on first run:
 
-**Lixo que parece texto**: num cartucho, a maior parte dos bytes imprimíveis
-não é texto — é gráfico, código e tabela. Num jogo real de GBA de 16 MiB
-medido em 12/10/2026 (só contagens; nenhum byte de jogo entra neste
-repositório), o scanner ASCII achou 187.162 sequências de 4 ou mais
-caracteres. Com o filtro ficam 17.936 e 169.226 são descartadas. Antes o app
-parava nas 20 mil primeiras, das quais só 3.124 passam no filtro; as outras
-14.812 que ficam estavam depois do corte, fora da lista.
+- **macOS** says the app is damaged. After dragging it to Applications, run `xattr -cr "/Applications/RomTranslate Studio.app"`.
+- **Windows** SmartScreen: "More info", then "Run anyway".
+- **Linux**: `chmod +x RomTranslate*.AppImage`.
 
-A regra (`looks_like_text`, em `crates/core/src/scan.rs`) olha a proporção de
-letras, a variedade, a caixa de cada palavra e se há vogais; palavra curta de
-menu ("SAVE", "Yes", "HP") passa. String com ponteiro em tabela nunca é
-descartada. No **Escanear** o filtro é a caixa "Só o que parece texto", ligada
-por padrão: desmarque para ver tudo. A **Extração estruturada** filtra sempre,
-porque o que ela devolve é regravado no jogo — lixo ali é tradução gravada por
-cima de gráfico ou de código. Limites:
+Only the macOS build has been opened and used by a person so far. The Windows and Linux installers are built by CI and still need someone to try them: if you do, please [open an issue](https://github.com/crimsondawnacademy-design/romtranslate-studio/issues) with what happened.
 
-- é heurística, e erra: perde "McCoy" (caixa no meio da palavra), "Lv.99" e
-  "HP: 12/30" (símbolo demais) e "Nooooo!" (repetição demais). Uma string real
-  que a regra descarta aparece no Escanear sem filtro, mas esse caminho não
-  regrava no jogo;
-- foi calibrada num jogo só, em inglês;
-- projeto criado antes do filtro: a **Extração estruturada** tira dele as
-  strings antigas que não parecem texto e diz na tela quantas saíram. Só sai o
-  que não tem tradução, não tem ponteiro em tabela, não foi lido por tabela de
-  caracteres (`.tbl`) e não veio na extração que acabou de rodar. Lixo que já
-  recebeu tradução (da IA inclusive) fica na lista, e o **Escanear** nunca
-  apaga nada;
-- no Nintendo DS, a leitura UTF-16 falsa de um trecho binário passa pela regra
-  (para ela, kanji é letra).
+## Pick your AI
 
-**Texto fora do alcance do scanner**: extração vazia não prova que o jogo tem
-pouco texto. Se ele usa tabela de caracteres própria, a **busca relativa**
-monta o `.tbl`, e o texto lido por tabela é **regravado no jogo** por ela. O
-scan guarda uma cópia da tabela em `tables/` dentro do projeto; é essa cópia
-que a validação e a reinserção usam, e é nela que você completa números e
-pontuação. Vale a regra do in-place, medida em bytes da tabela: a tradução
-ocupa o espaço da original ou menos. A tradução por IA recebe a lista dos
-caracteres que a tabela escreve e a instrução de não usar nenhum outro. Se
-mesmo assim vier uma letra com acento que a tabela não tem, ela é gravada
-como a letra sem acento (`ação` vira `acao`) quando essa letra está na
-tabela, e a frase ganha um aviso de validação com o que a IA respondeu e o
-que foi gravado — tirar o acento pode mudar o sentido (`avô` e `avó` viram
-`avo`), então confira. Para ter o acento no jogo, a linha dele precisa estar
-no `.tbl` (e o jogo precisa ter o desenho da letra; o app não edita fonte).
-O que continuar fora da tabela (uma pontuação que falta completar, um acento
-cuja letra base a tabela não tem) é erro que diz qual caractere e em que
-posição — nunca um byte inventado. Limites: isso está provado de ponta a
-ponta numa fixture sintética de NES com um provider de mentira, não em jogo
-real; as outras plataformas in-place usam o mesmo caminho, mas não têm teste
-com tabela. Com modelo de verdade há duas medições, nas 7 frases da fixture.
-Num modelo local pequeno (`llama3.2:3b`): nenhuma pontuação fora da tabela, e
-3 ou 4 das 7 respostas ainda vieram com acento e foram gravadas sem ele (nas
-6 rodadas em que isso foi contado). No ChatGPT pelo Codex CLI (modelo padrão
-do Codex em 12/10/2026, `gpt-6-astra`): nenhum acento e nenhum caractere fora
-da tabela, em 7 rodadas. A troca
-cobre letra latina acentuada num caractere só (`á`, `ç`, `É`) e aspas,
-travessão e reticências tipográficos (quando a tabela tem o sinal simples);
-tradução escrita à mão não é mexida.
-
-**Tamanho do texto de tabela**: ele é sempre gravado no lugar, então o
-espaço da original é o teto. A tradução por IA recebe esse teto em cada
-frase, em caracteres (`maxChars`), com a instrução de que é limite duro. O
-número é contado pela entrada mais cara da tabela: numa tabela de 1 byte por
-caractere é o próprio espaço; se algum caractere custa 2 bytes, é a metade —
-nunca mais do que cabe, às vezes menos. Código de controle ou placeholder
-que a tradução tem de copiar do original (`[FIM]`, `{0}`) entra pelo que
-custa em bytes, não pelos caracteres que o modelo conta: se `[FIM]` é 1
-byte, `HELLO[FIM]` (6 bytes) vai com teto de 10 caracteres, não 6. Dupla de
-letras num byte só (`th`) continua sem aumentar o teto. A memória de
-tradução passa pela mesma conta: tradução guardada que não cabe no espaço
-da frase (veio de outro projeto, ou de uma resposta antiga que estourou)
-não é usada, e a frase vai para o provider com o teto. Quem decide se cabe
-é a validação,
-que mede em bytes da tabela: tradução maior que o espaço é **erro** na frase
-(antes era aviso, e a recusa só aparecia na reinserção), com os dois
-tamanhos. O app **não corta** texto: a tradução fica inteira no projeto até
-você encurtar, e não pergunta de novo ao modelo as frases que passaram.
-
-O que foi medido, nas 7 frases da fixture (inglês para pt-BR, tabela de 1
-byte por caractere, só letras e espaço):
-
-| Modelo | Pedido | Rodadas | Maiores que o espaço | Caracteres a mais, somando as 7 |
-|---|---|---|---|---|
-| ChatGPT pelo Codex CLI (`gpt-6-astra`) | com o limite | 4 | 0 de 7 nas 4 | 0 |
-| ChatGPT pelo Codex CLI (`gpt-6-astra`) | sem o limite | 3 | 7 de 7 nas 3 | 26 a 30 |
-| `llama3.2:3b` (Ollama local) | com o limite | 7 | 5 a 7 de 7 | 17 a 43 |
-| `llama3.2:3b` (Ollama local) | sem o limite | 3 | 7 de 7 nas 3 | 30 a 42 |
-
-No modelo capaz é o limite que faz caber. No modelo de 3B ele não basta: a
-diferença entre ter e não ter o limite fica dentro da variação de uma rodada
-pra outra — ali conte com o erro de validação e com encurtar à mão. Caber
-não é traduzir bem: `CONTINUE` (8 de espaço) voltou do Codex sem traduzir nas
-4 rodadas, porque `CONTINUAR` tem 9. Não medido: jogo real, diálogo longo, tabela com
-caractere de 2 bytes, outro par de idiomas, outro modelo. Limite conhecido:
-string de largura fixa numa tabela sem espaço precisa do tamanho exato, e o
-pedido só diz o máximo. E a sobra de
-uma tradução mais curta vira `0x00` quando o byte depois da string original
-é `0x00` (senão é preenchida com o espaço da tabela) — jogo com outro
-terminador pede conferência no emulador.
-
-**Texto ASCII traduzido para idioma com acento**: num jogo que guarda o
-texto em ASCII (é o que a extração estruturada lê; no DS, também UTF-16),
-letra acentuada não existe. O lote de strings ASCII vai para a IA com a lista
-do ASCII imprimível e a instrução de que não há letra acentuada — o mesmo
-mecanismo do texto de tabela. Se a resposta vier mesmo assim com acento, ou
-com aspas, travessão e reticências tipográficos (`“ ” ‘ ’ — – …`), o app
-grava a letra sem acento e o sinal simples (`" ' - ...`) e a frase ganha um
-aviso de validação com o que a IA respondeu e o que foi gravado. O que não
-tem equivalente (`º`, `ß`) continua erro, e a mensagem diz qual caractere e
-em que posição. Texto UTF-8 e UTF-16 escreve acento e não é mexido: vai em
-lote separado, sem a lista. A memória de tradução passa pela mesma rede, e
-tradução guardada que nem assim cabe em ASCII não é usada.
-
-Medido em 12/10/2026 no mesmo jogo real de GBA, com 30 falas espalhadas pelo
-arquivo e o ChatGPT pelo Codex CLI (`gpt-6-astra`), 3 rodadas de cada pedido
-(só contagens; o texto do jogo não entra neste repositório):
-
-| Pedido | Respostas com caractere fora de ASCII | Passam na validação como a IA respondeu | Passam como o app grava | Maiores que o campo |
-|---|---|---|---|---|
-| sem a lista (o de antes) | 17, 18 e 19 de 30 | 12, 10 e 10 de 30 | 29, 28 e 28 de 30 | 1, 2 e 2 |
-| com a lista (o de hoje) | 0 de 30 nas 3 | 26, 27 e 27 de 30 | 26, 27 e 27 de 30 | 4, 3 e 3 |
-
-Com a lista o modelo não usou acento em nenhuma das 90 respostas, e a troca
-não precisou agir; sem ela, a troca sozinha já tira o acento do caminho. O
-que sobra barrado é tamanho: tradução maior que o campo de uma linha da
-caixa de texto (erro que manda encurtar; nada é cortado). Com a lista houve
-mais dessas (10 em 90, contra 5 em 90), numa amostra pequena demais para
-dizer que a causa é a lista. Na primeira rodada com a lista, as 26 válidas
-foram reinseridas: arquivo do mesmo tamanho, 698 bytes alterados, nenhum
-fora de string traduzida, verificação ok, patch IPS de 885 bytes. Limites:
-um jogo, um par de idiomas, um modelo; tirar o acento pode mudar o sentido
-(`avô` e `avó` viram `avo`); para ter acento no jogo o texto precisa ser
-lido por uma tabela `.tbl` que tenha a letra, e o jogo precisa ter o desenho
-dela.
-
-**Nomes internos**: jogo guarda, ao lado do texto, nomes que nunca aparecem
-na tela (sala, script, recurso). A extração marca como **nome interno** a
-string feita só de maiúsculas, dígitos e sublinhado, sem espaço, com pelo
-menos um sublinhado ou um dígito (`FASE4_31_01`, `VILA_SET_1`, `SALA12`).
-Palavra de menu (`START`) e frase em maiúsculas (`NEW GAME`) continuam
-texto. A string marcada fica na lista — ela pode ter ponteiro em tabela, e o
-Raio-X conta com ela —, mas não vai para a IA e, sem tradução, não é
-regravada. A tela de tradução diz quantas ficaram de fora, o filtro "nomes
-internos" mostra quais, e o botão "É texto do jogo" desfaz a marca de uma.
-No jogo medido, 2.326 das 17.936 strings saem da fila (sobram 15.610): 1.596
-com sublinhado, das quais 1.564 têm ponteiro em tabela, e 730 só com dígito
-colado, que ali são gráfico que passou no filtro de texto. Das 1.590 strings
-com ponteiro em tabela, 1.565 são marcadas; as 25 que ficam são texto de
-menu (21) e lixo (4). Limites: é heurística — `PLAYER1`, `STAGE1` e `1UP`
-são texto e batem na regra; a marca é refeita a cada extração enquanto a
-string não tem tradução (desfazer e extrair de novo marca outra vez); nome
-interno que já recebeu tradução num projeto antigo fica como está.
-
-Se o texto está comprimido, o **Raio-X** mostra quanto — hoje o app só
-reconhece o LZ77 tipo 0x10 e só para leitura: texto comprimido ainda não é
-extraído nem reinserido.
-
-**"In-place"**: cada string traduzida ocupa o espaço da original (mesmo
-tamanho ou menor) — cobre menus e textos curtos de muitos jogos. O validador
-avisa o que não cabe antes de qualquer escrita.
-
-**Relocação de ponteiros**: quando a tradução não cabe no espaço da
-original, o texto novo vai pra outro lugar e os ponteiros pra ele são
-reapontados. Só vale pra string referenciada por uma **tabela** de ponteiros
-(vários seguidos, cada um apontando pro início de uma string). O app **não**
-caça cada ocorrência do endereço no arquivo: uma palavra de código ou de dado
-pode ter o mesmo valor de um ponteiro por coincidência, e trocá-la
-corromperia o jogo em silêncio. Onde o texto novo vai depende da plataforma:
-
-- **GBA**: fim do ROM (o cartucho é lido direto pela CPU). Ponteiro de ROM
-  quase nunca aparece por acaso, então 2 seguidos já contam como tabela.
-- **Nintendo DS**: fim do arquivo do filesystem; o arquivo inteiro vai pro
-  fim do ROM e a FAT passa a apontar pra ele. O ponteiro ali é um
-  deslocamento pequeno dentro do arquivo, de 32 ou 16 bits — e número pequeno
-  aparece à toa em dado binário. Por isso a tabela precisa estar em **ordem
-  crescente**, com 3 seguidos (32 bits) ou 4 (16 bits); ponteiro de 16 bits
-  só alcança os primeiros 64 KB do arquivo.
-- **PS1**: sobra do último setor do arquivo — o hardware lê setores
-  inteiros, então esse espaço sempre chega na RAM. É pouco (menos de 2 KB por
-  arquivo, dividido entre as strings realocadas); o editor mostra o teto de
-  cada uma. Mesmas tabelas de 32 ou 16 bits do DS.
-
-**Fica de fora, de propósito**: o binário ARM9 do DS e o executável do PS1.
-Os dois são copiados pra RAM, e logo depois deles vêm variáveis que o jogo
-zera ao ligar e o heap — texto anexado ali seria apagado ou sobrescrito. PS2
-e PSP também ficam só in-place: eles leem arquivos byte a byte, e a sobra do
-setor não chega garantida na memória.
-
-Em qualquer plataforma, o texto antigo continua no lugar: uma referência que
-a detecção não viu mostra o original em vez de lixo. E relocar resolve o
-espaço **na imagem**, não **na tela**: o validador avisa cada string
-realocada pra você conferir no emulador se ela cabe na caixa de texto.
-Projetos antigos: rode a extração estruturada de novo pra detectar as
-tabelas (as traduções são preservadas).
-
-## Rodando
-
-Pré-requisitos: [Rust](https://rustup.rs) estável, Node 20+, [pnpm](https://pnpm.io),
-e as [dependências do Tauri 2](https://tauri.app/start/prerequisites/) do seu SO.
-Para tradução local, [Ollama](https://ollama.com) com um modelo puxado
-(ex.: `ollama pull llama3.2:3b`).
-
-Para traduzir pela assinatura do ChatGPT, instale o
-[Codex CLI](https://github.com/openai/codex), rode `codex login` uma vez e
-escolha o provider **ChatGPT (Codex CLI)**. O app não faz o login nem guarda
-token: ele chama o `codex exec` com as ferramentas desligadas, só para
-traduzir. Os textos do jogo vão para a OpenAI, então a opção exige "permitir
-tradução remota". Cada lote é uma chamada do Codex — projeto grande gasta o
-limite da assinatura.
-
-```bash
-pnpm install
-pnpm dev          # abre o app (tauri dev)
-```
-
-Fluxo no app: selecionar arquivo → criar projeto → **Extração estruturada** (ou
-scan genérico) → configurar provider e **Traduzir** → revisar no editor →
-**Reinserir na cópia de trabalho** → **Exportar patch** (IPS ou BPS). Os artefatos saem
-em `SeuJogo.rtsproj/exports/`.
-
-Fixtures sintéticas para testar sem ROM real:
-
-```bash
-cargo run -p romtranslate-core --example gen_fixtures
-# gera 21 arquivos em fixtures/generated/ — um por plataforma, mais os de
-# tabela de ponteiros, tabela de caracteres própria, texto comprimido, lixo
-# imprimível antes do texto e texto ASCII com nomes internos
-```
-
-Testes e checks:
-
-```bash
-cargo test --workspace
-cargo fmt --check && cargo clippy --all-targets -- -D warnings
-pnpm test && pnpm lint && pnpm web:build
-# prova de fogo com Ollama rodando:
-cargo test -p romtranslate-core --test translate -- --ignored --nocapture
-# a mesma, com o texto numa tabela de caracteres (mostra o que o modelo
-# respondeu, o que foi gravado, quantas passaram do espaço e os avisos):
-cargo test -p romtranslate-core --test table_translate -- --ignored --nocapture
-# a mesma medição com o ChatGPT pelo Codex CLI logado (gasta a cota da conta;
-# só as 7 frases sintéticas saem da máquina). TABLE_TEST_NO_LIMIT=1 manda o
-# pedido sem o espaço de cada frase, pra comparar:
-TABLE_TEST_PROVIDER=codex cargo test -p romtranslate-core --test table_translate -- --ignored --nocapture
-```
-
-## Sem a janela (CLI)
-
-Os mesmos passos dos botões do app, pelo terminal: para automatizar, testar e
-medir sem abrir a janela. A CLI é uma casca sobre o `crates/core` — nenhuma
-lógica própria.
-
-*The same steps as the app's buttons, from the terminal: a thin shell over
-`crates/core`, for automation, tests and measurements without the window.*
-
-```bash
-cargo run -p romtranslate-cli -- <comando>   # binário: romtranslate
-```
-
-| comando | o que faz | what it does |
+| Provider | Cost | Notes |
 |---|---|---|
-| `inspect <arquivo>` | formato, plataforma e SHA-256 | format, platform and SHA-256 |
-| `create <arquivo> <projeto> [--target pt-BR] [--source en-US]` | cria o projeto; o original não é copiado nem alterado | creates the project; the original is never copied or modified |
-| `extract <projeto>` | extração estruturada do adapter | the adapter's structured extraction |
-| `scan <projeto> [--encoding ascii\|utf8\|utf16_le\|utf16_be\|table] [--tbl arquivo] [--region início..fim] [--min-chars N] [--only-text]` | scanner genérico; `--region` restringe a busca a um trecho do arquivo (bytes, aceita `0x`) | generic scanner; `--region` limits the search to a byte range (`0x` accepted) |
-| `export <projeto> <arquivo> [--format json\|csv]` | as frases do projeto, com os ids | the project's entries, with their ids |
-| `estimate <projeto> [--batch N]` | tamanho da rodada de tradução, sem chamar o provider | size of the translation round, without calling the provider |
-| `translate <projeto> [--batch N] [--parallel N] [--shorten-rounds N]` | traduz as pendentes com o provider das configurações do app; `--parallel` são as chamadas ao mesmo tempo (padrão 4) e `--shorten-rounds` quantas vezes a tradução que não coube volta ao provider (padrão 2; 0 desliga) | translates pending entries with the provider from the app's settings; `--parallel` is the number of simultaneous calls (default 4) and `--shorten-rounds` how many times a translation that does not fit goes back to the provider (default 2; 0 turns it off) |
-| `apply <projeto> <arquivo.tsv>` | grava traduções (`id<TAB>tradução` por linha) e valida | writes translations (`id<TAB>translation` per line) and validates |
-| `validate <projeto>` | valida, com a contagem por tipo de problema | validates, with a count per kind of issue |
-| `reinsert <projeto> [--policy block\|skip\|force]` | grava na cópia de trabalho e confere (padrão `skip`: frase com erro fica no original) | writes to the working copy and verifies (default `skip`: an entry with an error keeps the original) |
-| `patch <projeto> [--format ips\|bps]` | exporta patch, manifest e CSV | exports patch, manifest and CSV |
+| **Ollama** | free, runs locally | Nothing leaves your computer. Small models struggle to keep lines short. |
+| **ChatGPT subscription** via the Codex CLI | your existing plan, no API key | Sign in from inside the app. Subject to your plan's usage limit. |
+| **Claude** (Anthropic API) | your API key | The app estimates the cost before the run and shows what was billed after. |
+| Any **OpenAI-compatible** endpoint | your key | OpenRouter, LM Studio, a company gateway. |
 
-- `--json` em qualquer comando: o resultado numa linha de JSON no stdout.
-  Erro vai para o stderr com saída `1` (`2` para argumento inválido).
-  *`--json` on any command prints the result as one line of JSON on stdout.
-  Errors go to stderr with exit code `1` (`2` for invalid arguments).*
-- `translate` lê as configurações do app (mesma pasta; `--config-dir` aponta
-  outra), mostra o progresso no stderr e, se o provider parar, diz o motivo e
-  sai com `1`. Ctrl-C para depois das chamadas em andamento.
-  *`translate` reads the app's settings (same folder; `--config-dir` points
-  elsewhere), prints progress on stderr and, when the provider stops, says why
-  and exits `1`. Ctrl-C stops after the calls in flight.*
+Anything that is not local needs your explicit permission: the app tells you which text will be sent, and only the extracted lines go out, never the game file.
 
-O ciclo inteiro numa fixture sintética / *the whole cycle on a synthetic fixture*:
+## Supported consoles
+
+Every real platform is **experimental**. Games use different engines, compression and character tables, so there is no promise of universal support.
+
+| Platform | Extract | Reinsert | Longer translations |
+|---|---|---|---|
+| Game Boy Advance | yes | in place, header checksum fixed | yes, for text reached by a pointer table |
+| Nintendo DS | yes, ASCII and UTF-16 per file | in place, header CRC fixed | yes, the file grows and the FAT is updated |
+| NES | yes, ASCII or a `.tbl` character table | in place | no |
+| Super Nintendo | yes | in place, internal checksum fixed | no |
+| GameCube | yes, per file | in place | no |
+| PlayStation 1 (ISO, raw BIN, `.cue`) | yes, per file | in place, sector EDC/ECC regenerated | a little, into the last sector's slack |
+| PlayStation 2 (including DVDs over 2 GiB) | yes, per file | in place | no |
+| PSP | yes, per file | in place | no |
+| Wii, Wii U | detection only | no | no |
+
+"In place" means the translation uses the room of the original line. The full matrix, with what each column means and the known limits, is in [docs/DETALHES.md](docs/DETALHES.md) (Portuguese).
+
+## What it cannot do yet
+
+- Text inside compressed blocks is counted (LZ77 on GBA and DS) but not extracted.
+- No Shift-JIS, so Japanese games are out for now.
+- It does not edit fonts or text drawn as graphics (title screens, some menus).
+- Most text can only be as long as the original. Growing it needs a pointer table the app recognises; tables declared by the user are on the roadmap.
+- Choosing the text region and the character table for a cartridge game is still manual work.
+
+## For tinkerers
+
+- **Relative search** finds a game's custom character table from one word you know is in it, and writes the `.tbl` for you.
+- **X-ray** shows what the app cannot read: compressed blocks, dense areas, how many lines can grow.
+- **Command line**: every step also runs without the window, from source: `cargo run -p romtranslate-cli -- --help`. The commands are listed in [docs/DETALHES.md](docs/DETALHES.md#sem-a-janela-cli).
+- **Write an adapter** for a new platform or engine: [docs/ADAPTERS.md](docs/ADAPTERS.md).
+
+## Build from source
+
+You need stable Rust, Node 20 or newer, pnpm and the [Tauri 2 system dependencies](https://tauri.app/start/prerequisites/).
 
 ```bash
-cargo run -p romtranslate-core --example gen_fixtures
-alias rt='cargo run -q -p romtranslate-cli --'
-rt create fixtures/generated/synthetic_pointers.gba /tmp/demo.rtsproj
-rt extract /tmp/demo.rtsproj
-rt export /tmp/demo.rtsproj /tmp/frases.json   # os ids / the ids
-printf 'scan-00000120\tPOCAO\n' > /tmp/traducao.tsv
-rt apply /tmp/demo.rtsproj /tmp/traducao.tsv
-rt reinsert /tmp/demo.rtsproj
-rt patch /tmp/demo.rtsproj
+git clone https://github.com/crimsondawnacademy-design/romtranslate-studio.git
+cd romtranslate-studio
+pnpm install
+pnpm dev
 ```
 
-## Arquitetura
+To try it without a game, `cargo run -p romtranslate-core --example gen_fixtures` writes synthetic test files to `fixtures/generated/`.
 
-```
-apps/desktop/        # Tauri 2 + React + TS (shell fino; zero lógica de domínio)
-apps/cli/            # CLI `romtranslate` (outra casca fina sobre o core)
-crates/core/         # tudo testável sem UI
-  src/adapter.rs     # trait GameAdapter (probe/extract/apply/verify)
-  src/adapters/      # rtsf (referência completa), gba, nds, nes, snes, gamecube,
-                     # ps1, ps2, psp; wii e wiiu só detectam
-  src/scan.rs        # scanner genérico (Camada A) + a regra de "parece texto"
-  src/tbl.rs         # tabelas .tbl: leem o jogo e regravam a tradução
-  src/relative.rs    # busca relativa: descobre a tabela de caracteres
-  src/xray.rs        # raio-X: o que o app não lê (comprimido, denso, sem ponteiro)
-  src/lz77.rs        # LZ77 do BIOS do GBA/DS (leitura; base da Camada D)
-  src/pipeline.rs    # tradução: TM → batches → retry → cancel
-  src/db.rs          # entries + TM + glossário (SQLite por projeto)
-  src/validate.rs    # placeholders/bytes/statuses
-  src/reinsert.rs    # working copy + verify
-  src/patch.rs       # IPS + BPS create/apply + manifest
-  src/settings.rs    # configurações do app + provider montado a partir delas
-```
+## Rules of the house
 
-## Contribuindo
+- **Patch first.** Share the patch, never the game. The app works on files you already own and does not download ROMs.
+- **Local first.** The game file stays on your computer.
+- **No commercial ROM, BIOS or key** in this repository, in tests or in issues. Fixtures are synthetic.
+- **No claim without a test.** A capability is only listed when a round trip proves it.
 
-O melhor lugar para contribuir é um **adapter de plataforma** — o guia completo
-está em [docs/ADAPTERS.md](docs/ADAPTERS.md) e o processo em
-[CONTRIBUTING.md](CONTRIBUTING.md). A spec completa do produto vive em
-[docs/SPEC.md](docs/SPEC.md).
+## Contributing
 
-Reporte compatibilidade de jogos e peça adapters pelos
-[issue templates](.github/ISSUE_TEMPLATE) — **nunca anexe ROMs, BIOS ou keys**.
+Bug reports, a game that did not work, a platform you want: [issues](https://github.com/crimsondawnacademy-design/romtranslate-studio/issues) are open, and [CONTRIBUTING.md](CONTRIBUTING.md) explains how to send code. Please never attach a commercial ROM.
 
-## Aviso legal
+## Support the project
 
-RomTranslate Studio é uma ferramenta de tradução e modificação para arquivos de
-jogos obtidos legalmente pelo próprio usuário. O projeto **não distribui** jogos,
-BIOS, keys, firmware ou conteúdo proprietário, e não inclui mecanismos para
-baixá-los. Incentivamos a distribuição de **patches** em vez de imagens completas
-modificadas e o respeito às leis e licenças aplicáveis.
+RomTranslate Studio is free, MIT-licensed and made in spare time. If it helped you:
 
-Licença: [MIT](LICENSE).
+- **Star the repository.** It costs nothing and it is what makes the project visible.
+- **Pix (Brazil):** key `13982286871` (phone).
+
+## License
+
+[MIT](LICENSE). The license covers this software only: it gives no rights over any game, trademark or translation of someone else's work.
