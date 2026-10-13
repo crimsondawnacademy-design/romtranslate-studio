@@ -26,6 +26,7 @@ impl FakeCodex {
             "#!/bin/sh\n\
              dir=\"$(dirname \"$0\")\"\n\
              printf '%s\\n' \"$@\" > \"$dir/args.txt\"\n\
+             printf '%s' \"$CODEX_HOME\" > \"$dir/home.txt\"\n\
              if [ \"$1\" = exec ]; then cat > \"$dir/stdin.txt\"; fi\n\
              out=\"\"; prev=\"\"\n\
              for arg in \"$@\"; do if [ \"$prev\" = \"-o\" ]; then out=\"$arg\"; fi; prev=\"$arg\"; done\n\
@@ -179,18 +180,120 @@ async fn health_check_reads_the_login_status() {
     let logged = FakeCodex::new("logged", "echo 'Logged in using ChatGPT'");
     logged.provider("", 30).health_check().await.unwrap();
     assert_eq!(logged.read("args.txt"), "login\nstatus\n");
+    assert!(logged.provider("", 30).logged_in().await.unwrap());
 
+    // Conta do computador sem login: o conserto e no terminal.
     let out = FakeCodex::new("out", "echo 'Not logged in'; exit 1");
+    assert!(!out.provider("", 30).logged_in().await.unwrap());
     let err = out
         .provider("", 30)
         .health_check()
         .await
         .unwrap_err()
         .to_string();
-    assert!(
-        err.contains("codex login") && err.contains("Not logged in"),
-        "{err}"
+    assert!(err.contains("codex login"), "{err}");
+
+    // Conta do app sem login: o conserto e o botao.
+    let err = out
+        .provider("", 30)
+        .with_home(out.0.join("conta"))
+        .health_check()
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("Entrar com o ChatGPT"), "{err}");
+}
+
+#[tokio::test]
+async fn own_account_lives_in_its_own_codex_home() {
+    let fake = FakeCodex::new("home", ANSWER);
+    // Sem pasta propria, o app nao mexe no CODEX_HOME: vale a conta do computador.
+    fake.provider("", 30)
+        .translate_batch(&request())
+        .await
+        .unwrap();
+    assert_eq!(
+        fake.read("home.txt"),
+        std::env::var("CODEX_HOME").unwrap_or_default()
     );
+
+    let home = fake.0.join("conta do app");
+    let own = fake.provider("", 30).with_home(&home);
+    own.translate_batch(&request()).await.unwrap();
+    assert_eq!(fake.read("home.txt"), home.to_str().unwrap());
+    own.logged_in().await.unwrap();
+    assert_eq!(fake.read("home.txt"), home.to_str().unwrap());
+}
+
+#[tokio::test]
+async fn login_waits_for_the_browser_and_can_be_cancelled() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    // Login que termina: a pasta da conta passa a existir e o comando e `login`.
+    let quick = FakeCodex::new("login", "sleep 1");
+    let home = quick.0.join("conta");
+    quick
+        .provider("", 30)
+        .with_home(&home)
+        .login(&AtomicBool::new(false))
+        .await
+        .unwrap();
+    assert!(home.is_dir());
+    assert_eq!(quick.read("args.txt"), "login\n");
+    assert_eq!(quick.read("home.txt"), home.to_str().unwrap());
+
+    // Login que o Codex recusa: o motivo volta na mensagem.
+    let refused = FakeCodex::new("refused", "echo 'port 1455 already in use' >&2; exit 1");
+    let err = refused
+        .provider("", 30)
+        .with_home(refused.0.join("conta"))
+        .login(&AtomicBool::new(false))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("port 1455"), "{err}");
+
+    // Usuario desiste: o processo que esperava o navegador morre junto.
+    let stuck = FakeCodex::new("stuck", "sleep 60");
+    let cancel = Arc::new(AtomicBool::new(false));
+    let flag = cancel.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(700)).await;
+        flag.store(true, Ordering::Relaxed);
+    });
+    let started = std::time::Instant::now();
+    let err = stuck
+        .provider("", 30)
+        .with_home(stuck.0.join("conta"))
+        .login(&cancel)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("cancelado"), "{err}");
+    assert!(started.elapsed().as_secs() < 10);
+}
+
+#[tokio::test]
+async fn logout_runs_on_the_selected_account() {
+    let fake = FakeCodex::new("logout", "true");
+    let home = fake.0.join("conta");
+    fake.provider("", 30)
+        .with_home(&home)
+        .logout()
+        .await
+        .unwrap();
+    assert_eq!(fake.read("args.txt"), "logout\n");
+    assert_eq!(fake.read("home.txt"), home.to_str().unwrap());
+
+    let broken = FakeCodex::new("logout-fail", "echo 'disk full' >&2; exit 2");
+    let err = broken
+        .provider("", 30)
+        .logout()
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("disk full"), "{err}");
 }
 
 /// Chamada REAL ao Codex CLI instalado, gastando a cota da conta logada.

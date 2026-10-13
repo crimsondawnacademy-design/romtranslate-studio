@@ -1,6 +1,6 @@
 mod settings;
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -27,6 +27,28 @@ use settings::AppSettings;
 /// Flag de cancelamento da traducao em andamento (uma por vez).
 struct TranslationState(Mutex<Option<Arc<AtomicBool>>>);
 
+/// Flag de cancelamento do login do Codex em andamento (um por vez).
+struct CodexLoginState(Mutex<Option<Arc<AtomicBool>>>);
+
+/// O Codex CLI com a conta escolhida: a do computador, ou a do app (login
+/// numa pasta propria dentro da configuracao do app, que nunca toca no login
+/// do Codex do usuario).
+fn codex_cli(
+    cfg_dir: &Path,
+    command: &str,
+    model: &str,
+    own_account: bool,
+    timeout_secs: u64,
+) -> Result<CodexCliProvider, String> {
+    let provider =
+        CodexCliProvider::new(command, model, timeout_secs).map_err(|e| e.to_string())?;
+    Ok(if own_account {
+        provider.with_home(cfg_dir.join("codex-conta"))
+    } else {
+        provider
+    })
+}
+
 /// Todo comando de IO roda em spawn_blocking: nao trava a UI.
 async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> romtranslate_core::Result<T> + Send + 'static,
@@ -51,6 +73,7 @@ fn is_localhost(url: &str) -> bool {
 /// (spec §18: traducao remota so com allow_remote_translation).
 fn build_provider(
     cfg: &AppSettings,
+    cfg_dir: &Path,
     api_key: Option<String>,
 ) -> Result<(Box<dyn TranslationProvider>, String), String> {
     match cfg.provider.as_str() {
@@ -87,8 +110,13 @@ fn build_provider(
                 );
             }
             let codex = &cfg.codex_cli;
-            let p = CodexCliProvider::new(&codex.command, &codex.model, cfg.timeout_secs)
-                .map_err(|e| e.to_string())?;
+            let p = codex_cli(
+                cfg_dir,
+                &codex.command,
+                &codex.model,
+                codex.own_account,
+                cfg.timeout_secs,
+            )?;
             let label = match codex.model.trim() {
                 "" => "codex (modelo padrao)".to_string(),
                 model => format!("codex ({model})"),
@@ -342,9 +370,68 @@ async fn test_provider(app: AppHandle) -> Result<String, String> {
     let dir = config_dir(&app)?;
     let cfg = settings::load_settings(&dir);
     let api_key = settings::load_api_key(&dir);
-    let (provider, model) = build_provider(&cfg, api_key)?;
+    let (provider, model) = build_provider(&cfg, &dir, api_key)?;
     provider.health_check().await.map_err(|e| e.to_string())?;
     Ok(model)
+}
+
+// ---- Conta do ChatGPT pelo Codex CLI ----
+
+/// Ha login na conta escolhida? (A do computador ou a do app.)
+#[tauri::command]
+async fn codex_account_status(
+    app: AppHandle,
+    command: String,
+    own_account: bool,
+) -> Result<bool, String> {
+    codex_cli(&config_dir(&app)?, &command, "", own_account, 30)?
+        .logged_in()
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Abre o login do ChatGPT no navegador pra conta DO APP e espera o usuario
+/// concluir. A conta do computador nunca e trocada daqui.
+#[tauri::command]
+async fn codex_login(
+    app: AppHandle,
+    state: State<'_, CodexLoginState>,
+    command: String,
+) -> Result<(), String> {
+    let cancel = Arc::new(AtomicBool::new(false));
+    {
+        let mut guard = state.0.lock().map_err(|e| e.to_string())?;
+        if guard.is_some() {
+            return Err("ja existe um login em andamento".to_string());
+        }
+        *guard = Some(cancel.clone());
+    }
+    let provider = codex_cli(&config_dir(&app)?, &command, "", true, 30);
+    let result = match provider {
+        Ok(provider) => provider.login(&cancel).await.map_err(|e| e.to_string()),
+        Err(e) => Err(e),
+    };
+    if let Ok(mut guard) = state.0.lock() {
+        *guard = None;
+    }
+    result
+}
+
+#[tauri::command]
+fn codex_login_cancel(state: State<'_, CodexLoginState>) -> Result<(), String> {
+    if let Some(flag) = state.0.lock().map_err(|e| e.to_string())?.as_ref() {
+        flag.store(true, Ordering::Relaxed);
+    }
+    Ok(())
+}
+
+/// Apaga o login da conta DO APP.
+#[tauri::command]
+async fn codex_logout(app: AppHandle, command: String) -> Result<(), String> {
+    codex_cli(&config_dir(&app)?, &command, "", true, 30)?
+        .logout()
+        .await
+        .map_err(|e| e.to_string())
 }
 
 // ---- Sprint 3: traducao ----
@@ -381,7 +468,7 @@ async fn do_translate(
     let cfg_dir = config_dir(app)?;
     let cfg = settings::load_settings(&cfg_dir);
     let api_key = settings::load_api_key(&cfg_dir);
-    let (provider, model) = build_provider(&cfg, api_key)?;
+    let (provider, model) = build_provider(&cfg, &cfg_dir, api_key)?;
 
     let game = project::load_project(&dir).map_err(|e| e.to_string())?;
     let mut opts = TranslateOptions::new(game.target_language);
@@ -426,6 +513,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(TranslationState(Mutex::new(None)))
+        .manage(CodexLoginState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
             inspect_file,
             create_project,
@@ -451,7 +539,11 @@ pub fn run() {
             save_settings,
             test_provider,
             translate_project,
-            cancel_translation
+            cancel_translation,
+            codex_account_status,
+            codex_login,
+            codex_login_cancel,
+            codex_logout
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

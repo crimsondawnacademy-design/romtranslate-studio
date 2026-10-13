@@ -92,7 +92,22 @@ const messages = {
     "translate.codexModel": "Modelo (opcional)",
     "translate.codexModelDefault": "padrão do Codex",
     "translate.codexHint":
-      "Usa a sua assinatura do ChatGPT pelo Codex CLI, sem chave de API. Entre uma vez com `codex login` no terminal; o app não vê sua senha nem o token. Os textos do jogo vão para a OpenAI, por isso é preciso permitir tradução remota. Cada lote é uma chamada do Codex: projeto grande gasta o limite da assinatura.",
+      "Usa a sua assinatura do ChatGPT pelo Codex CLI, sem chave de API. O app não vê sua senha nem o token. Os textos do jogo vão para a OpenAI, por isso é preciso permitir tradução remota. Cada lote é uma chamada do Codex: projeto grande gasta o limite da assinatura.",
+    "translate.codexAccount": "Conta",
+    "translate.codexAccountSystem": "A do Codex deste computador",
+    "translate.codexAccountApp": "Uma conta só deste app",
+    "translate.codexLogin": "Entrar com o ChatGPT",
+    "translate.codexSwitch": "Trocar de conta",
+    "translate.codexLogout": "Sair",
+    "translate.codexLoginCancel": "Cancelar login",
+    "translate.codexLoginWaiting":
+      "Conclua o login na página que abriu no navegador: é lá que você escolhe a conta. O app espera até 5 minutos.",
+    "translate.codexChecking": "Conferindo o login...",
+    "translate.codexLogged": "Conta conectada ao ChatGPT.",
+    "translate.codexNotLoggedApp":
+      "Esta conta ainda não tem login. Clique em \"Entrar com o ChatGPT\" e escolha a conta no navegador.",
+    "translate.codexNotLoggedSystem":
+      "O Codex deste computador não está logado. Rode `codex login` no terminal, ou escolha \"Uma conta só deste app\".",
     "translate.saveSettings": "Salvar configuração",
     "translate.test": "Testar conexão",
     "translate.testing": "Testando...",
@@ -288,7 +303,22 @@ const messages = {
     "translate.codexModel": "Model (optional)",
     "translate.codexModelDefault": "Codex default",
     "translate.codexHint":
-      "Uses your ChatGPT subscription through the Codex CLI, with no API key. Sign in once with `codex login` in a terminal; the app never sees your password or token. The game text is sent to OpenAI, so remote translation must be allowed. Each batch is one Codex call: a large project uses up the subscription limit.",
+      "Uses your ChatGPT subscription through the Codex CLI, with no API key. The app never sees your password or token. The game text is sent to OpenAI, so remote translation must be allowed. Each batch is one Codex call: a large project uses up the subscription limit.",
+    "translate.codexAccount": "Account",
+    "translate.codexAccountSystem": "The one this computer's Codex uses",
+    "translate.codexAccountApp": "An account just for this app",
+    "translate.codexLogin": "Sign in with ChatGPT",
+    "translate.codexSwitch": "Switch account",
+    "translate.codexLogout": "Sign out",
+    "translate.codexLoginCancel": "Cancel sign-in",
+    "translate.codexLoginWaiting":
+      "Finish signing in on the page that opened in your browser: that is where you pick the account. The app waits up to 5 minutes.",
+    "translate.codexChecking": "Checking sign-in...",
+    "translate.codexLogged": "Account connected to ChatGPT.",
+    "translate.codexNotLoggedApp":
+      "This account has no sign-in yet. Click \"Sign in with ChatGPT\" and pick the account in your browser.",
+    "translate.codexNotLoggedSystem":
+      "This computer's Codex is not signed in. Run `codex login` in a terminal, or choose \"An account just for this app\".",
     "translate.saveSettings": "Save settings",
     "translate.test": "Test connection",
     "translate.testing": "Testing...",

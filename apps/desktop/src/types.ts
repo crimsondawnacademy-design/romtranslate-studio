@@ -143,6 +143,8 @@ export interface CodexCliSettings {
   command: string;
   /** Vazio = o modelo padrão do Codex. */
   model: string;
+  /** true = login só do app; false = a conta do Codex deste computador. */
+  ownAccount: boolean;
 }
 
 export interface AppSettings {

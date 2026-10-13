@@ -24,6 +24,9 @@ pub struct CodexCliSettings {
     pub command: String,
     /// Vazio = o modelo padrao do Codex.
     pub model: String,
+    /// `true` = o app usa um login so dele (pasta propria); `false` = a conta
+    /// em que o Codex deste computador ja esta logado.
+    pub own_account: bool,
 }
 
 impl Default for CodexCliSettings {
@@ -31,6 +34,7 @@ impl Default for CodexCliSettings {
         CodexCliSettings {
             command: romtranslate_core::providers::codex_cli::DEFAULT_COMMAND.to_string(),
             model: String::new(),
+            own_account: false,
         }
     }
 }

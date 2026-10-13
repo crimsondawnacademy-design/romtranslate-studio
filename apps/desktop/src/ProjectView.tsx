@@ -103,6 +103,9 @@ export default function ProjectView({
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [testResult, setTestResult] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
+  // Conta do ChatGPT em uso pelo Codex: null = ainda nao conferido.
+  const [codexLogged, setCodexLogged] = useState<boolean | null>(null);
+  const [loggingIn, setLoggingIn] = useState(false);
   // Erro de configurar, testar ou traduzir aparece junto dos botoes: o aviso
   // geral fica no topo da pagina, fora de vista de quem esta neste painel.
   const [translateError, setTranslateError] = useState<string | null>(null);
@@ -360,6 +363,58 @@ export default function ProjectView({
       setTranslateError(String(e));
       return false;
     }
+  }
+
+  const codexSelected = settings?.provider === "codex_cli";
+  const codexCommand = settings?.codexCli.command ?? "";
+  const codexOwnAccount = settings?.codexCli.ownAccount ?? false;
+
+  const refreshCodexAccount = useCallback(async () => {
+    setCodexLogged(null);
+    try {
+      setCodexLogged(
+        await invoke<boolean>("codex_account_status", {
+          command: codexCommand,
+          ownAccount: codexOwnAccount,
+        }),
+      );
+    } catch (e) {
+      setCodexLogged(false);
+      setTranslateError(String(e));
+    }
+  }, [codexCommand, codexOwnAccount]);
+
+  // O comando muda a cada tecla: so reconfere quando o provider ou a conta
+  // escolhida mudam (e depois de entrar ou sair).
+  useEffect(() => {
+    if (codexSelected) void refreshCodexAccount();
+  }, [codexSelected, codexOwnAccount]);
+
+  /** Login da conta do app: o navegador abre e a pessoa escolhe a conta la. */
+  async function codexLogin(switching: boolean) {
+    setTranslateError(null);
+    setTestResult(null);
+    setLoggingIn(true);
+    try {
+      if (switching) await invoke("codex_logout", { command: codexCommand });
+      await invoke("codex_login", { command: codexCommand });
+    } catch (e) {
+      setTranslateError(String(e));
+    } finally {
+      setLoggingIn(false);
+      await refreshCodexAccount();
+    }
+  }
+
+  async function codexLogout() {
+    setTranslateError(null);
+    setTestResult(null);
+    try {
+      await invoke("codex_logout", { command: codexCommand });
+    } catch (e) {
+      setTranslateError(String(e));
+    }
+    await refreshCodexAccount();
   }
 
   async function testProvider() {
@@ -914,7 +969,51 @@ export default function ProjectView({
             )}
           </div>
           {settings.provider === "codex_cli" && (
-            <p className="hint left">{t("translate.codexHint")}</p>
+            <>
+              <p className="hint left">{t("translate.codexHint")}</p>
+              <div className="scan-controls">
+                <label>
+                  {t("translate.codexAccount")}
+                  <select
+                    value={settings.codexCli.ownAccount ? "app" : "system"}
+                    disabled={loggingIn}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        codexCli: { ...settings.codexCli, ownAccount: e.target.value === "app" },
+                      })
+                    }
+                  >
+                    <option value="system">{t("translate.codexAccountSystem")}</option>
+                    <option value="app">{t("translate.codexAccountApp")}</option>
+                  </select>
+                </label>
+                {settings.codexCli.ownAccount && !loggingIn && (
+                  <>
+                    <button onClick={() => codexLogin(codexLogged === true)}>
+                      {codexLogged ? t("translate.codexSwitch") : t("translate.codexLogin")}
+                    </button>
+                    {codexLogged && <button onClick={codexLogout}>{t("translate.codexLogout")}</button>}
+                  </>
+                )}
+                {loggingIn && (
+                  <button onClick={() => invoke("codex_login_cancel")}>
+                    {t("translate.codexLoginCancel")}
+                  </button>
+                )}
+              </div>
+              <p className="hint left">
+                {loggingIn
+                  ? t("translate.codexLoginWaiting")
+                  : codexLogged === null
+                    ? t("translate.codexChecking")
+                    : codexLogged
+                      ? t("translate.codexLogged")
+                      : settings.codexCli.ownAccount
+                        ? t("translate.codexNotLoggedApp")
+                        : t("translate.codexNotLoggedSystem")}
+              </p>
+            </>
           )}
           {hasAscii && <p className="hint left">{t("translate.ascii")}</p>}
           {internal > 0 && <p className="hint left">{t("translate.internal", { n: internal })}</p>}
