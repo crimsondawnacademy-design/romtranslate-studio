@@ -3550,7 +3550,7 @@ dependencies = [
 
 [[package]]
 name = "romtranslate-cli"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "clap",
  "dirs",
@@ -3562,7 +3562,7 @@ dependencies = [
 
 [[package]]
 name = "romtranslate-core"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "async-trait",
  "chrono",
@@ -3584,7 +3584,7 @@ dependencies = [
 
 [[package]]
 name = "romtranslate-desktop"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "romtranslate-core",
  "serde",
