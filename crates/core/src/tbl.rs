@@ -313,12 +313,31 @@ impl TblTable {
     /// o espaco exato. Traducao maior que `slot` volta sem preenchimento:
     /// quem chama decide se e erro ou relocacao.
     pub fn encode_slot(&self, text: &str, slot: usize, terminated: bool) -> Result<Vec<u8>> {
+        self.encode_slot_with(text, slot, terminated.then_some(&[0u8][..]))
+    }
+
+    /// `encode_slot` com a sobra completada por `fill` repetido (o 0x00 da
+    /// string terminada, o codigo de fim de um campo de largura fixa); sem
+    /// `fill`, pelo espaco da tabela.
+    pub fn encode_slot_with(
+        &self,
+        text: &str,
+        slot: usize,
+        fill: Option<&[u8]>,
+    ) -> Result<Vec<u8>> {
         let mut bytes = self.encode(text)?;
         let Some(room) = slot.checked_sub(bytes.len()).filter(|&room| room > 0) else {
             return Ok(bytes);
         };
-        if terminated {
-            bytes.resize(slot, 0x00);
+        if let Some(fill) = fill.filter(|fill| !fill.is_empty()) {
+            if !room.is_multiple_of(fill.len()) {
+                return Err(CoreError::Tbl(format!(
+                    "campo de largura fixa: sobram {room} bytes, que o preenchimento de {} \
+                     bytes nao completa",
+                    fill.len()
+                )));
+            }
+            bytes.extend(fill.repeat(room / fill.len()));
             return Ok(bytes);
         }
         match self.reverse.get(" ") {

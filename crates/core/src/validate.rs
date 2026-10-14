@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::adapters::inplace::terminated;
+use crate::adapters::inplace::fill;
 use crate::db::{GlobalTm, ProjectDb};
 use crate::error::Result;
 use crate::tbl::{ProjectTables, TblTable};
@@ -237,8 +237,8 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
             let original = entry.original_bytes.len();
             // Texto em tabela: a sobra do espaco tem que ser preenchivel — a
             // mesma conta que a reinsercao faz.
-            if let Some(Err(e)) =
-                table.map(|table| table.encode_slot(translation, original, terminated(entry)))
+            if let Some(Err(e)) = table
+                .map(|table| table.encode_slot_with(translation, original, fill(entry).as_deref()))
             {
                 push(Severity::Error, IssueKind::ByteOverflow, e.to_string());
             }

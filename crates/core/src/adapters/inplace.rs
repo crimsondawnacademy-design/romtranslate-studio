@@ -20,6 +20,21 @@ pub(crate) fn terminated(entry: &TextEntry) -> bool {
         .unwrap_or(true)
 }
 
+/// Com o que completar a sobra do espaco de uma string gravada por tabela:
+/// os bytes de `metadata.fill` (hex; campo de largura fixa completado com o
+/// codigo de fim, como `FFFF`), o 0x00 da string terminada, ou nada (`None`:
+/// o espaco da tabela).
+pub(crate) fn fill(entry: &TextEntry) -> Option<Vec<u8>> {
+    let hex = entry.metadata.get("fill").and_then(|v| v.as_str());
+    match hex {
+        Some(hex) => (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(hex.get(i..i + 2)?, 16).ok())
+            .collect(),
+        None => terminated(entry).then(|| vec![0]),
+    }
+}
+
 /// Serializa a traducao no encoding da entry.
 fn encode(entry: &TextEntry, text: &str) -> Result<Option<Vec<u8>>> {
     let entry_id = &entry.id;

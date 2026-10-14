@@ -56,6 +56,12 @@ const ALONE_CHARS: usize = 16;
 /// Usos pra julgar um comando (`find_params`) ou a marca de fala
 /// (`find_bullet`).
 const MIN_USES: u32 = 15;
+/// Registros seguidos de mesma largura pra valer como tabela de campos fixos
+/// (`record_slots`).
+const MIN_RECORDS: usize = 8;
+/// Registro mais largo que isto (em unidades) nao e campo de nome ou item.
+const MAX_RECORD: usize = 64;
+
 /// Um comando leva ate isto de parametros. Numero em mais posicoes seguidas
 /// do que isto nao e parametro: e texto de outro alfabeto.
 const MAX_PARAMS: usize = 4;
@@ -503,6 +509,55 @@ fn scan(codes: &[u16], dialect: &Dialect, starts: &HashSet<usize>) -> Vec<Span> 
     found
 }
 
+/// Tabela de campos de largura fixa (nomes, itens): `MIN_RECORDS` ou mais
+/// sequencias seguidas, uma a cada `stride` unidades, cada uma completada com
+/// 0xFFFF ate o comeco da proxima. Pra cada sequencia que esta numa tabela
+/// assim, o espaco que ela pode ocupar (em unidades): o do maior texto que o
+/// proprio jogo poe nessa tabela — o que ele sabe mostrar —, sempre com pelo
+/// menos um 0xFFFF fechando o campo.
+///
+/// Medido no jogo real: a tabela de nomes tem um campo a cada 12 unidades, e
+/// "リュカ" (3) ocupava so 3: a traducao saia "Luc". O maior nome dela tem 6.
+fn record_slots(codes: &[u16], found: &[Span]) -> Vec<Option<usize>> {
+    let filled = |span: &Span, stride: usize| {
+        codes
+            .get(span.end..span.begin + stride)
+            .is_some_and(|rest| !rest.is_empty() && rest.iter().all(|c| *c == END))
+    };
+    let mut slots = vec![None; found.len()];
+    let mut i = 0;
+    while i + 1 < found.len() {
+        let stride = found[i + 1].begin - found[i].begin;
+        let mut j = i;
+        while j + 1 < found.len()
+            && found[j + 1].begin - found[j].begin == stride
+            && filled(&found[j], stride)
+        {
+            j += 1;
+        }
+        if j + 1 - i < MIN_RECORDS || stride > MAX_RECORD {
+            i += 1;
+            continue;
+        }
+        let longest = found[i..=j]
+            .iter()
+            .map(|span| span.end - span.begin)
+            .max()
+            .unwrap_or(0)
+            .min(stride - 1);
+        for (k, span) in found.iter().enumerate().take(j + 1).skip(i) {
+            // O ultimo campo da fila tambem tem que fechar dentro da largura.
+            if k < j || filled(span, stride) {
+                slots[k] = Some(longest.max(span.end - span.begin));
+            }
+        }
+        // O ultimo da fila pode ser o primeiro da proxima: a distancia ate ele
+        // por acaso bateu com a largura desta.
+        i = j;
+    }
+    slots
+}
+
 /// As mensagens de `data` nesta codificacao, ou `None` se o arquivo nao
 /// guarda texto assim (menos de `MIN_SENTENCES` frases). Cada entry vai do
 /// primeiro ao ultimo caractere de uma sequencia de caracteres, desenhos e
@@ -539,6 +594,7 @@ pub fn extract(data: &[u8], starts: &HashSet<usize>) -> Option<Kuten16> {
         }
         text
     };
+    let slots = record_slots(&codes, &found);
     let mut entries = Vec::new();
     let mut spans = Vec::new();
     let mut commands = BTreeSet::new();
@@ -551,7 +607,7 @@ pub fn extract(data: &[u8], starts: &HashSet<usize>) -> Option<Kuten16> {
             continue;
         }
         let grouped = i + 1 - group >= MIN_GROUP;
-        for span in &found[group..=i] {
+        for (span, slot) in found[group..=i].iter().zip(&slots[group..=i]) {
             let text = text_of(span);
             if !grouped && !stands_alone(&text) {
                 continue;
@@ -564,7 +620,10 @@ pub fn extract(data: &[u8], starts: &HashSet<usize>) -> Option<Kuten16> {
                 }
                 at += len;
             }
-            let (offset, len) = (span.begin * 2, (span.end - span.begin) * 2);
+            // Campo de tabela de largura fixa: a entry vai ate onde o campo
+            // deixa, e a sobra da traducao volta a ser 0xFFFF.
+            let units = slot.unwrap_or(span.end - span.begin);
+            let (offset, len) = (span.begin * 2, units * 2);
             spans.push((offset, len));
             entries.push(TextEntry {
                 id: format!("scan-{offset:08x}"),
@@ -580,11 +639,19 @@ pub fn extract(data: &[u8], starts: &HashSet<usize>) -> Option<Kuten16> {
                 max_bytes: Some(len),
                 encoding: TextEncoding::Table(TABLE_ID.to_string()),
                 status: TranslationStatus::Untranslated,
-                metadata: serde_json::json!({
-                    "scanner": TABLE_ID,
-                    "chars": span.chars,
-                    "terminated": codes.get(span.end) == Some(&0),
-                }),
+                metadata: match slot {
+                    Some(_) => serde_json::json!({
+                        "scanner": TABLE_ID,
+                        "chars": span.chars,
+                        "terminated": false,
+                        "fill": "FFFF",
+                    }),
+                    None => serde_json::json!({
+                        "scanner": TABLE_ID,
+                        "chars": span.chars,
+                        "terminated": codes.get(span.end) == Some(&0),
+                    }),
+                },
             });
         }
         group = i + 1;
@@ -700,6 +767,66 @@ mod tests {
             .find(|e| e.source_text.contains("こあき"))
             .expect("o nome foi lido");
         assert_eq!(name.source_text, "こあき");
+    }
+
+    #[test]
+    fn a_table_of_fixed_fields_lends_each_name_the_room_of_the_longest() {
+        let kana = |text: &str| text.chars().map(|c| encode(c).unwrap()).collect::<Vec<_>>();
+        // Falas de tamanhos variados, como as de um jogo.
+        let predicates = [
+            "きょうもげんきにはたらいている",
+            "まだねむそうにしている",
+            "ゆっくりさんぽをしている",
+        ];
+        let mut codes = Vec::new();
+        for i in 0..120 {
+            codes.push(encode('◆').unwrap());
+            codes.extend(kana("むらのひとは"));
+            codes.push(0xFF01);
+            codes.extend(kana(predicates[i % 3]));
+            codes.push(END);
+        }
+        // Tabela de nomes: um campo a cada 8 unidades, completado com 0xFFFF.
+        let names = [
+            "リュカ",
+            "クラウス",
+            "フリント",
+            "ヒナワ",
+            "ボニー",
+            "ダスター",
+            "クマトラ",
+            "サルサ",
+            "ウエスト",
+            "アレック",
+        ];
+        for name in names {
+            let mut field = kana(name);
+            field.resize(8, END);
+            codes.extend(field);
+        }
+        codes.extend([0, 0, 0, 0]);
+        let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
+        let found = extract(&data, &HashSet::new()).unwrap();
+        let entry = |name: &str| {
+            found
+                .entries
+                .iter()
+                .find(|e| e.source_text == name)
+                .unwrap()
+        };
+        // O maior nome tem 4: cada campo pode levar 4, e o resto volta a ser fim.
+        assert_eq!(entry("リュカ").original_bytes.len(), 8);
+        assert_eq!(&entry("リュカ").original_bytes[6..], &[0xFF, 0xFF]);
+        assert_eq!(entry("リュカ").max_bytes, Some(8));
+        assert_eq!(entry("リュカ").metadata["fill"], "FFFF");
+        assert_eq!(entry("クラウス").original_bytes.len(), 8);
+        // Fora de tabela, a frase so tem o proprio espaco.
+        let line = found
+            .entries
+            .iter()
+            .find(|e| e.source_text.starts_with('◆'))
+            .unwrap();
+        assert!(line.metadata.get("fill").is_none());
     }
 
     #[test]

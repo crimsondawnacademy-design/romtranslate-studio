@@ -245,10 +245,10 @@ fn encode_table_entries(project_dir: &Path, entries: &mut [TextEntry]) -> Result
         };
         let bytes = tables
             .get(id)?
-            .encode_slot(
+            .encode_slot_with(
                 &text,
                 entry.original_bytes.len(),
-                crate::adapters::inplace::terminated(entry),
+                crate::adapters::inplace::fill(entry).as_deref(),
             )
             .map_err(|e| CoreError::Project(format!("entry {}: {e}", entry.id)))?;
         entry.set_encoded(&bytes);

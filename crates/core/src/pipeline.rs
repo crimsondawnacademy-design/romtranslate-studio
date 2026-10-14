@@ -13,7 +13,7 @@ use chrono::Utc;
 use serde::Serialize;
 use tracing::{info, warn};
 
-use crate::adapters::inplace::terminated;
+use crate::adapters::inplace::fill;
 use crate::db::{GlobalTm, ProjectDb};
 use crate::error::Result;
 use crate::provider::{BatchItem, GlossaryTerm, TranslationProvider, TranslationRequest};
@@ -414,12 +414,18 @@ pub async fn run_translation(
                         answered.insert(entry.id.clone());
                         summary.translated += 1;
                     }
-                    let missing = batch.len()
-                        - response
-                            .translations
-                            .iter()
-                            .filter(|t| batch.iter().any(|e| e.id == t.id))
-                            .count();
+                    // A mesma id duas vezes na resposta nao conta duas: sem isto
+                    // a conta passava do tamanho do lote e virava um numero
+                    // gigante na tela.
+                    let came: HashSet<&str> = response
+                        .translations
+                        .iter()
+                        .map(|t| t.id.as_str())
+                        .collect();
+                    let missing = batch
+                        .iter()
+                        .filter(|e| !came.contains(e.id.as_str()))
+                        .count();
                     summary.failed += missing;
                     failed_in_a_row = 0;
                 }
@@ -628,7 +634,7 @@ impl<'a> Charset<'a> {
             Charset::Table(table) => {
                 let slot = entry.original_bytes.len();
                 table
-                    .encode_slot(text, slot, terminated(entry))
+                    .encode_slot_with(text, slot, fill(entry).as_deref())
                     .is_ok_and(|bytes| bytes.len() <= slot || entry.can_grow())
             }
         }
