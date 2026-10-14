@@ -105,6 +105,10 @@ fn a_disc_with_the_root_directory_past_the_probe_window_is_recognized() {
     // E o disco inteiro passa pelo resto: a extracao acha o texto dele.
     let entries = Ps2Adapter.extract_structured(&dvd).unwrap();
     assert!(entries.iter().any(|e| e.source_text == "PRESS X TO JUMP"));
+    // A configuracao de partida do console nao entra na fila de traducao.
+    assert!(!entries
+        .iter()
+        .any(|e| e.resource_path.as_deref() == Some("SYSTEM.CNF")));
 }
 
 #[test]

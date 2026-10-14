@@ -272,7 +272,13 @@ pub fn extract_ascii_by_file(
 
     let files = walk(data, map)?;
     let mut out = crate::adapter::Extraction::default();
-    for file in files.iter().filter(|f| f.size > 0) {
+    // O SYSTEM.CNF e a configuracao de partida do console ("VMODE = NTSC"
+    // passa por frase): nao e texto do jogo, e mexer nele impede o disco de
+    // ligar.
+    let game_files = files
+        .iter()
+        .filter(|f| f.size > 0 && !f.path.eq_ignore_ascii_case("SYSTEM.CNF"));
+    for file in game_files {
         let first = out.entries.len();
         for (start, end) in file_regions(data, map, file.extent, file.size)? {
             let outcome = scan_bytes(
