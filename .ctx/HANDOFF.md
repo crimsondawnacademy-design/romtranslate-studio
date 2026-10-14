@@ -5,11 +5,21 @@ gerado_por: claude / opus-5.5
 motivo: fim-de-sessao-longa (janela de contexto fechando)
 branch: main
 ultimo_commit: c2cec40 (2026-10-13)
-versao_publicada: v0.1.5
+versao_publicada: v0.1.8
 numero: 4
-adendo: 2026-10-13 à noite (v0.1.6 e japonês; adendo 2 às 20h) — ler antes do resto
+adendo: 2026-10-13 à noite (v0.1.6 e japonês; adendo 2 às 20h); adendo 3 em 14/10 (v0.1.8) — ler antes do resto
 ---
 
+> ## Adendo 3, de 14/10/2026 (noite) — v0.1.8 publicada
+>
+> - **v0.1.8** (tag `0a4d4aa`) leva tudo do `main` até ela: tradução completa como padrão no jogo
+>   japonês (menus, itens, nomes com o espaço do maior campo, a correção da tela preta). Site em 0.1.8.
+> - **O jogo do Rhuan:** 11.824 frases gravadas; cópia "teste 4" em `~/Desktop/mother3-teste-jp/`.
+>   O que falta está no passo 0e do `STATE.md`.
+> - **mGBA deste Mac com o controle USB:** configuração da máquina, fora do repo (memória local do Claude,
+>   `mgba-controle-usb`). Em outro Mac, o mGBA com pad ShanWan no modo PS3 fecha sozinho até ter
+>   `SDL_HIDAPI_IGNORE_DEVICES=0x2563/0x0973` no ambiente.
+>
 > ## Adendo 2, de 13/10/2026 (20h) — onde o jogo japonês parou
 >
 > - **No `main` (`2e1df05`), sem binário:** quebra de linha automática na
