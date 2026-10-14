@@ -529,6 +529,73 @@ pub async fn run_translation(
     }
     summary.too_long = too_long_entries(db, &answered, &mut tables)?.len();
 
+    // Fase 4 — o que voltou sem um codigo do jogo (ou com um a mais) volta ao
+    // provider com a lista dos codigos que a frase tem que ter. Medido em
+    // 14/10/2026 num jogo japones: 2,7% das falas voltaram assim do modelo
+    // leve (juntou paragrafos tirando o "espera o botao"), e duas perguntas a
+    // mais recuperaram tres em cada quatro. Mesma regra da fase 3: so o que o
+    // provider respondeu nesta rodada.
+    for _ in 0..opts.shorten_rounds {
+        if summary.cancelled || summary.stopped.is_some() || cancel.load(Ordering::Relaxed) {
+            break;
+        }
+        let mut broken = code_mismatch_entries(db, &answered, &mut tables)?;
+        if broken.is_empty() {
+            break;
+        }
+        let mut fixed = 0;
+        broken.sort_by(|a, b| charset_group(a).cmp(&charset_group(b)));
+        let batches: Vec<&[TextEntry]> = broken
+            .chunk_by(|a, b| charset_group(a) == charset_group(b))
+            .flat_map(|same_charset| batches_of(same_charset, opts.batch_size))
+            .collect();
+        for wave in batches.chunks(opts.parallel.max(1)) {
+            if cancel.load(Ordering::Relaxed) {
+                summary.cancelled = true;
+                break;
+            }
+            let mut requests = Vec::with_capacity(wave.len());
+            for batch in wave {
+                let charset = Charset::of(&batch[0], &mut tables)?;
+                let mut request = batch_request(batch, charset, &glossary, opts);
+                for (item, entry) in request.items.iter_mut().zip(batch.iter()) {
+                    codes_please(item, entry);
+                }
+                requests.push(request);
+            }
+            let Some(responses) = call_together(provider, &requests, opts, cancel).await else {
+                summary.cancelled = true;
+                break;
+            };
+            for (batch, response) in wave.iter().zip(responses) {
+                let charset = Charset::of(&batch[0], &mut tables)?;
+                let Ok(response) = response else { continue };
+                for item in &response.translations {
+                    let Some(entry) = batch.iter().find(|e| e.id == item.id) else {
+                        continue;
+                    };
+                    let fitted = charset.and_then(|charset| charset.fit(&item.translation));
+                    let answer = fitted.as_deref().unwrap_or(&item.translation);
+                    let fits = !matches!(excess(entry, answer, charset), Some(over) if over > 0);
+                    if answer.trim().is_empty() || !fits || loses_codes(entry, answer, charset) {
+                        continue; // ainda errada: fica a de antes
+                    }
+                    save_translation(db, entry, &item.translation, charset)?;
+                    db.tm_store(
+                        &entry.source_text,
+                        &src_lang,
+                        &opts.target_language,
+                        &item.translation,
+                    )?;
+                    fixed += 1;
+                }
+            }
+        }
+        if fixed == 0 {
+            break;
+        }
+    }
+
     // As repeticoes recebem a traducao que ficou pra primeira (ja encurtada,
     // se foi o caso). A que ficou sem resposta deixa as copias pendentes.
     if !copies.is_empty() {
@@ -715,6 +782,70 @@ fn too_long_entries(
         }
     }
     Ok(out)
+}
+
+/// A traducao `text` de `entry` tirou um codigo do original ou pos um que ele
+/// nao tem? A conta e a da validacao (com as excecoes dela: quebra de linha
+/// que o app poe, kanji que a tabela nao le, "<...>" que a tabela nao grava).
+fn loses_codes(entry: &TextEntry, text: &str, charset: Option<Charset>) -> bool {
+    let table = match charset {
+        Some(Charset::Table(table)) => Some(table),
+        _ => None,
+    };
+    let probe = TextEntry {
+        translated_text: Some(text.to_string()),
+        ..entry.clone()
+    };
+    crate::validate::validate_entry(&probe, table)
+        .iter()
+        .any(|issue| issue.kind == crate::validate::IssueKind::PlaceholderMismatch)
+}
+
+/// As entries que o provider respondeu nesta rodada (`ids`) com codigo a
+/// menos ou a mais.
+fn code_mismatch_entries(
+    db: &ProjectDb,
+    ids: &HashSet<String>,
+    tables: &mut ProjectTables,
+) -> Result<Vec<TextEntry>> {
+    let mut out = Vec::new();
+    for entry in db.load_entries()? {
+        if !ids.contains(&entry.id) {
+            continue;
+        }
+        let charset = Charset::of(&entry, tables)?;
+        if entry
+            .translated_text
+            .as_deref()
+            .is_some_and(|text| loses_codes(&entry, text, charset))
+        {
+            out.push(entry);
+        }
+    }
+    Ok(out)
+}
+
+/// Transforma o item do pedido numa repergunta pelos codigos: a traducao de
+/// antes e a lista dos codigos (do texto que o provider recebeu) que ela
+/// tem que ter.
+fn codes_please(item: &mut BatchItem, entry: &TextEntry) {
+    let Some(previous) = entry.translated_text.as_deref() else {
+        return;
+    };
+    let codes: Vec<String> = extract_tokens(&item.text)
+        .into_iter()
+        .filter(|token| !crate::kuten::is_glyph_token(token))
+        .collect();
+    let note = format!(
+        "Your previous translation \"{previous}\" dropped or added codes in square brackets. \
+         Write it again with exactly these codes, in this order, each one as many times as it \
+         appears here: {}",
+        codes.join(" ")
+    );
+    item.context = Some(match item.context.take() {
+        Some(context) => format!("{context}\n{note}"),
+        None => note,
+    });
 }
 
 /// Transforma o item do pedido numa repergunta: diz ao provider a traducao

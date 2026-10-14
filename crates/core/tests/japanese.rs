@@ -135,6 +135,47 @@ impl TranslationProvider for FakeProvider {
     }
 }
 
+/// Provider que tira a quebra de linha na primeira resposta e so poe de
+/// volta quando o pedido diz que faltou codigo.
+struct ForgetfulProvider {
+    asked_again: Mutex<usize>,
+}
+
+#[async_trait]
+impl TranslationProvider for ForgetfulProvider {
+    fn id(&self) -> &'static str {
+        "forgetful"
+    }
+
+    async fn translate_batch(&self, request: &TranslationRequest) -> Result<TranslationResponse> {
+        let translations = request
+            .items
+            .iter()
+            .map(|item| {
+                let again = item
+                    .context
+                    .as_deref()
+                    .is_some_and(|c| c.contains("dropped or added codes"));
+                *self.asked_again.lock().unwrap() += usize::from(again);
+                let translation = match (item.text.contains("[FF01]"), again) {
+                    (false, _) => "Mel",
+                    (true, false) => "◆Oi tchau.",
+                    (true, true) => "◆Oi[FF01]tchau.",
+                };
+                TranslatedItem {
+                    id: item.id.clone(),
+                    translation: translation.to_string(),
+                }
+            })
+            .collect();
+        Ok(TranslationResponse { translations })
+    }
+
+    async fn health_check(&self) -> Result<()> {
+        Ok(())
+    }
+}
+
 #[test]
 fn japanese_text_is_extracted_next_to_the_ascii_and_kanji_alone_is_not() {
     let rom = synth::make_gba_rom_japanese();
@@ -479,6 +520,32 @@ mod jis16 {
         assert!(japanese
             .iter()
             .all(|e| e.status == TranslationStatus::Untranslated));
+    }
+
+    #[tokio::test]
+    async fn a_translation_that_lost_a_game_code_is_asked_again_with_the_list() {
+        let tmp = TempDir::new("jis16-codes");
+        let (dir, _) = project(&tmp);
+        extract_project(&dir).unwrap();
+        let provider = ForgetfulProvider {
+            asked_again: Mutex::new(0),
+        };
+        let mut db = ProjectDb::open(&dir).unwrap();
+        run_translation(
+            &mut db,
+            None,
+            &provider,
+            "fake-model",
+            &TranslateOptions::new("pt-BR"),
+            &AtomicBool::new(false),
+            &|_| {},
+        )
+        .await
+        .unwrap();
+        assert!(*provider.asked_again.lock().unwrap() > 0);
+        let entries = db.load_entries().unwrap();
+        let first = by_text(&entries, &synth::jis16_message(0));
+        assert_eq!(first.translated_text.as_deref(), Some("◆Oi[FF01]tchau."));
     }
 
     #[test]
