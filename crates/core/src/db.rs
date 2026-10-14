@@ -155,6 +155,55 @@ impl ProjectDb {
         Ok(removed)
     }
 
+    /// Tira do projeto a leitura antiga que a extracao nova trocou por outra:
+    /// a entry que nao voltou, no mesmo encoding de uma que voltou e em cima
+    /// dos mesmos bytes — tenha traducao ou nao. Sem isto, depois de uma
+    /// regra de leitura nova as duas disputavam os bytes e a reinsercao
+    /// parava. Entry de outro encoding (o Escanear com uma tabela da pessoa)
+    /// fica. Devolve quantas saíram.
+    pub fn remove_overlapped(&mut self, extracted: &[TextEntry]) -> Result<usize> {
+        let ids: HashSet<&str> = extracted.iter().map(|e| e.id.as_str()).collect();
+        let mut spans: Vec<(u64, u64, &TextEncoding)> = extracted
+            .iter()
+            .filter_map(|e| {
+                Some((
+                    e.offset?,
+                    e.offset? + e.original_bytes.len() as u64,
+                    &e.encoding,
+                ))
+            })
+            .collect();
+        spans.sort_unstable_by_key(|span| span.0);
+        let overlaps = |entry: &TextEntry| {
+            let Some(start) = entry.offset else {
+                return false;
+            };
+            let end = start + entry.original_bytes.len() as u64;
+            let i = spans.partition_point(|span| span.0 < end);
+            spans[..i]
+                .iter()
+                .rev()
+                .take_while(|span| span.0 + 64 * 1024 > start)
+                .any(|span| span.1 > start && span.2 == &entry.encoding)
+        };
+        let stale: Vec<String> = self
+            .load_entries()?
+            .into_iter()
+            .filter(|e| !ids.contains(e.id.as_str()) && overlaps(e))
+            .map(|e| e.id)
+            .collect();
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        let mut removed = 0;
+        {
+            let mut delete = tx.prepare("DELETE FROM entries WHERE id=?1")?;
+            for id in &stale {
+                removed += delete.execute([id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(removed)
+    }
+
     pub fn load_entries(&self) -> Result<Vec<TextEntry>> {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT {ENTRY_COLUMNS} FROM entries ORDER BY offset IS NULL, offset, id"

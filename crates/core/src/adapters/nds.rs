@@ -264,7 +264,14 @@ fn relocate_files(data: &[u8], out: &mut Vec<u8>, relocations: &[Relocation]) ->
         let room = MAX_ROM_LEN
             .checked_sub(new_start)
             .ok_or_else(|| err("ROM ja no tamanho maximo de um cartao de DS"))?;
-        relocate(&mut bytes, &relative, 0, room).map_err(|e| err(format!("{path}: {e}")))?;
+        let left =
+            relocate(&mut bytes, &relative, 0, room).map_err(|e| err(format!("{path}: {e}")))?;
+        if left > 0 {
+            return Err(err(format!(
+                "{path}: sem espaco pra realocar {left} string(s) — o arquivo passaria do \
+                 espaco que ele tem; encurte as traducoes"
+            )));
+        }
         out.resize(new_start, 0xFF);
         out.extend_from_slice(&bytes);
         let new_end = out.len();

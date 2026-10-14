@@ -276,9 +276,14 @@ impl GameAdapter for GbaAdapter {
         }
         ensure_pointers_untouched(data, &out, entries)?;
         plan.relocations.extend(blocks.relocations);
-        relocate(&mut out, &plan.relocations, ROM_POINTERS.base, MAX_ROM_LEN)?;
+        let left = relocate(&mut out, &plan.relocations, ROM_POINTERS.base, MAX_ROM_LEN)?;
         out[CHECKSUM_OFFSET] = header_checksum(&out);
         let mut report = plan.report;
+        // Cartucho no tamanho maximo: a frase que nao achou lugar fica como no
+        // original, e a conta aparece junto com a dos bancos.
+        report.applied -= left.min(report.applied);
+        report.relocated -= left.min(report.relocated);
+        report.kept_original += left;
         report.applied += blocks.report.applied;
         report.kept_original += blocks.report.kept_original;
         report.relocated += blocks.report.relocated;
@@ -286,7 +291,7 @@ impl GameAdapter for GbaAdapter {
         report.applied += banks.report.applied;
         report.kept_original += banks.report.kept_original;
         report.relocated += banks.report.relocated;
-        report.no_room = banks.report.no_room;
+        report.no_room = banks.report.no_room + left;
         Ok(AppliedImage { bytes: out, report })
     }
 

@@ -482,6 +482,43 @@ mod jis16 {
     }
 
     #[test]
+    fn extracting_again_drops_the_old_reading_of_the_same_bytes() {
+        let tmp = TempDir::new("jis16-stale");
+        let (dir, _) = project(&tmp);
+        extract_project(&dir).unwrap();
+        let mut db = ProjectDb::open(&dir).unwrap();
+        let first = by_text(&db.load_entries().unwrap(), &synth::jis16_message(0)).clone();
+        // Uma leitura antiga dos mesmos bytes, deslocada e ja traduzida (como
+        // a que comecava pelo numero de um campo vizinho), e uma frase do
+        // Escanear com a tabela da pessoa em cima dos mesmos bytes.
+        let at = first.offset.unwrap();
+        let old = TextEntry {
+            id: format!("scan-{:08x}", at - 2),
+            offset: Some(at - 2),
+            original_bytes: vec![0; first.original_bytes.len()],
+            translated_text: Some("leitura antiga".to_string()),
+            ..first.clone()
+        };
+        let mine = TextEntry {
+            id: "minha-tabela-1".to_string(),
+            encoding: TextEncoding::Table("minha".to_string()),
+            translated_text: Some("da pessoa".to_string()),
+            ..old.clone()
+        };
+        db.upsert_entries(&[old.clone(), mine.clone()]).unwrap();
+        drop(db);
+        let outcome = extract_project(&dir).unwrap();
+        assert!(outcome.removed >= 1, "{}", outcome.removed);
+        let entries = ProjectDb::open(&dir).unwrap().load_entries().unwrap();
+        assert!(
+            !entries.iter().any(|e| e.id == old.id),
+            "a leitura antiga saiu"
+        );
+        assert!(entries.iter().any(|e| e.id == mine.id), "a da pessoa ficou");
+        assert!(entries.iter().any(|e| e.id == first.id), "a nova ficou");
+    }
+
+    #[test]
     fn a_game_without_this_encoding_gets_no_table() {
         for rom in [
             synth::make_gba_rom_japanese(),

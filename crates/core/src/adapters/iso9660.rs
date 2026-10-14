@@ -450,13 +450,20 @@ fn relocate_into_slack(
         }
         let relative = to_file_relative(&mine, |abs| layout.abs_to_rel(abs))?;
         let mut bytes = read_file(out, map, file.extent, file.size)?;
-        relocate(&mut bytes, &relative, 0, layout.capacity()).map_err(|e| {
+        let room = layout.capacity() - layout.size;
+        let left = relocate(&mut bytes, &relative, 0, layout.capacity()).map_err(|e| {
             err(format!(
-                "{} (espaco livre no setor final: {} bytes): {e}",
-                file.path,
-                layout.capacity() - layout.size
+                "{} (espaco livre no setor final: {room} bytes): {e}",
+                file.path
             ))
         })?;
+        if left > 0 {
+            return Err(err(format!(
+                "{} (espaco livre no setor final: {room} bytes): sem espaco pra realocar \
+                 {left} string(s) — encurte as traducoes",
+                file.path
+            )));
+        }
         for (k, chunk) in bytes.chunks(SECTOR_DATA).enumerate() {
             let start = layout.sector_starts[k];
             out[start..start + chunk.len()].copy_from_slice(chunk);

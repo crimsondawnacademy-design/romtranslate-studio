@@ -117,13 +117,16 @@ pub struct Relocation {
 /// porque ha engine que copia texto com LDM/STM, e no ARM7 leitura
 /// desalinhada rotaciona a palavra. O original fica intacto: uma referencia
 /// que a deteccao nao viu continua mostrando o texto antigo, nao lixo.
-/// `max_len` = teto enderecavel da plataforma.
+/// `max_len` = teto enderecavel da plataforma. A string que nao cabe mais
+/// fica como no original (ponteiros intocados) e entra na conta devolvida:
+/// uma frase sem lugar nao derruba a gravacao das outras.
 pub fn relocate(
     out: &mut Vec<u8>,
     relocations: &[Relocation],
     base: u32,
     max_len: usize,
-) -> Result<()> {
+) -> Result<usize> {
+    let mut placed = Vec::with_capacity(relocations.len());
     for r in relocations {
         let expected = pointer_value(base, r.original_offset)?;
         for &p in &r.pointers {
@@ -137,11 +140,7 @@ pub fn relocate(
         }
         let at = out.len().next_multiple_of(4);
         if at + r.bytes.len() > max_len {
-            return Err(err(format!(
-                "entry {}: sem espaco pra realocar — as strings realocadas passariam do \
-                 limite de {max_len} bytes; encurte as traducoes",
-                r.entry_id
-            )));
+            continue;
         }
         let new_value = pointer_value(base, at)?;
         if new_value > u16::MAX as u32 && r.pointers.iter().any(|p| p.width == 2) {
@@ -156,11 +155,12 @@ pub fn relocate(
         for &p in &r.pointers {
             write_pointer(out, p, new_value);
         }
+        placed.push(r);
     }
     out.resize(out.len().next_multiple_of(4), 0);
 
     // Auto-checagem: todo ponteiro reapontado resolve pros bytes novos.
-    for r in relocations {
+    for r in &placed {
         for &p in &r.pointers {
             let target = read_pointer(out, p)
                 .and_then(|v| v.checked_sub(base))
@@ -174,7 +174,7 @@ pub fn relocate(
             }
         }
     }
-    Ok(())
+    Ok(relocations.len() - placed.len())
 }
 
 /// So string terminada pode crescer: quem le por tamanho fixo nao aceita.
@@ -448,10 +448,12 @@ mod tests {
         let e = relocate(&mut drifted, std::slice::from_ref(&reloc), BASE, 1 << 20).unwrap_err();
         assert!(e.to_string().contains("0x8"), "{e}");
 
-        // Sem espaco enderecavel: recusa em vez de gravar ponteiro invalido.
+        // Sem espaco enderecavel: a string fica como no original e entra na
+        // conta, em vez de virar ponteiro invalido ou derrubar as outras.
         let mut full = data.clone();
-        let e = relocate(&mut full, std::slice::from_ref(&reloc), BASE, 0x44).unwrap_err();
-        assert!(e.to_string().contains("sem espaco pra realocar"), "{e}");
+        let left = relocate(&mut full, std::slice::from_ref(&reloc), BASE, 0x44).unwrap();
+        assert_eq!(left, 1);
+        assert_eq!(read_pointer(&full, ptr(0x00, 4)), Some(BASE + 0x20));
     }
 
     #[test]

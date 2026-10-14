@@ -90,7 +90,8 @@ pub fn extract_project(project_dir: &Path) -> Result<ExtractOutcome> {
     let jis16 = crate::types::TextEncoding::Table(crate::kuten::TABLE_ID.to_string());
     let mut db = ProjectDb::open(project_dir)?;
     let saved = db.upsert_entries(&extraction.entries)?;
-    let removed = db.remove_stale_junk(&extraction.entries)?;
+    let removed =
+        db.remove_stale_junk(&extraction.entries)? + db.remove_overlapped(&extraction.entries)?;
     let stray = db.mark_stray(&crate::scan::stray_ids(&extraction.entries))?;
     Ok(ExtractOutcome {
         saved,
