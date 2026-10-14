@@ -661,6 +661,17 @@ mod jis16 {
         let first = by_text(&entries, &synth::jis16_message(0));
         let issues = validate_entry(&translated(first, "◆Oi."), Some(&table));
         assert!(issues[0].message.contains("[FF01]"), "{issues:?}");
+        // "<...>" no lugar do "＜...＞" do original e letra, nao comando; o
+        // comando que a tabela grava continua contando.
+        let quoted = translated(first, "◆<Aviso> \"Oi\"[FF01]tchau.");
+        let issues = validate_entry(&quoted, Some(&table));
+        assert!(issues.is_empty(), "{issues:?}");
+        let invented = translated(first, "◆Oi[FF01]tchau[FF03].");
+        let issues = validate_entry(&invented, Some(&table));
+        assert!(
+            issues.iter().any(|i| i.message.contains("[FF03]")),
+            "{issues:?}"
+        );
         // O texto de 8 bits do cartucho nao vai pra IA.
         assert!(!requests
             .iter()

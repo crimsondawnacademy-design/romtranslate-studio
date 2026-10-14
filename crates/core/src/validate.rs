@@ -212,9 +212,15 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
             );
         }
     }
+    // Em texto de tabela, so e codigo inventado o que a tabela grava como
+    // codigo: o "<" que a IA escreve no lugar do "＜" do original e letra.
+    let is_code = |token: &str| {
+        !matches!(entry.encoding, TextEncoding::Table(_))
+            || table.is_none_or(|table| table.has_entry(token))
+    };
     for (token, &n) in &translation_tokens {
         let had = source_tokens.get(token).copied().unwrap_or(0);
-        if n > had {
+        if n > had && is_code(token) {
             push(
                 Severity::Error,
                 IssueKind::PlaceholderMismatch,

@@ -34,6 +34,18 @@ fn wide_form(ch: char) -> Option<char> {
         .flatten()
 }
 
+/// O que pode ir no lugar de um caractere que a tabela nao tem: a forma de
+/// largura inteira e, nas aspas, a aspa tipografica — a tabela japonesa tem
+/// "”" e "’", mas nao a reta de largura inteira.
+fn stand_ins(ch: char) -> impl Iterator<Item = char> {
+    let quote = match ch {
+        '"' => Some('”'),
+        '\'' => Some('’'),
+        _ => None,
+    };
+    wide_form(ch).into_iter().chain(quote)
+}
+
 #[derive(Debug, Clone)]
 pub struct TblTable {
     entries: HashMap<Vec<u8>, String>,
@@ -129,7 +141,7 @@ impl TblTable {
                 continue;
             }
             let wide =
-                wide_form(ch).and_then(|w| Some((w, self.reverse.get(w.to_string().as_str())?)));
+                stand_ins(ch).find_map(|w| Some((w, self.reverse.get(w.to_string().as_str())?)));
             let Some((wide, bytes)) = wide else {
                 let position = text[..text.len() - rest.len()].chars().count() + 1;
                 return Err(CoreError::Tbl(format!(
@@ -152,10 +164,16 @@ impl TblTable {
         Ok(out)
     }
 
-    /// A tabela escreve `ch`, como ele e ou na forma de largura inteira.
+    /// A tabela escreve `ch`, como ele e ou por um substituto (`stand_ins`).
     fn writes(&self, ch: char) -> bool {
         let has = |c: char| self.reverse.contains_key(c.to_string().as_str());
-        has(ch) || wide_form(ch).is_some_and(has)
+        has(ch) || stand_ins(ch).any(has)
+    }
+
+    /// `text` e uma entrada da tabela inteira (um codigo de controle como
+    /// `[FF03]`, por exemplo), e nao letras avulsas?
+    pub fn has_entry(&self, text: &str) -> bool {
+        self.reverse.contains_key(text)
     }
 
     /// A maior entrada da tabela no comeco de `rest`: onde ela termina e os
@@ -470,6 +488,14 @@ fn decode_hex(hex: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quotes_the_table_lacks_go_in_as_typographic_ones() {
+        // Tabela como a japonesa: aspas tipograficas, sem a reta.
+        let table = TblTable::parse("01=”\n02=’\n03=a\n04=[FF03]\n").unwrap();
+        assert_eq!(table.encode("a\"a'").unwrap(), [3, 1, 3, 2]);
+        assert!(table.has_entry("[FF03]") && !table.has_entry("<a>"));
+    }
 
     #[test]
     fn encode_takes_the_longest_match_and_reads_back() {
