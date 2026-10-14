@@ -122,10 +122,10 @@ const LEAN: &str = r#"if [ "$1" = features ]; then
     'plugins                     stable             false' \
     'shell_tool                  stable             true' \
     'browser_use                 stable             true' \
-    'recurso_novo                stable             true' \
-    'skip_host_skill_discovery   under development  false'
+    'recurso_novo                stable             true'
   exit 0
 fi
+printf '%s' "$HOME" > "$dir/casa.txt"
 printf '%s\n' '{"type":"turn.started"}' \
   '{"type":"turn.completed","usage":{"input_tokens":1200,"cached_input_tokens":0,"output_tokens":34}}'
 printf '%s' '{"translations":[{"id":"a","translation":"NOVO JOGO"}]}' > "$out""#;
@@ -148,8 +148,11 @@ async fn the_call_carries_only_the_request_and_says_what_it_spent() {
     for name in ["plugins", "unified_exec", "recurso_novo"] {
         assert!(!follows("--disable", name), "sobrou {name}: {args}");
     }
-    // As skills do computador nao entram na conversa.
-    assert!(follows("--enable", "skip_host_skill_discovery"), "{args}");
+    // As skills do computador nao entram na conversa: o processo enxerga
+    // uma pasta pessoal vazia, e o login continua achado pelo CODEX_HOME.
+    let seen = fake.read("casa.txt");
+    assert!(seen.ends_with("/empty"), "{seen}");
+    assert!(fake.read("home.txt").ends_with(".codex") || std::env::var("CODEX_HOME").is_ok());
     // O que as duas chamadas declararam de consumo.
     let spent = provider.usage();
     assert_eq!((spent.input_tokens, spent.output_tokens), (2400, 68));
@@ -195,6 +198,25 @@ async fn failures_come_back_as_readable_errors() {
         "{err}"
     );
     assert!(!err.contains("eco do prompt"), "{err}");
+
+    // Com `--json` o motivo vem num evento da saida; o stderr so tem aviso.
+    let event = FakeCodex::new(
+        "event",
+        r#"echo '2026 ERROR codex_core: failed to load skill x' >&2
+           printf '%s\n' '{"type":"turn.started"}' '{"type":"error","message":"usage limit, try again at 12:24 AM"}'
+           exit 1"#,
+    );
+    let err = event
+        .provider("", 30)
+        .translate_batch(&request())
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("usage limit") && err.contains("12:24"),
+        "{err}"
+    );
+    assert!(!err.contains("failed to load skill"), "{err}");
 
     let silent = FakeCodex::new("silent", "exit 0");
     let err = silent
@@ -267,15 +289,19 @@ async fn health_check_reads_the_login_status() {
 #[tokio::test]
 async fn own_account_lives_in_its_own_codex_home() {
     let fake = FakeCodex::new("home", ANSWER);
-    // Sem pasta propria, o app nao mexe no CODEX_HOME: vale a conta do computador.
-    fake.provider("", 30)
-        .translate_batch(&request())
-        .await
-        .unwrap();
+    // Sem pasta propria vale a conta do computador: o login nao muda, e na
+    // chamada que traduz (que enxerga uma pasta pessoal vazia) a pasta do
+    // Codex do computador vai dita por extenso.
+    let provider = fake.provider("", 30);
+    provider.logged_in().await.unwrap();
     assert_eq!(
         fake.read("home.txt"),
         std::env::var("CODEX_HOME").unwrap_or_default()
     );
+    provider.translate_batch(&request()).await.unwrap();
+    let computer = std::env::var("CODEX_HOME")
+        .unwrap_or_else(|_| format!("{}/.codex", std::env::var("HOME").unwrap()));
+    assert_eq!(fake.read("home.txt"), computer);
 
     let home = fake.0.join("conta do app");
     let own = fake.provider("", 30).with_home(&home);

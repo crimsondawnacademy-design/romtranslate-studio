@@ -7,6 +7,10 @@
 //!   (shell, plugins, skills, navegador, imagem, outros agentes): sem comando
 //!   de shell, e sem carregar em TODA chamada um contexto que conta no limite
 //!   do plano e nao serve pra traduzir (`UNUSED`, `lean_flags`);
+//! - a pasta pessoal do processo (`HOME`) e a pasta vazia de trabalho: o Codex
+//!   le as skills de `~/.agents/skills` mesmo com `--ignore-user-config`, e a
+//!   lista delas ia em toda chamada. O login continua achado pelo
+//!   `CODEX_HOME`;
 //! - `model_reasoning_effort=low`: traduzir nao pede raciocinio longo, e o
 //!   raciocinio tambem conta no limite;
 //! - `--json`: a saida traz os tokens que a chamada gastou;
@@ -67,9 +71,6 @@ const UNUSED: &[&str] = &[
     "sleep_tool",
     "personality",
 ];
-/// Ligado, o Codex nao le as skills instaladas no computador (a lista delas
-/// ia em toda chamada).
-const NO_SKILLS: &str = "skip_host_skill_discovery";
 /// O `codex features list` e local e rapido: mais que isto e Codex travado.
 const FEATURES_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -133,7 +134,7 @@ impl CodexCliProvider {
         if let Some(home) = &self.home {
             fs::create_dir_all(home).map_err(|e| CoreError::io(home, e))?;
         }
-        let mut child = self.spawn(&[OsStr::new("login")], Stdio::null())?;
+        let mut child = self.spawn(&[OsStr::new("login")], Stdio::null(), None)?;
         let deadline = Instant::now() + LOGIN_TIMEOUT;
         loop {
             let exited = child
@@ -184,9 +185,9 @@ impl CodexCliProvider {
     }
 
     /// As flags que deixam a chamada so com o pedido: `--disable` de cada
-    /// recurso de `UNUSED` que esta versao do Codex tem ligado, e `--enable`
-    /// do que pula as skills. Se o Codex nao disser que recursos tem, ficam
-    /// as duas de sempre (sem comando de shell).
+    /// recurso de `UNUSED` que esta versao do Codex tem ligado. Se o Codex nao
+    /// disser que recursos tem, ficam as duas de sempre (sem comando de
+    /// shell).
     async fn lean_flags(&self) -> &[String] {
         self.lean
             .get_or_init(|| async {
@@ -210,9 +211,6 @@ impl CodexCliProvider {
                     .filter(|name| on(name, "true"))
                     .flat_map(|name| ["--disable".to_string(), name.to_string()])
                     .collect();
-                if on(NO_SKILLS, "false") {
-                    flags.extend(["--enable".to_string(), NO_SKILLS.to_string()]);
-                }
                 if flags.is_empty() {
                     flags = ["--disable", "shell_tool", "--disable", "unified_exec"]
                         .map(String::from)
@@ -223,7 +221,14 @@ impl CodexCliProvider {
             .await
     }
 
-    fn spawn(&self, args: &[&OsStr], stdin: Stdio) -> Result<tokio::process::Child> {
+    /// `user_home`: a pasta pessoal que o processo enxerga (so na chamada que
+    /// traduz; login e afins rodam na de verdade).
+    fn spawn(
+        &self,
+        args: &[&OsStr],
+        stdin: Stdio,
+        user_home: Option<&Path>,
+    ) -> Result<tokio::process::Child> {
         let mut command = Command::new(&self.program);
         command
             .args(args)
@@ -233,8 +238,21 @@ impl CodexCliProvider {
             .stderr(Stdio::piped())
             // Timeout ou cancelamento derruba o future; o processo vai junto.
             .kill_on_drop(true);
-        if let Some(home) = &self.home {
-            command.env("CODEX_HOME", home);
+        // Onde o login mora: a pasta propria, ou a do Codex do computador —
+        // dita por extenso quando a pasta pessoal do processo vai mudar.
+        let login = self.home.clone().or_else(|| {
+            user_home?;
+            std::env::var_os("CODEX_HOME")
+                .map(PathBuf::from)
+                .or_else(|| Some(PathBuf::from(std::env::var_os("HOME")?).join(".codex")))
+        });
+        if let Some(login) = &login {
+            command.env("CODEX_HOME", login);
+        }
+        // ponytail: so no Unix. No Windows a pasta pessoal vem de USERPROFILE
+        // e leva junto o AppData; trocar la pede teste num Windows de verdade.
+        if let (Some(user_home), true, true) = (user_home, cfg!(unix), login.is_some()) {
+            command.env("HOME", user_home);
         }
         command.spawn().map_err(|e| {
             CoreError::Provider(format!(
@@ -246,12 +264,21 @@ impl CodexCliProvider {
     }
 
     async fn run(&self, args: &[&OsStr], stdin: Option<&str>) -> Result<Output> {
+        self.run_in(args, stdin, None).await
+    }
+
+    async fn run_in(
+        &self,
+        args: &[&OsStr],
+        stdin: Option<&str>,
+        user_home: Option<&Path>,
+    ) -> Result<Output> {
         let pipe = if stdin.is_some() {
             Stdio::piped()
         } else {
             Stdio::null()
         };
-        let mut child = self.spawn(args, pipe)?;
+        let mut child = self.spawn(args, pipe, user_home)?;
         if let (Some(text), Some(mut pipe)) = (stdin, child.stdin.take()) {
             // Se o Codex morrer antes de ler tudo, o erro de verdade esta no
             // status e no stderr, nao neste write.
@@ -267,6 +294,23 @@ impl CodexCliProvider {
             })?
             .map_err(|e| CoreError::Provider(format!("falha esperando o Codex CLI: {e}")))
     }
+}
+
+/// Por que a chamada falhou: com `--json` o motivo vem num evento de erro na
+/// saida (limite da conta, modelo recusado); o stderr so tem os avisos do
+/// Codex. Sem evento, o fim do stderr.
+fn failure(output: &Output) -> String {
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .rev()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .find_map(|event| {
+            let message = event
+                .get("message")
+                .or_else(|| event.get("error")?.get("message"));
+            Some(message?.as_str()?.chars().take(400).collect())
+        })
+        .unwrap_or_else(|| tail(&output.stderr))
 }
 
 /// Os tokens que a chamada gastou: o ultimo evento do `--json` que traz
@@ -409,12 +453,12 @@ impl TranslationProvider for CodexCliProvider {
             build_system_prompt(request),
             build_user_prompt(request)
         );
-        let output = self.run(&args, Some(&prompt)).await?;
+        let output = self.run_in(&args, Some(&prompt), Some(&empty)).await?;
         if !output.status.success() {
             return Err(CoreError::Provider(format!(
                 "o Codex CLI falhou ({}): {}",
                 output.status,
-                tail(&output.stderr)
+                failure(&output)
             )));
         }
         let raw = fs::read_to_string(&answer).map_err(|_| {
