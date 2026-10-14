@@ -285,6 +285,15 @@ fn find_bullets(codes: &[u16], spans: &[Span]) -> HashSet<u16> {
         .collect()
 }
 
+/// O que pode abrir uma mensagem: kana, kanji, letra, numero, marca de fala e
+/// o que abre aspas ou parenteses. Acento solto, virgula, ponto, travessao e
+/// afins nao abrem: logo depois do fim de uma mensagem, o numero de um campo
+/// vizinho (no jogo medido, o `0x000C` antes de uma tabela de nomes) e lido
+/// como um desses — e a traducao escrevia por cima dele.
+fn opens_text(c: char) -> bool {
+    c.is_alphanumeric() || "☆★○●◎◇◆□■△▲▽▼※→←↑↓♪・…‥‘“（〔［｛〈《「『【＜―～".contains(c)
+}
+
 /// Texto longo o bastante pra valer fora de uma fila de textos.
 fn stands_alone(text: &str) -> bool {
     let hiragana = text
@@ -445,10 +454,11 @@ fn scan(codes: &[u16], dialect: &Dialect, starts: &HashSet<usize>) -> Vec<Span> 
     let mut i = 0;
     while i < codes.len() {
         let opens = !is_param[i]
-            && matches!(
-                dialect.piece(codes, i).0,
-                Piece::Glyph | Piece::Char('\u{21}'..)
-            );
+            && match dialect.piece(codes, i).0 {
+                Piece::Glyph => true,
+                Piece::Char(c) => opens_text(c),
+                _ => false,
+            };
         if !opens {
             i += 1;
             continue;
@@ -471,6 +481,15 @@ fn scan(codes: &[u16], dialect: &Dialect, starts: &HashSet<usize>) -> Vec<Span> 
         // fala costuma abrir com um, logo depois da quebra de linha.
         let is_space = |at: &usize| Some(codes[*at]) == dialect.space;
         let before = (0..span.begin).rev().find(|at| !is_space(at));
+        // Um valor que nao abre texto logo antes (o numero de um campo
+        // vizinho, `opens_text`) nao suja o comeco: vale o que vem antes dele.
+        let number = |at: usize| {
+            codes[at] < CONTROL && decode(codes[at]).is_some_and(|c| !opens_text(c) && c != '　')
+        };
+        let before = match before {
+            Some(at) if number(at) => at.checked_sub(1),
+            other => other,
+        };
         let after = (span.end..codes.len()).find(|at| !is_space(at));
         let clean = header || starts.contains(&span.begin) || clean_edge(before);
         // Ate 3 caracteres so entre comandos ou zeros dos dois lados: valor
@@ -652,6 +671,35 @@ mod tests {
         let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
         let found = extract(&data, &HashSet::new())?;
         Some(found.entries[60].source_text.clone())
+    }
+
+    #[test]
+    fn a_number_before_a_name_is_not_the_first_letter_of_it() {
+        // Fila de nomes como a do jogo medido: um numero de outra tabela
+        // (0x000C, que pela tabela seria o acento "´") logo depois de um fim
+        // de mensagem, e o nome em seguida.
+        let kana = |text: &str| text.chars().map(|c| encode(c).unwrap()).collect::<Vec<_>>();
+        let mut codes = Vec::new();
+        for i in 0..120u16 {
+            codes.push(encode('◆').unwrap());
+            codes.extend(kana("むらのひとは"));
+            codes.push(0xFF01);
+            codes.extend(kana("きょうもげんきにはたらいている"));
+            codes.push(END);
+            if i == 60 {
+                codes.extend([0x0002, END, 0x000C]);
+                codes.extend(kana("こあき"));
+                codes.push(END);
+            }
+        }
+        let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
+        let found = extract(&data, &HashSet::new()).unwrap();
+        let name = found
+            .entries
+            .iter()
+            .find(|e| e.source_text.contains("こあき"))
+            .expect("o nome foi lido");
+        assert_eq!(name.source_text, "こあき");
     }
 
     #[test]
