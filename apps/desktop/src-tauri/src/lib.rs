@@ -407,6 +407,7 @@ async fn translate_project(
     app: AppHandle,
     state: State<'_, TranslationState>,
     project_dir: String,
+    redo_errors: Option<bool>,
 ) -> Result<TranslateSummary, String> {
     let cancel = Arc::new(AtomicBool::new(false));
     {
@@ -417,7 +418,7 @@ async fn translate_project(
         *guard = Some(cancel.clone());
     }
 
-    let result = do_translate(&app, &project_dir, &cancel).await;
+    let result = do_translate(&app, &project_dir, &cancel, redo_errors.unwrap_or(false)).await;
 
     if let Ok(mut guard) = state.0.lock() {
         *guard = None;
@@ -429,6 +430,7 @@ async fn do_translate(
     app: &AppHandle,
     project_dir: &str,
     cancel: &AtomicBool,
+    redo_errors: bool,
 ) -> Result<TranslateSummary, String> {
     let dir = PathBuf::from(project_dir);
     let cfg_dir = config_dir(app)?;
@@ -439,6 +441,7 @@ async fn do_translate(
     let mut opts = TranslateOptions::new(game.target_language);
     opts.source_language = game.source_language;
     opts.batch_size = cfg.batch_size.clamp(1, 50);
+    opts.redo_errors = redo_errors;
 
     let mut db = ProjectDb::open(&dir).map_err(|e| e.to_string())?;
     let mut global = open_global_tm(&cfg_dir);

@@ -1866,3 +1866,39 @@ volta dele.
 **O que NÃO foi provado:** quanto isso economiza. O limite da conta só
 volta depois desta sessão; nenhuma chamada enxuta chegou a rodar de
 verdade (os testes usam um Codex de mentira).
+
+## 2026-10-14 — A tabela gerada acompanha a leitura; erro só volta à IA quando pedido
+
+**Contexto:** o Rhuan pediu que o app traduza "tudo que tá em japonês" do
+jogo. A validação do projeto real mostrou 113 falas acusadas de "tabela
+ambígua" e um nome padrão ("クラウス") fora da extração. Causas: (1) a tabela
+`tables/jis16.tbl` era gravada uma vez e nunca mais (13/10 19h26), e a
+leitura mudou depois (19h44): o comando de nome de item (`FF21`) tinha
+parâmetro na tabela e não nas frases; (2) a contagem de parâmetros tratava o
+id do item que cai no código do "◇" ou do "◆" (15% dos usos) como texto;
+(3) o primeiro campo de uma tabela de nomes vinha depois de dois números de
+outra estrutura e não tinha começo limpo.
+
+**Decisão:**
+- **A extração regrava a tabela gerada** e põe no fim as linhas que a pessoa
+  mudou (valor diferente do que o gerador dá à chave), que valem por cima.
+  Linha de geração velha (comando com parâmetro que não existe mais) sai.
+- **Tradução já feita é relida** pela tabela nova quando o original mudou só
+  na forma dos comandos (mesmos bytes): `[FF21][FFF0]` vira `[FF21:FFF0]`.
+  Sem isso, cada uma virava erro e voltava ao provider.
+- **Parâmetro:** além de "menos de 10% de texto na posição", vale "menos de
+  25% e texto em 75%+ logo depois".
+- **Fila de campos de largura fixa** estende um campo antes da primeira e
+  depois da última sequência achada, sem exigir começo limpo.
+- **`redo_errors`** (CLI `--redo-errors`, botão "Traduzir de novo as com
+  erro"): a frase com erro volta ao provider sem passar pela memória. Não é
+  automático: frase que não tem conserto voltaria a cada rodada.
+
+**Consequências medidas no jogo:** 136 falas a mais com o comando certo, 23
+delas tinham perdido o id do item sem ninguém ver (o jogo leria a primeira
+letra como item). Rodada de 341 frases com erro: 330 traduzidas, mas 610 mil
+tokens de entrada (a estimativa dizia 39 mil — as reperguntas de encurtar e
+de códigos não entram na conta).
+
+**O que NÃO foi provado:** nenhuma mensagem de "pegou item" foi vista no
+emulador (só a tela de nomes e o primeiro diálogo).

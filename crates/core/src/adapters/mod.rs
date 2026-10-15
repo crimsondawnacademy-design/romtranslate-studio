@@ -16,6 +16,7 @@ pub mod snes;
 pub mod wii;
 pub mod wiiu;
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use serde::Serialize;
@@ -23,6 +24,8 @@ use serde::Serialize;
 use crate::adapter::GameAdapter;
 use crate::db::ProjectDb;
 use crate::error::{CoreError, Result};
+use crate::tbl::TblTable;
+use crate::types::{TextEncoding, TextEntry};
 
 /// Registry dos adapters compilados no workspace (spec: sem plugin loading
 /// dinamico no MVP). Ordem: magics fortes primeiro, heuristicos por ultimo.
@@ -70,6 +73,10 @@ pub struct ExtractOutcome {
     /// Das salvas, quantas estao numa mensagem de banco em blocos
     /// (`bank`): a traducao delas pode crescer.
     pub banked: usize,
+    /// Traducoes ja feitas relidas com os comandos na forma da leitura de
+    /// agora (`TblTable::reread`): o original mudou so na forma, os bytes sao
+    /// os mesmos.
+    pub reread: usize,
 }
 
 /// Extracao estruturada do arquivo de origem de um projeto, gravada no banco.
@@ -84,12 +91,54 @@ pub fn extract_project(project_dir: &Path) -> Result<ExtractOutcome> {
     // mmap: DVD de PS2 (>2 GiB) extrai sem carregar o arquivo em RAM.
     let data = crate::fileio::read_view(&game.source_path)?;
     let extraction = adapter.extract(&data)?;
+    // A tabela de antes fica a mao: e com ela que as traducoes ja feitas
+    // foram escritas.
+    let mut older = HashMap::new();
     for (id, text) in &extraction.tables {
+        let path = project_dir
+            .join(crate::tbl::TABLES_DIR)
+            .join(format!("{id}.tbl"));
+        if let Ok(table) = TblTable::load(&path) {
+            older.insert(id.clone(), table);
+        }
         crate::tbl::ensure_table(project_dir, id, text)?;
     }
     let jis16 = crate::types::TextEncoding::Table(crate::kuten::TABLE_ID.to_string());
     let mut db = ProjectDb::open(project_dir)?;
+    let before: HashMap<String, TextEntry> = db
+        .load_entries()?
+        .into_iter()
+        .map(|e| (e.id.clone(), e))
+        .collect();
     let saved = db.upsert_entries(&extraction.entries)?;
+    // O original que mudou so na forma dos comandos (agora a leitura sabe que
+    // um deles leva parametro) leva junto a traducao que ja tinha: os mesmos
+    // bytes, relidos pela tabela nova. Sem isto, cada uma delas virava erro de
+    // codigo faltando e voltava ao provider.
+    let mut tables = crate::tbl::ProjectTables::new(project_dir);
+    let mut reread = 0;
+    for entry in &extraction.entries {
+        let TextEncoding::Table(id) = &entry.encoding else {
+            continue;
+        };
+        let (Some(old), Some(older)) = (before.get(&entry.id), older.get(id)) else {
+            continue;
+        };
+        let Some(translation) = old.translated_text.as_deref() else {
+            continue;
+        };
+        if old.source_text == entry.source_text {
+            continue;
+        }
+        let table = tables.get(id)?;
+        if let Some(text) = table
+            .reread(older, translation)
+            .filter(|text| text != translation)
+        {
+            db.update_translation(&entry.id, &text, old.status)?;
+            reread += 1;
+        }
+    }
     let removed =
         db.remove_stale_junk(&extraction.entries)? + db.remove_overlapped(&extraction.entries)?;
     let stray = db.mark_stray(&crate::scan::stray_ids(&extraction.entries))?;
@@ -114,5 +163,6 @@ pub fn extract_project(project_dir: &Path) -> Result<ExtractOutcome> {
             .iter()
             .filter(|e| bank::is_banked(e))
             .count(),
+        reread,
     })
 }

@@ -641,12 +641,18 @@ mod jis16 {
         let outcome = extract_project(&dir).unwrap();
         assert_eq!(outcome.jis16, 120 + JIS16_NAMES.len() + 1);
         assert!(dir.join("tables/jis16.tbl").is_file());
-        // A tabela do projeto nao e sobrescrita numa segunda extracao.
-        fs::write(dir.join("tables/jis16.tbl"), "AC00= \n1B01=あ\n").unwrap();
+        // Uma segunda extracao regrava a tabela e mantem, no fim, o que a
+        // pessoa mudou nela.
+        let generated = fs::read_to_string(dir.join("tables/jis16.tbl")).unwrap();
+        fs::write(
+            dir.join("tables/jis16.tbl"),
+            generated.replace("\nAD00=[00AD]\n", "\nAD00=父\n"),
+        )
+        .unwrap();
         extract_project(&dir).unwrap();
         assert_eq!(
             fs::read_to_string(dir.join("tables/jis16.tbl")).unwrap(),
-            "AC00= \n1B01=あ\n"
+            format!("{generated}# Linhas mudadas a mao, mantidas da tabela anterior:\nAD00=父\n")
         );
         fs::remove_file(dir.join("tables/jis16.tbl")).unwrap();
         extract_project(&dir).unwrap();

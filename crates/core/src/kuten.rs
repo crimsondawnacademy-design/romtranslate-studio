@@ -156,7 +156,8 @@ pub fn table_text(space: Option<u16>, commands: &BTreeSet<Vec<u16>>) -> String {
          # [FFxx] e comando do jogo; [FFxx:pppp], comando com os parametros dele.\n\
          # [xxxx] e um desenho proprio do jogo (kanji, icone) num codigo que a tabela\n\
          # padrao deixa vazio: troque pelo caractere certo se souber qual e.\n\
-         # Pode ser completada a mao: o app nao sobrescreve este arquivo.\n",
+         # Pode ser completada a mao: a extracao regrava o arquivo e poe no fim as\n\
+         # linhas que voce mudou, que valem por cima das geradas.\n",
     );
     let space = space.unwrap_or(0);
     let _ = writeln!(out, "{}= ", key(space));
@@ -265,11 +266,21 @@ fn find_params(codes: &[u16], dialect: &Dialect, spans: &[Span]) -> HashMap<u16,
     seen.into_iter()
         .filter(|&(_, (uses, _))| uses >= MIN_USES)
         .map(|(code, (_, after))| {
-            let params = after
-                .iter()
-                .take_while(|&&(n, text)| n >= MIN_USES && text * 10 < n)
-                .count();
-            (code, params)
+            let measured = |k: usize| after.get(k).copied().filter(|&(n, _)| n >= MIN_USES);
+            let number = |k: usize| {
+                measured(k).is_some_and(|(n, text)| {
+                    text * 10 < n
+                        // Parametro que as vezes cai no codigo de uma marca de
+                        // fala: pouco texto na posicao e texto quase sempre
+                        // logo depois dela. Medido no jogo real: o nome de item
+                        // (`FF21`) tem o id do item 15% das vezes no "◇" ou no
+                        // "◆" e texto em 94% das vezes depois; lido sem o
+                        // parametro, o id virava letra da frase.
+                        || (text * 4 < n
+                            && measured(k + 1).is_some_and(|(n, text)| text * 4 >= n * 3))
+                })
+            };
+            (code, (0..after.len()).take_while(|&k| number(k)).count())
         })
         .collect()
 }
@@ -519,26 +530,8 @@ fn scan(codes: &[u16], dialect: &Dialect, starts: &HashSet<usize>) -> Vec<Span> 
 /// Medido no jogo real: a tabela de nomes tem um campo a cada 12 unidades, e
 /// "リュカ" (3) ocupava so 3: a traducao saia "Luc". O maior nome dela tem 6.
 fn record_slots(codes: &[u16], found: &[Span]) -> Vec<Option<usize>> {
-    let filled = |span: &Span, stride: usize| {
-        codes
-            .get(span.end..span.begin + stride)
-            .is_some_and(|rest| !rest.is_empty() && rest.iter().all(|c| *c == END))
-    };
     let mut slots = vec![None; found.len()];
-    let mut i = 0;
-    while i + 1 < found.len() {
-        let stride = found[i + 1].begin - found[i].begin;
-        let mut j = i;
-        while j + 1 < found.len()
-            && found[j + 1].begin - found[j].begin == stride
-            && filled(&found[j], stride)
-        {
-            j += 1;
-        }
-        if j + 1 - i < MIN_RECORDS || stride > MAX_RECORD {
-            i += 1;
-            continue;
-        }
+    for (i, j, stride) in record_runs(codes, found) {
         let longest = found[i..=j]
             .iter()
             .map(|span| span.end - span.begin)
@@ -547,15 +540,98 @@ fn record_slots(codes: &[u16], found: &[Span]) -> Vec<Option<usize>> {
             .min(stride - 1);
         for (k, span) in found.iter().enumerate().take(j + 1).skip(i) {
             // O ultimo campo da fila tambem tem que fechar dentro da largura.
-            if k < j || filled(span, stride) {
+            if k < j || filled(codes, span, stride) {
                 slots[k] = Some(longest.max(span.end - span.begin));
             }
         }
+    }
+    slots
+}
+
+/// O campo de `span` numa tabela de largura `stride` vai do fim do texto ao
+/// comeco do proximo so com 0xFFFF.
+fn filled(codes: &[u16], span: &Span, stride: usize) -> bool {
+    codes
+        .get(span.end..span.begin + stride)
+        .is_some_and(|rest| !rest.is_empty() && rest.iter().all(|c| *c == END))
+}
+
+/// As filas de campos de largura fixa de `found` (`record_slots`): primeira e
+/// ultima sequencia da fila e a largura, em unidades.
+fn record_runs(codes: &[u16], found: &[Span]) -> Vec<(usize, usize, usize)> {
+    let mut runs = Vec::new();
+    let mut i = 0;
+    while i + 1 < found.len() {
+        let stride = found[i + 1].begin - found[i].begin;
+        let mut j = i;
+        while j + 1 < found.len()
+            && found[j + 1].begin - found[j].begin == stride
+            && filled(codes, &found[j], stride)
+        {
+            j += 1;
+        }
+        if j + 1 - i < MIN_RECORDS || stride > MAX_RECORD {
+            i += 1;
+            continue;
+        }
+        runs.push((i, j, stride));
         // O ultimo da fila pode ser o primeiro da proxima: a distancia ate ele
         // por acaso bateu com a largura desta.
         i = j;
     }
-    slots
+    runs
+}
+
+/// Campos de uma fila de `record_runs` que a varredura deixou de fora, logo
+/// antes da primeira e logo depois da ultima sequencia: dentro da fila, o
+/// comeco limpo nao precisa valer — o campo e texto se o texto ocupa o comeco
+/// dele e o resto e 0xFFFF ate o proximo. Medido no jogo real: o primeiro nome
+/// de uma tabela vinha depois de dois numeros de outra estrutura, ficava fora
+/// da extracao e seguia em japones na tela.
+fn missed_records(
+    codes: &[u16],
+    dialect: &Dialect,
+    starts: &HashSet<usize>,
+    found: &[Span],
+) -> Vec<Span> {
+    let taken = |at: usize, stride: usize| {
+        found
+            .iter()
+            .any(|span| span.begin < at + stride && at < span.end.max(span.begin + 1))
+    };
+    let field = |at: usize, stride: usize| -> Option<Span> {
+        if at >= codes.len() {
+            return None;
+        }
+        let opens = match dialect.piece(codes, at).0 {
+            Piece::Glyph => true,
+            Piece::Char(c) => opens_text(c),
+            _ => false,
+        };
+        if !opens || taken(at, stride) {
+            return None;
+        }
+        let (span, _) = span_at(codes, dialect, starts, at);
+        (span.chars > 0
+            && span.end < at + stride
+            && filled(codes, &span, stride)
+            && span.script.verdict() == Some(true))
+        .then_some(span)
+    };
+    let mut extra = Vec::new();
+    for (i, j, stride) in record_runs(codes, found) {
+        let mut at = found[i].begin;
+        while let Some(span) = at.checked_sub(stride).and_then(|prev| field(prev, stride)) {
+            at = span.begin;
+            extra.push(span);
+        }
+        let mut at = found[j].begin + stride;
+        while let Some(span) = field(at, stride) {
+            at += stride;
+            extra.push(span);
+        }
+    }
+    extra
 }
 
 /// As mensagens de `data` nesta codificacao, ou `None` se o arquivo nao
@@ -582,7 +658,9 @@ pub fn extract(data: &[u8], starts: &HashSet<usize>) -> Option<Kuten16> {
     let first = scan(&codes, &dialect, starts);
     dialect.bullets = find_bullets(&codes, &first);
     dialect.params = find_params(&codes, &dialect, &first);
-    let found = scan(&codes, &dialect, starts);
+    let mut found = scan(&codes, &dialect, starts);
+    found.extend(missed_records(&codes, &dialect, starts, &found));
+    found.sort_by_key(|span| span.begin);
 
     // Texto de jogo vem em fila; fora de fila so fica a sequencia longa.
     let text_of = |span: &Span| -> String {
@@ -827,6 +905,83 @@ mod tests {
             .find(|e| e.source_text.starts_with('◆'))
             .unwrap();
         assert!(line.metadata.get("fill").is_none());
+    }
+
+    #[test]
+    fn the_first_field_of_a_table_counts_after_numbers_of_another_record() {
+        let kana = |text: &str| text.chars().map(|c| encode(c).unwrap()).collect::<Vec<_>>();
+        let mut codes = Vec::new();
+        for _ in 0..120 {
+            codes.push(encode('◆').unwrap());
+            codes.extend(kana("むらのひとは"));
+            codes.push(0xFF01);
+            codes.extend(kana("きょうもげんきにはたらいている"));
+            codes.push(END);
+        }
+        // Antes do primeiro campo, dois numeros de outra estrutura: o comeco
+        // dele nao e limpo, so a fila mostra que e um nome.
+        codes.extend([0x0BDC, END, 0x0009, 0x0046]);
+        for name in [
+            "リュカ",
+            "クラウス",
+            "フリント",
+            "ヒナワ",
+            "ボニー",
+            "ダスター",
+            "クマトラ",
+            "サルサ",
+            "ウエスト",
+        ] {
+            let mut field = kana(name);
+            field.resize(8, END);
+            codes.extend(field);
+        }
+        codes.extend([0, 0, 0, 0]);
+        let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
+        let found = extract(&data, &HashSet::new()).unwrap();
+        let first = found
+            .entries
+            .iter()
+            .find(|e| e.source_text == "リュカ")
+            .expect("o primeiro nome da tabela foi lido");
+        assert_eq!(first.original_bytes.len(), 8);
+        assert_eq!(first.metadata["fill"], "FFFF");
+        // Nada antes dele virou frase: os numeros continuam como estao.
+        assert!(!found.entries.iter().any(|e| e.source_text.contains('∞')));
+    }
+
+    #[test]
+    fn a_parameter_that_falls_on_a_speech_mark_stays_with_its_command() {
+        let kana = |text: &str| text.chars().map(|c| encode(c).unwrap()).collect::<Vec<_>>();
+        // Itens do jogo: um em cada sete tem o id no codigo do "◇", que abre
+        // uma fala em cada cinco mensagens.
+        let items = [0x005D, 0x0067, 0x006B, 0x00E6, 0x006F, 0x00C5, 0x00C1];
+        let mut codes = Vec::new();
+        for i in 0..140 {
+            if i % 5 == 0 {
+                codes.push(encode('◇').unwrap());
+                codes.extend(kana("きばこがおいてある"));
+            } else {
+                codes.push(encode('◆').unwrap());
+                codes.extend(kana("むらのひとは"));
+                codes.extend([0xFF21, items[i % items.len()]]);
+                codes.extend(kana("をてにいれた"));
+            }
+            codes.push(END);
+        }
+        let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
+        let found = extract(&data, &HashSet::new()).unwrap();
+        let texts: Vec<&str> = found
+            .entries
+            .iter()
+            .map(|e| e.source_text.as_str())
+            .collect();
+        assert!(
+            texts.contains(&"◆むらのひとは[FF21:005D]をてにいれた"),
+            "{:?}",
+            &texts[..8]
+        );
+        assert!(texts.iter().all(|t| !t.contains("[FF21]")), "{texts:?}");
     }
 
     #[test]

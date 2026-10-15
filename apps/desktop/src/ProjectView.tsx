@@ -94,6 +94,8 @@ export default function ProjectView({
     jis16: number;
     /** Das salvas, quantas podem crescer (banco em blocos). */
     banked: number;
+    /** Traducoes relidas com os comandos na forma de agora. */
+    reread: number;
     structured: boolean;
   } | null>(null);
   const [encoding, setEncoding] = useState<ScanEncoding>("ascii");
@@ -245,6 +247,7 @@ export default function ProjectView({
         packed: 0,
         jis16: 0,
         banked: 0,
+        reread: 0,
         structured: false,
       });
       await reloadEntries();
@@ -319,6 +322,7 @@ export default function ProjectView({
         packed: outcome.packed,
         jis16: outcome.jis16,
         banked: outcome.banked,
+        reread: outcome.reread,
         structured: true,
       });
       await reloadEntries();
@@ -519,7 +523,7 @@ export default function ProjectView({
     }
   }, [projectDir, reloadEntries]);
 
-  async function runTranslation(current: AppSettings | null = settings) {
+  async function runTranslation(current: AppSettings | null = settings, redoErrors = false) {
     setSummary(null);
     setProgress(null);
     setRemoteAsk(null);
@@ -527,7 +531,10 @@ export default function ProjectView({
     try {
       // Traduz com o provider que esta na tela, nao com o ultimo gravado.
       if (!(await saveSettings(current))) return;
-      const result = await invoke<TranslateSummary>("translate_project", { projectDir });
+      const result = await invoke<TranslateSummary>("translate_project", {
+        projectDir,
+        redoErrors,
+      });
       setSummary(result);
       if (result.stopped) setTranslateError(t("translate.stopped", { error: result.stopped }));
       await runValidation(); // erros aparecem antes de qualquer reinsercao
@@ -687,6 +694,7 @@ export default function ProjectView({
   // Nome interno do jogo nao e texto: fica fora da fila, contado na tela.
   const internal = entries.filter((e) => e.status === "internal").length;
   const pending = entries.filter((e) => !e.translatedText && e.status !== "internal").length;
+  const failed = entries.filter((e) => e.status === "error").length;
   const hasAscii = entries.some((e) => e.encoding === "ascii");
   const hasJapanese = entries.some((e) => e.encoding === "shift_jis");
   const hasJis16 = entries.some(
@@ -893,6 +901,9 @@ export default function ProjectView({
       )}
       {scanInfo && scanInfo.banked > 0 && (
         <p className="hint left">{t("extract.banked", { n: scanInfo.banked })}</p>
+      )}
+      {scanInfo && scanInfo.reread > 0 && (
+        <p className="hint left">{t("extract.reread", { n: scanInfo.reread })}</p>
       )}
       {savedPath && <div className="ok">{t("export.saved", { path: savedPath })}</div>}
 
@@ -1277,6 +1288,15 @@ export default function ProjectView({
                 disabled={pending === 0 || sourceBroken}
               >
                 {t("translate.run")} ({pending})
+              </button>
+            )}
+            {!translating && failed > 0 && (
+              <button
+                onClick={() => runTranslation(settings, true)}
+                disabled={sourceBroken}
+                title={t("translate.redoErrorsHint")}
+              >
+                {t("translate.redoErrors")} ({failed})
               </button>
             )}
           </div>

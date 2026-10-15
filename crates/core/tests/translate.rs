@@ -252,6 +252,60 @@ async fn full_flow_translates_saves_and_hits_tm_on_rerun() {
 }
 
 #[tokio::test]
+async fn a_translation_with_errors_goes_back_to_the_provider_only_when_asked() {
+    let tmp = TempDir::new("redo");
+    let mut db = ProjectDb::open(&tmp.0).unwrap();
+    let mut broken = entry("bad", "LINE ONE");
+    broken.translated_text = Some("RESPOSTA RUIM".to_string());
+    broken.status = TranslationStatus::Error;
+    db.upsert_entries(&[broken, entry("new", "LINE TWO")])
+        .unwrap();
+    // A memoria tem a resposta ruim: quem volta com erro nao passa por ela.
+    db.tm_store("LINE ONE", "", "pt-BR", "RESPOSTA RUIM")
+        .unwrap();
+    let cancel = AtomicBool::new(false);
+
+    let provider = MockProvider::new(0);
+    run_translation(
+        &mut db,
+        None,
+        &provider,
+        "mock-model",
+        &opts(),
+        &cancel,
+        &no_progress(),
+    )
+    .await
+    .unwrap();
+    let sent: Vec<String> = provider.requests.lock().unwrap()[0]
+        .items
+        .iter()
+        .map(|i| i.id.clone())
+        .collect();
+    assert_eq!(sent, ["new"], "sem pedir, a frase com erro fica como esta");
+
+    let provider = MockProvider::new(0);
+    let redo = TranslateOptions {
+        redo_errors: true,
+        ..opts()
+    };
+    let summary = run_translation(
+        &mut db,
+        None,
+        &provider,
+        "mock-model",
+        &redo,
+        &cancel,
+        &no_progress(),
+    )
+    .await
+    .unwrap();
+    assert_eq!((summary.translated, summary.tm_hits), (1, 0));
+    let bad = db.get_entry("bad").unwrap().unwrap();
+    assert_eq!(bad.translated_text.as_deref(), Some("[pt] LINE ONE"));
+}
+
+#[tokio::test]
 async fn retry_recovers_and_exhaustion_counts_failed() {
     let tmp = TempDir::new("retry");
     let mut db = ProjectDb::open(&tmp.0).unwrap();

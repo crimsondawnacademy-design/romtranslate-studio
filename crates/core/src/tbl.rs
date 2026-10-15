@@ -129,6 +129,33 @@ impl TblTable {
     /// O caractere ASCII que falta e gravado nessa forma (`wide_form`), e e
     /// assim que ele sera lido de volta.
     pub fn encode(&self, text: &str) -> Result<Vec<u8>> {
+        let (out, written) = self.encode_unchecked(text)?;
+        // Chave de 2+ bytes que comeca por outra chave: os bytes certos, lado
+        // a lado, podem ser lidos como outro texto.
+        let read_back = self.decode(&out);
+        if read_back.as_deref() != Some(written.as_str()) {
+            return Err(CoreError::Tbl(format!(
+                "tabela ambigua: \"{written}\" gravado seria lido de volta como \"{}\"",
+                read_back.unwrap_or_default()
+            )));
+        }
+        Ok(out)
+    }
+
+    /// `text` lido pela tabela `self` depois de gravado pela tabela `older`:
+    /// os mesmos bytes, com os codigos na forma em que esta tabela os le
+    /// (`[FF21][FFF0]` vira `[FF21:FFF0]` quando a leitura de agora sabe que
+    /// o comando leva parametro). `None` = `older` nao grava o texto ou esta
+    /// tabela nao le os bytes.
+    pub fn reread(&self, older: &TblTable, text: &str) -> Option<String> {
+        let (bytes, _) = older.encode_unchecked(text).ok()?;
+        self.decode(&bytes)
+    }
+
+    /// Os bytes de `text` e o texto como ele foi escrito (o caractere que so
+    /// existe em largura inteira, nessa forma), sem conferir a leitura de
+    /// volta.
+    fn encode_unchecked(&self, text: &str) -> Result<(Vec<u8>, String)> {
         let mut out = Vec::new();
         // O texto como a tabela vai le-lo de volta.
         let mut written = String::with_capacity(text.len());
@@ -152,16 +179,7 @@ impl TblTable {
             written.push(wide);
             rest = &rest[ch.len_utf8()..];
         }
-        // Chave de 2+ bytes que comeca por outra chave: os bytes certos, lado
-        // a lado, podem ser lidos como outro texto.
-        let read_back = self.decode(&out);
-        if read_back.as_deref() != Some(written.as_str()) {
-            return Err(CoreError::Tbl(format!(
-                "tabela ambigua: \"{written}\" gravado seria lido de volta como \"{}\"",
-                read_back.unwrap_or_default()
-            )));
-        }
-        Ok(out)
+        Ok((out, written))
     }
 
     /// A tabela escreve `ch`, como ele e ou por um substituto (`stand_ins`).
@@ -448,18 +466,63 @@ pub fn adopt_table(project_dir: &Path, source: &Path) -> Result<PathBuf> {
     Ok(dest)
 }
 
-/// Grava a tabela `id` no projeto se ele ainda nao tem uma com esse nome: e
-/// a tabela que a extracao montou sozinha. A que ja existe fica como esta —
-/// pode ter sido completada a mao.
+/// Grava no projeto a tabela `id` que a extracao montou sozinha. A que ja
+/// existe e trocada pela de agora, com as linhas que a pessoa mudou
+/// (`hand_lines`) no fim, valendo por cima: a leitura aprende o jogo melhor a
+/// cada versao, e a tabela velha lia os comandos de outro jeito que as frases
+/// (medido em 14/10/2026: 113 falas acusadas de "tabela ambigua" porque o
+/// comando de nome de item tinha parametro numa e nao na outra).
 pub fn ensure_table(project_dir: &Path, id: &str, text: &str) -> Result<()> {
+    TblTable::parse(text)?;
     let dir = project_dir.join(TABLES_DIR);
     let dest = dir.join(format!("{id}.tbl"));
-    if dest.exists() {
-        return Ok(());
+    let mut out = text.to_string();
+    match fs::read_to_string(&dest) {
+        Ok(old) => {
+            let kept = hand_lines(&old, text);
+            if !kept.is_empty() {
+                out.push_str("# Linhas mudadas a mao, mantidas da tabela anterior:\n");
+                for line in kept {
+                    out.push_str(line);
+                    out.push('\n');
+                }
+            }
+            if old == out {
+                return Ok(());
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(CoreError::io(&dest, e)),
     }
-    TblTable::parse(text)?;
     fs::create_dir_all(&dir).map_err(|e| CoreError::io(&dir, e))?;
-    fs::write(&dest, text).map_err(|e| CoreError::io(&dest, e))
+    fs::write(&dest, out).map_err(|e| CoreError::io(&dest, e))
+}
+
+/// As linhas de `old` que a pessoa escreveu: nem estao na tabela gerada agora
+/// (`generated`), nem tem o valor que o gerador da a uma chave que nao reconhece
+/// (`[` + as unidades de 16 bits da chave + `]`: comando, comando com
+/// parametro, desenho proprio) — essas sao de uma geracao velha.
+fn hand_lines<'a>(old: &'a str, generated: &str) -> Vec<&'a str> {
+    let fresh: std::collections::HashSet<&str> = generated.lines().collect();
+    let generator_value = |hex: &str| {
+        let bytes = decode_hex(hex)?;
+        let units: Vec<String> = bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|pair| format!("{:04X}", u16::from_le_bytes(*pair)))
+            .collect();
+        (bytes.len() % 2 == 0).then(|| format!("[{}]", units.join(":")))
+    };
+    old.lines()
+        .map(|line| line.trim_end_matches('\r'))
+        .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with(';'))
+        .filter(|line| !fresh.contains(line))
+        .filter(|line| {
+            line.split_once('=')
+                .is_some_and(|(hex, value)| generator_value(hex).as_deref() != Some(value))
+        })
+        .collect()
 }
 
 /// O que se grava no lugar de um caractere que a fonte do jogo nao tem,
@@ -507,6 +570,58 @@ fn decode_hex(hex: &str) -> Option<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_new_extraction_rewrites_the_table_and_keeps_the_lines_changed_by_hand() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("rts-tbl-{nanos}"));
+        // A tabela de uma leitura velha: um comando com parametro que a de
+        // agora le de outro jeito, um desenho sem nome e um que a pessoa
+        // batizou.
+        let old = "# gerada\n1B01=あ\n21FF=[FF21]\n21FF5D00=[FF21:005D]\nAD00=[00AD]\nAE00=父\n";
+        ensure_table(&dir, "jis16", old).unwrap();
+        let new = "# gerada de novo\n1B01=あ\n21FF=[FF21]\n21FFF0FF=[FF21:FFF0]\nAD00=[00AD]\nAE00=[00AE]\n";
+        ensure_table(&dir, "jis16", new).unwrap();
+        let written = fs::read_to_string(dir.join(TABLES_DIR).join("jis16.tbl")).unwrap();
+        assert!(written.starts_with(new), "{written}");
+        assert!(
+            !written.contains("[FF21:005D]"),
+            "linha de geracao velha sai"
+        );
+        assert!(written.ends_with("AE00=父\n"), "{written}");
+        let table = TblTable::parse(&written).unwrap();
+        assert_eq!(table.lookup(&[0xAE, 0x00]), Some((2, "父")));
+        // De novo com a mesma tabela: o arquivo nao muda.
+        ensure_table(&dir, "jis16", new).unwrap();
+        assert_eq!(
+            fs::read_to_string(dir.join(TABLES_DIR).join("jis16.tbl")).unwrap(),
+            written
+        );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_translation_is_reread_in_the_form_of_the_new_table() {
+        let older = TblTable::parse("5D00=◇\n1B01=あ\n21FF=[FF21]\n").unwrap();
+        let newer =
+            TblTable::parse("5D00=◇\n1B01=あ\n21FF=[FF21]\n21FF5D00=[FF21:005D]\n").unwrap();
+        assert_eq!(
+            newer.reread(&older, "◇[FF21]◇あ").as_deref(),
+            Some("◇[FF21:005D]あ")
+        );
+        // Escrito do jeito velho, o comando com o parametro colado acusa a
+        // tabela nova de ambigua; relido, grava os mesmos bytes sem erro.
+        assert!(newer.encode("[FF21]◇").is_err());
+        assert_eq!(
+            newer.encode("[FF21:005D]").unwrap(),
+            [0x21, 0xFF, 0x5D, 0x00]
+        );
+        // O que a tabela velha nao grava fica como esta.
+        assert_eq!(newer.reread(&older, "x"), None);
+    }
 
     #[test]
     fn quotes_the_table_lacks_go_in_as_typographic_ones() {

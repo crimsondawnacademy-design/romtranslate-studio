@@ -147,6 +147,9 @@ const messages = {
     "translate.testing": "Testando...",
     "translate.testOk": "Conexão OK — modelo: {model}",
     "translate.run": "Traduzir pendentes",
+    "translate.redoErrors": "Traduzir de novo as com erro",
+    "translate.redoErrorsHint":
+      "Manda de novo à IA as frases que a validação acusou (código do jogo faltando, maior que o espaço), sem a memória de tradução, com o tamanho e os códigos que a frase tem que ter.",
     "translate.running": "Traduzindo...",
     "translate.cancel": "Cancelar",
     "translate.phase.tm": "memória de tradução",
@@ -169,6 +172,8 @@ const messages = {
       "{n} frases estão em japonês, em códigos de 16 bits na ordem da tabela japonesa padrão (JIS). O app montou a tabela de letras sozinho e guardou no projeto (tables/jis16.tbl). O que o scanner comum leu neste jogo saiu da fila de tradução: num jogo assim é quase tudo dado, e aparece no filtro “nomes internos”.",
     "extract.banked":
       "{n} dessas mensagens podem crescer: o jogo guarda cada bloco de falas com uma tabela de posições, e o app remonta o bloco com a tradução maior (se ele não couber onde estava, vai para o espaço livre do arquivo). O limite passa a ser a caixa de texto do jogo: a largura da linha é medida no próprio jogo e, quando há sinal de que a caixa rola sozinha, o app quebra as linhas da tradução nessa largura.",
+    "extract.reread":
+      "{n} traduções já feitas foram relidas: a leitura de agora mostra os comandos do jogo de outro jeito (um comando que leva número aparece junto dele), e a tradução passou a usar a mesma forma. Os bytes gravados são os mesmos.",
     "translate.ascii":
       "Texto ASCII não tem letra acentuada: a IA é avisada disso e, se mesmo assim responder com acento ou com aspas e travessão tipográficos, o app grava a letra sem acento e o sinal simples, com um aviso na frase. O que não tem equivalente bloqueia a reinserção e a frase diz qual caractere é.",
     "translate.japanese":
@@ -415,6 +420,9 @@ const messages = {
     "translate.testing": "Testing...",
     "translate.testOk": "Connection OK — model: {model}",
     "translate.run": "Translate pending",
+    "translate.redoErrors": "Translate the ones with errors again",
+    "translate.redoErrorsHint":
+      "Sends the strings that validation flagged (a game code missing, longer than the space) back to the AI, without the translation memory, with the length and the codes the string must have.",
     "translate.running": "Translating...",
     "translate.cancel": "Cancel",
     "translate.phase.tm": "translation memory",
@@ -436,6 +444,8 @@ const messages = {
       "{n} lines are in Japanese, as 16-bit codes in the order of the standard Japanese table (JIS). The app built the letter table by itself and saved it in the project (tables/jis16.tbl). What the plain scanner read in this game left the translation queue: in a game like this it is almost all data, and it shows up under the “internal names” filter.",
     "extract.banked":
       "{n} of those messages can grow: the game stores each block of lines with a table of positions, and the app rebuilds the block with the longer translation (if it no longer fits where it was, it goes to the free space of the file). The limit becomes the game's text box: the line width is measured in the game itself and, when there is a sign that the box scrolls by itself, the app breaks the lines of the translation at that width.",
+    "extract.reread":
+      "{n} translations already made were reread: the current reading shows the game's commands another way (a command that takes a number shows it attached), and the translation now uses the same form. The bytes written are the same.",
     "translate.ascii":
       "ASCII text has no accented letters: the AI is told so and, if it still answers with an accent or with typographic quotes and dashes, the app writes the plain letter and the plain sign, with a warning on the string. Anything with no equivalent blocks reinsertion and the string says which character it is.",
     "translate.japanese":

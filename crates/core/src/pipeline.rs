@@ -36,6 +36,10 @@ pub struct TranslateOptions {
     /// Quantas vezes a traducao que nao coube no espaco da frase volta ao
     /// provider, com o tamanho que passou (0 = nao repede).
     pub shorten_rounds: u32,
+    /// A frase com erro de validacao (codigo do jogo faltando, maior que o
+    /// espaco) volta ao provider nesta rodada, sem passar pela memoria de
+    /// traducao — que devolveria a mesma resposta.
+    pub redo_errors: bool,
 }
 
 impl TranslateOptions {
@@ -48,6 +52,7 @@ impl TranslateOptions {
             retry_delay_ms: 1000,
             parallel: 4,
             shorten_rounds: 2,
+            redo_errors: false,
         }
     }
 }
@@ -103,7 +108,7 @@ pub fn estimate_translation(
     let mut pending: Vec<TextEntry> = db
         .load_entries()?
         .into_iter()
-        .filter(|e| e.translated_text.is_none() && e.status != TranslationStatus::Internal)
+        .filter(|e| wanted(e, opts))
         .collect();
     let mut tables = ProjectTables::new(db.project_dir());
     let glossary = db.glossary_list()?;
@@ -247,6 +252,14 @@ pub struct Progress {
     pub phase: &'static str,
 }
 
+/// A entry entra na rodada: sem traducao ou, com `redo_errors`, com erro de
+/// validacao. Nome interno do jogo nao e texto: nem memoria, nem provider.
+fn wanted(entry: &TextEntry, opts: &TranslateOptions) -> bool {
+    entry.status != TranslationStatus::Internal
+        && (entry.translated_text.is_none()
+            || (opts.redo_errors && entry.status == TranslationStatus::Error))
+}
+
 /// Traduz todas as entries ainda nao traduzidas do banco do projeto.
 /// `cancel` interrompe entre batches; progresso via callback.
 pub async fn run_translation(
@@ -264,8 +277,7 @@ pub async fn run_translation(
     let pending: Vec<TextEntry> = db
         .load_entries()?
         .into_iter()
-        // Nome interno do jogo nao e texto: nem memoria, nem provider.
-        .filter(|e| e.translated_text.is_none() && e.status != TranslationStatus::Internal)
+        .filter(|e| wanted(e, opts))
         .collect();
     let total = pending.len();
     let mut summary = TranslateSummary {
@@ -292,6 +304,11 @@ pub async fn run_translation(
         // Tabela ausente do projeto e erro ja aqui: sem ela nao ha o que
         // dizer pro provider nem como conferir a resposta.
         let charset = Charset::of(&entry, &mut tables)?;
+        // Volta com erro (`redo_errors`): a memoria daria a mesma resposta.
+        if entry.translated_text.is_some() {
+            remaining.push(entry);
+            continue;
+        }
         let mut hit = db.tm_lookup(&entry.source_text, &src_lang, &opts.target_language)?;
         if hit.is_none() {
             if let Some(global) = global_tm.as_deref_mut() {

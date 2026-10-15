@@ -112,6 +112,8 @@ export interface ExtractOutcome {
   jis16: number;
   /** Das salvas, quantas estao num banco em blocos: a traducao pode crescer. */
   banked: number;
+  /** Traducoes ja feitas relidas com os comandos na forma da leitura de agora. */
+  reread: number;
 }
 
 export interface OpenProjectReport {

@@ -112,6 +112,9 @@ enum Command {
         /// Frases por chamada, de 1 a 50 [padrao: o das configuracoes do app]
         #[arg(long, value_name = "N")]
         batch: Option<usize>,
+        /// Conta tambem as frases com erro de validacao (como no translate)
+        #[arg(long)]
+        redo_errors: bool,
     },
     /// Traduz as frases pendentes com o provider das configuracoes do app
     Translate {
@@ -126,6 +129,10 @@ enum Command {
         /// Vezes que a traducao que nao coube na frase volta ao provider (0 = nao volta)
         #[arg(long, value_name = "N", default_value_t = TranslateOptions::new("").shorten_rounds)]
         shorten_rounds: u32,
+        /// Manda de novo ao provider as frases com erro de validacao (codigo do jogo
+        /// faltando, maior que o espaco), sem a memoria de traducao
+        #[arg(long)]
+        redo_errors: bool,
     },
     /// Grava traducoes de um arquivo (uma por linha: id<TAB>traducao) e valida
     Apply {
@@ -344,14 +351,16 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             let mut text = format!(
                 "gravadas: {}, descartadas (nao parecem texto): {}, removidas do projeto antigo: {}, \
                  fora das regioes de texto (ficam fora da traducao): {}, de blocos comprimidos: {}, \
-                 em japones de 16 bits (tabela gerada): {}, que podem crescer (banco em blocos): {}",
+                 em japones de 16 bits (tabela gerada): {}, que podem crescer (banco em blocos): {}, \
+                 traducoes relidas com os comandos de agora: {}",
                 outcome.saved,
                 outcome.discarded,
                 outcome.removed,
                 outcome.stray,
                 outcome.packed,
                 outcome.jis16,
-                outcome.banked
+                outcome.banked,
+                outcome.reread
             );
             if outcome.truncated {
                 text.push_str("\ncortou no teto: pode haver mais texto");
@@ -412,14 +421,19 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             });
             Ok(Output::new(text, json))
         }
-        Command::Estimate { project, batch } => {
+        Command::Estimate {
+            project,
+            batch,
+            redo_errors,
+        } => {
             let game = load(&project)?;
             let batch = match batch {
                 Some(batch) => batch,
                 None => settings::load_settings(&config_dir()?).batch_size,
             };
-            let (estimate, _) =
-                estimate_translation(&ProjectDb::open(&project)?, &options(game, batch))?;
+            let mut opts = options(game, batch);
+            opts.redo_errors = redo_errors;
+            let (estimate, _) = estimate_translation(&ProjectDb::open(&project)?, &opts)?;
             // Media de caracteres por token: a tela calibra pelo Claude quando ha
             // chave; aqui a conta e sempre a media.
             let tokens = |chars: usize| (chars as f64 / DEFAULT_CHARS_PER_TOKEN).ceil() as u64;
@@ -438,12 +452,14 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             batch,
             parallel,
             shorten_rounds,
+            redo_errors,
         } => {
             let cfg_dir = config_dir()?;
             let cfg = settings::load_settings(&cfg_dir);
             let mut opts = options(load(&project)?, batch.unwrap_or(cfg.batch_size));
             opts.parallel = parallel;
             opts.shorten_rounds = shorten_rounds;
+            opts.redo_errors = redo_errors;
             translate(&project, &opts, &cfg, &cfg_dir)
         }
         Command::Apply { project, tsv } => apply(&project, &tsv),
