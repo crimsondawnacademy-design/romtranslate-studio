@@ -37,6 +37,7 @@ pub fn encoding_label(encoding: &TextEncoding) -> String {
         TextEncoding::Utf16Be => "utf16be".to_string(),
         TextEncoding::ShiftJis => "shift_jis".to_string(),
         TextEncoding::Table(id) => format!("table:{id}"),
+        TextEncoding::Image => "image".to_string(),
     }
 }
 

@@ -27,6 +27,9 @@ icu_normalizer = { version = "2", default-features = false, features = ["compile
 # sistema. No Linux o cofre e o Secret Service por zbus, sem lib de sistema.
 toml = "1.1.6"
 keyring = { version = "4.2.0", features = ["apple-native-keyring-store"] }
+# Texto em imagem (`images`): a folha que vai pra IA ler e a que a tela mostra.
+# Ja vem na arvore pelo Tauri.
+png = "0.18"
 
 [dev-dependencies]
 tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread"] }

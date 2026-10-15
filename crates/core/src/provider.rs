@@ -84,6 +84,15 @@ pub trait TranslationProvider: Send + Sync {
     fn usage(&self) -> Usage {
         Usage::default()
     }
+
+    /// Responde a `prompt` olhando a imagem `png` (a leitura do texto
+    /// desenhado, `images`). Provider que nao ve imagem recusa.
+    async fn read_image(&self, _png: &[u8], _prompt: &str) -> Result<String> {
+        Err(CoreError::Provider(format!(
+            "o provider {} nao le imagem — use o ChatGPT pelo Codex CLI",
+            self.id()
+        )))
+    }
 }
 
 pub fn build_system_prompt(req: &TranslationRequest) -> String {

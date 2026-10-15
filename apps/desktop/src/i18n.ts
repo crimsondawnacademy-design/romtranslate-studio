@@ -146,6 +146,23 @@ const messages = {
     "translate.test": "Testar conexão",
     "translate.testing": "Testando...",
     "translate.testOk": "Conexão OK — modelo: {model}",
+    "pictures.title": "Texto em imagem",
+    "pictures.hint":
+      "Alguns jogos guardam texto como desenho: aviso da abertura, rótulos de menu, listas de opções. O app acha as imagens com quadros que parecem letra (sem IA, sem custo); marque as que têm japonês e só essas vão pra IA ler. Cada trecho lido vira uma frase do projeto: traduza como as outras, e na reinserção o app apaga o japonês e escreve a tradução no lugar, com a fonte dele, nas mesmas cores. Grade de letras soltas (teclado de nomes) fica como está.",
+    "pictures.find": "Procurar imagens com letra",
+    "pictures.finding": "Procurando...",
+    "pictures.found": "{n} imagens com quadros que parecem letra. Marque as que têm texto em japonês.",
+    "pictures.none": "Nenhuma imagem com letra neste arquivo.",
+    "pictures.raw": "crua",
+    "pictures.read": "Ler as marcadas com a IA ({n})",
+    "pictures.readHint":
+      "Uma chamada por imagem, com o modelo de ler imagem (o padrão do Codex se o campo estiver vazio): letra miúda pede modelo forte. Confira o texto lido na lista antes de traduzir.",
+    "pictures.reading": "Lendo...",
+    "pictures.readDone":
+      "{pictures} imagens lidas: {blocks} trechos de letra, {entries} frases com japonês entraram no projeto.",
+    "translate.codexImageModel": "Modelo pra ler imagem (opcional)",
+    "translate.codexImageModelHint":
+      "Vazio = o modelo padrão do Codex. O modelo leve inventa palavra em letra miúda; o padrão leu certo por menos tokens.",
     "translate.run": "Traduzir pendentes",
     "translate.redoErrors": "Traduzir de novo as com erro",
     "translate.redoErrorsHint":
@@ -259,6 +276,8 @@ const messages = {
     "reinsert.relocated": "{n} realocadas, com os ponteiros atualizados",
     "reinsert.noRoom":
       "{n} traduções ficaram sem espaço: o bloco de falas delas, remontado, não coube no espaço livre do arquivo. Esses blocos ficaram como no original. Encurte as traduções desses blocos e reinsira.",
+    "reinsert.pictures": "{pictures} imagens redesenhadas, com {drawn} frases escritas nelas.",
+    "reinsert.picturesLeftOut": "{n} frases desenhadas ficaram como no original:",
     "reinsert.packedLeftOut":
       "{n} traduções de blocos comprimidos ficaram de fora: o bloco regravado ficou maior que o original e o jogo não tem tabela de ponteiros para ele mudar de lugar. Encurte o texto desses blocos e reinsira.",
     "reinsert.advanced": "Modo avançado: reinserir mesmo com erros de validação",
@@ -419,6 +438,23 @@ const messages = {
     "translate.test": "Test connection",
     "translate.testing": "Testing...",
     "translate.testOk": "Connection OK — model: {model}",
+    "pictures.title": "Text in images",
+    "pictures.hint":
+      "Some games store text as drawings: the opening warning, menu labels, lists of options. The app finds the images with tiles that look like letters (no AI, no cost); tick the ones with Japanese and only those go to the AI to be read. Each piece read becomes a string of the project: translate it like the others, and on reinsertion the app erases the Japanese and writes the translation in its place, with its own font, in the same colors. A grid of single letters (name keyboard) stays as it is.",
+    "pictures.find": "Find images with letters",
+    "pictures.finding": "Finding...",
+    "pictures.found": "{n} images with tiles that look like letters. Tick the ones with Japanese text.",
+    "pictures.none": "No image with letters in this file.",
+    "pictures.raw": "raw",
+    "pictures.read": "Read the ticked ones with the AI ({n})",
+    "pictures.readHint":
+      "One call per image, with the image-reading model (Codex's default if the field is empty): tiny letters need a strong model. Check the text read in the list before translating.",
+    "pictures.reading": "Reading...",
+    "pictures.readDone":
+      "{pictures} images read: {blocks} pieces of lettering, {entries} strings with Japanese entered the project.",
+    "translate.codexImageModel": "Model to read images (optional)",
+    "translate.codexImageModelHint":
+      "Empty = Codex's default model. The light model makes words up in tiny letters; the default read them right for fewer tokens.",
     "translate.run": "Translate pending",
     "translate.redoErrors": "Translate the ones with errors again",
     "translate.redoErrorsHint":
@@ -531,6 +567,8 @@ const messages = {
     "reinsert.relocated": "{n} relocated, with pointers updated",
     "reinsert.noRoom":
       "{n} translations ran out of room: their block of lines, rebuilt, did not fit the free space of the file. Those blocks stayed as in the original. Shorten the translations in those blocks and reinsert.",
+    "reinsert.pictures": "{pictures} images redrawn, with {drawn} strings written on them.",
+    "reinsert.picturesLeftOut": "{n} drawn strings stayed as in the original:",
     "reinsert.packedLeftOut":
       "{n} translations in compressed blocks were left out: the rewritten block came out larger than the original and the game has no pointer table that lets it move. Shorten the text in those blocks and reinsert.",
     "reinsert.advanced": "Advanced mode: reinsert even with validation errors",

@@ -1902,3 +1902,38 @@ de códigos não entram na conta).
 
 **O que NÃO foi provado:** nenhuma mensagem de "pegou item" foi vista no
 emulador (só a tela de nomes e o primeiro diálogo).
+
+## 2026-10-14 — Texto em imagem: o app acha, a pessoa escolhe, a IA lê, o app redesenha
+
+**Contexto:** no Mother 3, o aviso de saúde da abertura, os rótulos da tela de
+nomes e as listas da tela de ajustes são desenho (quadros 4bpp), não código
+de letra. O Rhuan quer tudo em português.
+
+**Decisão (`crates/core/src/images/`, `TextEncoding::Image`):**
+- **Achar sem IA:** blocos LZ77 de quadros e trechos de quadros crus com
+  muitos quadros que parecem letra (2 ou 3 cores, tinta de 5 a 29 pixels, sem
+  listra). Desenhados 32 por linha (a ordem da tela de GBA), o texto já é
+  legível. No jogo: 308 imagens, em 1 s.
+- **A pessoa marca as que têm japonês**; só essas vão pra IA. Mandar centenas
+  de sprites pra visão gastaria a cota à toa.
+- **A IA só lê, por número de trecho.** O app separa os trechos (linhas de
+  tinta, lista em colunas, parágrafo, furigana fora, teclado de nomes fora) e
+  manda uma folha numerada. A resposta vem por número: em lista, a IA pulava
+  um e o texto escorregava pro trecho seguinte. Modelo de ler imagem próprio
+  (`codexCli.imageModel`, vazio = o padrão do Codex): o leve inventava
+  palavra ("スコア", "ステージ") onde o padrão leu certo, por menos tokens.
+- **A tradução é a de sempre;** o limite é em pixels (`images::layout`).
+- **Redesenho:** apaga o que não é fundo perto da tinta e no retângulo do
+  trecho (sombra e contorno de outra cor inclusos) e escreve com a fonte do
+  app (desenho próprio, 5x7 com acento). Não coube, usa a fonte estreita (3x5,
+  versalete). Espaço até o fim do quadro da última letra: o jogo pode montar a
+  tela copiando os quadros de cada item. Imagem comprimida volta recomprimida
+  só se couber no lugar.
+- **A medida dos trechos é refeita na reinserção** (`images::refresh`), sem
+  IA: código novo não pede leitura nova.
+
+**O que NÃO foi provado:** só 2 imagens de um jogo. Item de lista em que o
+jogo copia uma janela que começa no meio do texto sai com a ponta cortada.
+Imagem montada por mapa de quadros fora de ordem, 8bpp ou comprimida que
+cresce não é tratada. A leitura da IA varia de uma vez pra outra em letra
+miúda ("おそい" lido "はちみつ"): conferir na lista antes de traduzir.

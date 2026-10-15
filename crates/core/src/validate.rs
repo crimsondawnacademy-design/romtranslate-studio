@@ -100,6 +100,13 @@ pub fn encoded_len(text: &str, encoding: &TextEncoding, table: Option<&TblTable>
                  esta gravado — troque o caractere (letra acentuada vira a letra simples)"
             )),
         },
+        // Desenho: o tamanho e em pixels, conferido por `images::layout`.
+        TextEncoding::Image => match crate::images::font::missing(text) {
+            None => EncodedLen::Bytes(0),
+            Some(ch) => EncodedLen::Unencodable(format!(
+                "a fonte do app nao tem o caractere {ch:?} — troque o caractere"
+            )),
+        },
     }
 }
 
@@ -184,6 +191,28 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
             IssueKind::EmptyTranslation,
             "traducao vazia para texto nao-vazio".to_string(),
         );
+        return issues;
+    }
+
+    // Texto desenhado: o que conta e caber no desenho com a fonte do app.
+    if entry.encoding == TextEncoding::Image {
+        let place = crate::images::place_of(entry);
+        match place.map(|(_, block)| crate::images::layout(translation, &block)) {
+            Some(Ok(_)) => {}
+            Some(Err(why)) => {
+                let kind = if crate::images::font::missing(translation).is_some() {
+                    IssueKind::Unencodable
+                } else {
+                    IssueKind::ByteOverflow
+                };
+                push(Severity::Error, kind, why);
+            }
+            None => push(
+                Severity::Error,
+                IssueKind::Unencodable,
+                "frase desenhada sem a posicao do desenho".to_string(),
+            ),
+        }
         return issues;
     }
 

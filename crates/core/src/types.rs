@@ -84,6 +84,9 @@ pub enum TextEncoding {
     ShiftJis,
     /// Tabela customizada (.tbl) identificada por id.
     Table(String),
+    /// Texto desenhado numa imagem (`images`): a traducao e escrita no
+    /// desenho com a fonte do app, nao gravada em bytes.
+    Image,
 }
 
 /// O que um adapter declara saber fazer. Probes do Sprint 1 so detectam.

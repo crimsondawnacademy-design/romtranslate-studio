@@ -56,6 +56,7 @@ export type TextEncodingWire =
   | "utf16_le"
   | "utf16_be"
   | "shift_jis"
+  | "image"
   | { table: string };
 
 export interface TextEntry {
@@ -172,6 +173,8 @@ export interface CodexCliSettings {
   command: string;
   /** Vazio = o modelo padrão do Codex. */
   model: string;
+  /** Modelo pra ler texto desenhado em imagem. Vazio = o padrão do Codex. */
+  imageModel: string;
   /** true = login só do app; false = a conta do Codex deste computador. */
   ownAccount: boolean;
 }
@@ -279,6 +282,35 @@ export interface ReinsertOutcome {
   forcedErrors: number;
   /** Traduções com erro que ficaram de fora: a frase segue como no original. */
   skippedErrors: number;
+  /** Texto desenhado em imagem: imagens regravadas e frases que ficaram no original. */
+  pictures: PicturesApplied;
+}
+
+export interface PicturesApplied {
+  pictures: number;
+  drawn: number;
+  /** [id da frase, por que ficou no original]. */
+  leftOut: [string, string][];
+}
+
+/** Uma imagem do arquivo com quadros que parecem letra. */
+export interface Picture {
+  id: string;
+  offset: number;
+  /** Bytes do bloco comprimido (LZ77); null = quadros crus. */
+  packed: number | null;
+  /** Bytes dos quadros, já descomprimidos. */
+  bytes: number;
+  /** Quadros que parecem letra. */
+  lettered: number;
+}
+
+export interface ReadPicturesOutcome {
+  pictures: number;
+  blocks: number;
+  entries: number;
+  /** [id da imagem, por que não foi lida]. */
+  failed: [string, string][];
 }
 
 export interface PatchExportOutcome {

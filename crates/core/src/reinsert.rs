@@ -30,6 +30,9 @@ pub struct ReinsertOutcome {
     /// Entries traduzidas que ficaram com o texto ORIGINAL porque a traducao
     /// tem erro ou nao cabe (so na politica `Skip`).
     pub skipped_errors: usize,
+    /// Texto desenhado em imagem (`images::apply`): imagens regravadas e
+    /// frases que ficaram no original.
+    pub pictures: crate::images::Applied,
 }
 
 /// O que fazer com a traducao que a validacao reprovou.
@@ -108,7 +111,9 @@ fn reinsert(
         ));
     }
 
-    // 2. Validacao fresca + bloqueio de erros criticos.
+    // 2. Validacao fresca + bloqueio de erros criticos. Antes, a medida dos
+    //    trechos de texto desenhado e a de agora (`images::refresh`).
+    crate::images::refresh(project_dir)?;
     let mut db = ProjectDb::open(project_dir)?;
     let validation = validate_project_db(&mut db)?;
     let mut entries = db.load_entries()?;
@@ -154,6 +159,12 @@ fn reinsert(
         }
     }
 
+    // Texto desenhado nao passa pelo adapter: e escrito na imagem depois.
+    let (pictures, mut entries): (Vec<TextEntry>, Vec<TextEntry>) = entries
+        .into_iter()
+        .partition(|e| e.encoding == TextEncoding::Image);
+    let mut drawn = crate::images::Applied::default();
+
     encode_table_entries(project_dir, &mut entries)?;
 
     // 4. Aplica sobre os bytes do original (all-or-nothing) e grava a
@@ -174,7 +185,7 @@ fn reinsert(
     let apply_report = if size <= in_memory_max {
         let original =
             fs::read(&project.source_path).map_err(|e| CoreError::io(&project.source_path, e))?;
-        let applied = adapter.apply_text(&original, &entries)?;
+        let mut applied = adapter.apply_text(&original, &entries)?;
         if policy == ErrorPolicy::Block && applied.report.no_room > 0 {
             return Err(CoreError::Project(format!(
                 "{} traducoes ficaram sem espaco: o bloco de mensagens delas, remontado, nao \
@@ -191,9 +202,25 @@ fn reinsert(
                 applied.report.packed_left_out
             )));
         }
+        drawn = crate::images::apply(&mut applied.bytes, &pictures);
+        if policy == ErrorPolicy::Block && !drawn.left_out.is_empty() {
+            let (id, why) = &drawn.left_out[0];
+            return Err(CoreError::Project(format!(
+                "{} frases desenhadas em imagem nao foram escritas — a primeira, {id}: {why}",
+                drawn.left_out.len()
+            )));
+        }
         fs::write(&tmp, &applied.bytes).map_err(|e| CoreError::io(&tmp, e))?;
         applied.report
     } else {
+        // ponytail: texto em imagem so no arquivo que cabe na memoria (cartucho);
+        // disco grande grava o texto e deixa os desenhos no original.
+        for entry in pictures.iter().filter(|e| e.translated_text.is_some()) {
+            drawn.left_out.push((
+                entry.id.clone(),
+                "texto desenhado so e escrito em arquivo que cabe na memoria".to_string(),
+            ));
+        }
         stream_apply_iso(&project.source_path, &entries, &tmp, in_memory_max)?
     };
     fs::rename(&tmp, &working_path).map_err(|e| CoreError::io(&working_path, e))?;
@@ -224,6 +251,7 @@ fn reinsert(
             0
         },
         skipped_errors,
+        pictures: drawn,
     })
 }
 

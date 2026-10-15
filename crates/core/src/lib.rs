@@ -12,6 +12,7 @@ pub mod error;
 pub mod export;
 pub mod fileio;
 pub mod hash;
+pub mod images;
 pub mod kuten;
 pub mod lz77;
 pub mod patch;

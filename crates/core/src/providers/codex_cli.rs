@@ -81,6 +81,8 @@ pub struct CodexCliProvider {
     program: PathBuf,
     path_env: OsString,
     model: Option<String>,
+    /// Modelo da leitura de imagem (`read_image`); `None` = o padrao do Codex.
+    image_model: Option<String>,
     timeout: Duration,
     /// `CODEX_HOME` proprio: a conta usada deixa de ser a do Codex do
     /// computador, e o login de la nao e tocado.
@@ -106,11 +108,18 @@ impl CodexCliProvider {
             program: resolve(command, &dirs),
             path_env,
             model: Some(model.trim().to_string()).filter(|m| !m.is_empty()),
+            image_model: None,
             timeout: Duration::from_secs(timeout_secs.max(1)),
             home: None,
             lean: tokio::sync::OnceCell::new(),
             spent: (AtomicU64::new(0), AtomicU64::new(0)),
         })
+    }
+
+    /// O modelo que le imagem (vazio = o padrao do Codex).
+    pub fn with_image_model(mut self, model: &str) -> Self {
+        self.image_model = Some(model.trim().to_string()).filter(|m| !m.is_empty());
+        self
     }
 
     /// Usa uma pasta de login propria em vez da do Codex do computador.
@@ -480,6 +489,60 @@ impl TranslationProvider for CodexCliProvider {
             input_tokens: self.spent.0.load(Ordering::Relaxed),
             output_tokens: self.spent.1.load(Ordering::Relaxed),
         }
+    }
+
+    async fn read_image(&self, png: &[u8], prompt: &str) -> Result<String> {
+        let work = WorkDir::new()?;
+        let image = work.0.join("imagem.png");
+        let answer = work.0.join("answer.txt");
+        let empty = work.0.join("empty");
+        fs::write(&image, png).map_err(|e| CoreError::io(&image, e))?;
+        let mut args: Vec<&OsStr> = [
+            "exec",
+            "--json",
+            "--skip-git-repo-check",
+            "--ephemeral",
+            "--ignore-user-config",
+            "--sandbox",
+            "read-only",
+            "-c",
+            "model_reasoning_effort=\"low\"",
+            "--color",
+            "never",
+        ]
+        .map(OsStr::new)
+        .to_vec();
+        args.extend(self.lean_flags().await.iter().map(OsStr::new));
+        // A imagem logo antes de outra opcao: `-i` aceita varios arquivos e
+        // levaria o "-" do prompt junto.
+        args.extend([OsStr::new("-i"), image.as_os_str()]);
+        args.extend([OsStr::new("-C"), empty.as_os_str()]);
+        args.extend([OsStr::new("-o"), answer.as_os_str()]);
+        // O modelo da traducao nao: letra miuda pede o padrao (ou o escolhido
+        // pra imagem).
+        if let Some(model) = &self.image_model {
+            args.extend([OsStr::new("-m"), OsStr::new(model)]);
+        }
+        args.push(OsStr::new("-"));
+        let output = self.run_in(&args, Some(prompt), Some(&empty)).await?;
+        if !output.status.success() {
+            return Err(CoreError::Provider(format!(
+                "o Codex CLI falhou ({}): {}",
+                output.status,
+                failure(&output)
+            )));
+        }
+        let used = usage_of(&output.stdout);
+        self.spent.0.fetch_add(used.input_tokens, Ordering::Relaxed);
+        self.spent
+            .1
+            .fetch_add(used.output_tokens, Ordering::Relaxed);
+        fs::read_to_string(&answer).map_err(|_| {
+            CoreError::Provider(format!(
+                "o Codex CLI terminou sem escrever a resposta: {}",
+                tail(&output.stderr)
+            ))
+        })
     }
 
     async fn health_check(&self) -> Result<()> {

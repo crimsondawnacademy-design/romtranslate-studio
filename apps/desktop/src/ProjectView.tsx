@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { makeT, MessageId } from "./i18n";
+import PicturesPanel from "./PicturesPanel";
 import {
   defaultProjectDir,
   encodedByteLength,
@@ -874,6 +875,13 @@ export default function ProjectView({
         </div>
       )}
 
+      <PicturesPanel
+        projectDir={projectDir}
+        t={t}
+        onRead={reloadEntries}
+        disabled={sourceBroken || translating}
+      />
+
       {scanInfo && (
         <div className="ok">
           {t("entries.saved", { n: scanInfo.found })}
@@ -1068,6 +1076,21 @@ export default function ProjectView({
                       setSettings({
                         ...settings,
                         codexCli: { ...settings.codexCli, model: e.target.value },
+                      })
+                    }
+                  />
+                </label>
+                <label title={t("translate.codexImageModelHint")}>
+                  {t("translate.codexImageModel")}
+                  <input
+                    type="text"
+                    size={18}
+                    value={settings.codexCli.imageModel ?? ""}
+                    placeholder={t("translate.codexModelDefault")}
+                    onChange={(e) =>
+                      setSettings({
+                        ...settings,
+                        codexCli: { ...settings.codexCli, imageModel: e.target.value },
                       })
                     }
                   />
@@ -1440,7 +1463,26 @@ export default function ProjectView({
                     {t("reinsert.packedLeftOut", { n: reinsertOutcome.apply.packedLeftOut })}
                   </>
                 )}
+                {reinsertOutcome.pictures.pictures > 0 && (
+                  <>
+                    <br />
+                    {t("reinsert.pictures", {
+                      pictures: reinsertOutcome.pictures.pictures,
+                      drawn: reinsertOutcome.pictures.drawn,
+                    })}
+                  </>
+                )}
               </div>
+              {reinsertOutcome.pictures.leftOut.length > 0 && (
+                <div className="warn">
+                  {t("reinsert.picturesLeftOut", { n: reinsertOutcome.pictures.leftOut.length })}
+                  {reinsertOutcome.pictures.leftOut.map(([id, why]) => (
+                    <div key={id}>
+                      {id}: {why}
+                    </div>
+                  ))}
+                </div>
+              )}
               <p className="hint left">{t("reinsert.personal")}</p>
               <ul className="evidence">
                 {reinsertOutcome.verification.checks.map((c) => (

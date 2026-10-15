@@ -36,6 +36,7 @@ export function encodedByteLength(
       return units * 2;
     }
     case "shift_jis":
+    case "image":
       return null;
   }
 }

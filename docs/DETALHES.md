@@ -62,6 +62,14 @@ Prefere compilar do código? Veja [Rodando](#rodando).
   explícito de privacidade. Texto ASCII e texto de tabela vão com a lista dos
   caracteres que o jogo escreve, e nome interno do jogo (identificador) fica
   fora da fila;
+- **Texto em imagem** (GBA, experimental): texto que o jogo guarda como
+  desenho — aviso da abertura, rótulos de menu, listas de opções. O app acha
+  as imagens com quadros que parecem letra (sem IA), você marca as que têm
+  japonês e só essas vão pra IA ler; cada trecho vira uma frase do projeto, e
+  na reinserção o app apaga o japonês e escreve a tradução com a fonte dele
+  (com acento; uma estreita quando o espaço é curto), nas cores do original.
+  Grade de letras soltas (teclado de nomes) fica como está. Só quadros 4bpp
+  na ordem da tela, crus ou em LZ77; a imagem comprimida volta só se couber;
 - **Validação e revisão**: placeholders/control codes/tags, limite de bytes no
   encoding destino, editor com filtros e statuses; erros bloqueiam a reinserção;
 - **Reinserção** em working copy verificada — o arquivo original **nunca** é
@@ -515,7 +523,9 @@ cargo run -p romtranslate-cli -- <comando>   # binário: romtranslate
 | `scan <projeto> [--encoding ascii\|utf8\|utf16_le\|utf16_be\|table] [--tbl arquivo] [--region início..fim] [--min-chars N] [--only-text]` | scanner genérico; `--region` restringe a busca a um trecho do arquivo (bytes, aceita `0x`) | generic scanner; `--region` limits the search to a byte range (`0x` accepted) |
 | `export <projeto> <arquivo> [--format json\|csv]` | as frases do projeto, com os ids | the project's entries, with their ids |
 | `estimate <projeto> [--batch N]` | tamanho da rodada de tradução, sem chamar o provider | size of the translation round, without calling the provider |
-| `translate <projeto> [--batch N] [--parallel N] [--shorten-rounds N]` | traduz as pendentes com o provider das configurações do app; `--parallel` são as chamadas ao mesmo tempo (padrão 4) e `--shorten-rounds` quantas vezes a tradução que não coube volta ao provider (padrão 2; 0 desliga) | translates pending entries with the provider from the app's settings; `--parallel` is the number of simultaneous calls (default 4) and `--shorten-rounds` how many times a translation that does not fit goes back to the provider (default 2; 0 turns it off) |
+| `translate <projeto> [--batch N] [--parallel N] [--shorten-rounds N] [--redo-errors]` | traduz as pendentes com o provider das configurações do app; `--parallel` são as chamadas ao mesmo tempo (padrão 4), `--shorten-rounds` quantas vezes a tradução que não coube volta ao provider (padrão 2; 0 desliga) e `--redo-errors` manda de novo **todas** as frases com erro de validação | translates pending entries with the provider from the app's settings; `--parallel` is the number of simultaneous calls (default 4), `--shorten-rounds` how many times a translation that does not fit goes back to the provider (default 2; 0 turns it off) and `--redo-errors` sends **every** string with a validation error again |
+| `pictures <projeto>` | acha as imagens com letra e grava a folha de cada uma em `<projeto>/imagens` (sem IA) | finds the images with lettering and saves a sheet of each in `<project>/imagens` (no AI) |
+| `read-pictures <projeto> <id>... [--preview] [--model M]` | a IA lê o texto das imagens escolhidas; `--preview` só grava a folha de trechos que iria pra ela | the AI reads the text of the chosen images; `--preview` only saves the sheet of pieces that would be sent |
 | `apply <projeto> <arquivo.tsv>` | grava traduções (`id<TAB>tradução` por linha) e valida | writes translations (`id<TAB>translation` per line) and validates |
 | `validate <projeto>` | valida, com a contagem por tipo de problema | validates, with a count per kind of issue |
 | `reinsert <projeto> [--policy block\|skip\|force]` | grava na cópia de trabalho e confere (padrão `skip`: frase com erro fica no original) | writes to the working copy and verifies (default `skip`: an entry with an error keeps the original) |

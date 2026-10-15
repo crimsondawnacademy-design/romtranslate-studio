@@ -204,6 +204,20 @@ impl ProjectDb {
         Ok(removed)
     }
 
+    /// Apaga as entries de `ids` e diz quantas sairam.
+    pub fn remove_entries(&mut self, ids: &[String]) -> Result<usize> {
+        let tx = self.conn.transaction()?;
+        let mut removed = 0;
+        {
+            let mut delete = tx.prepare("DELETE FROM entries WHERE id = ?1")?;
+            for id in ids {
+                removed += delete.execute([id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(removed)
+    }
+
     pub fn load_entries(&self) -> Result<Vec<TextEntry>> {
         let mut stmt = self.conn.prepare(&format!(
             "SELECT {ENTRY_COLUMNS} FROM entries ORDER BY offset IS NULL, offset, id"

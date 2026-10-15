@@ -126,6 +126,53 @@ async fn load_entries(project_dir: String) -> Result<Vec<TextEntry>, String> {
 
 // ---- Sprint 5: extracao estruturada + reinsercao ----
 
+/// Imagens com letra do arquivo do projeto (`images::find`), com a folha de
+/// cada uma gravada em `<projeto>/imagens`.
+#[tauri::command]
+async fn list_pictures(
+    project_dir: String,
+) -> Result<Vec<romtranslate_core::images::Picture>, String> {
+    blocking(move || romtranslate_core::images::list_pictures(&PathBuf::from(project_dir))).await
+}
+
+/// O PNG da folha de uma imagem (gravado por `list_pictures`), ou o da folha
+/// de trechos que foi pra IA (`leitura`).
+#[tauri::command]
+async fn picture_png(project_dir: String, id: String, reading: bool) -> Result<Vec<u8>, String> {
+    // O id vem da tela: so nome de arquivo, nada de caminho.
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        return Err(format!("id de imagem invalido: {id}"));
+    }
+    let name = if reading {
+        format!("{id}-leitura.png")
+    } else {
+        format!("{id}.png")
+    };
+    let path = PathBuf::from(project_dir)
+        .join(romtranslate_core::images::PICTURES_DIR)
+        .join(name);
+    std::fs::read(&path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// A IA le o texto das imagens marcadas; cada trecho com japones vira frase.
+#[tauri::command]
+async fn read_pictures(
+    app: AppHandle,
+    project_dir: String,
+    ids: Vec<String>,
+) -> Result<romtranslate_core::images::ReadOutcome, String> {
+    let cfg_dir = config_dir(&app)?;
+    let cfg = settings::load_settings(&cfg_dir);
+    let (provider, _) = build_provider(&cfg, &cfg_dir)?;
+    romtranslate_core::images::read_pictures(
+        &PathBuf::from(project_dir),
+        Some(provider.as_ref()),
+        &ids,
+    )
+    .await
+    .map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 async fn extract_structured(
     project_dir: String,
@@ -483,6 +530,9 @@ pub fn run() {
         .manage(TranslationState(Mutex::new(None)))
         .manage(CodexLoginState(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![
+            list_pictures,
+            picture_png,
+            read_pictures,
             inspect_file,
             create_project,
             open_project,

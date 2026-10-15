@@ -228,6 +228,11 @@ fn batch_request(
                     .or_else(|| {
                         (e.encoding == TextEncoding::ShiftJis && !e.can_grow())
                             .then(|| e.max_bytes.unwrap_or(e.original_bytes.len()))
+                    })
+                    // Desenho: as letras que cabem na largura e nas linhas dele.
+                    .or_else(|| {
+                        crate::images::place_of(e)
+                            .map(|(_, block)| crate::images::chars_that_fit(&block))
                     }),
                 max_line: crate::adapters::bank::line_width(e).filter(|_| layout.is_none()),
             })
@@ -672,6 +677,8 @@ enum Charset<'a> {
     Ascii,
     /// `TextEncoding::Table`: o que a tabela do projeto escreve.
     Table(&'a TblTable),
+    /// `TextEncoding::Image`: o que a fonte do app desenha.
+    Image,
 }
 
 impl<'a> Charset<'a> {
@@ -679,6 +686,7 @@ impl<'a> Charset<'a> {
         Ok(match &entry.encoding {
             TextEncoding::Ascii | TextEncoding::ShiftJis => Some(Charset::Ascii),
             TextEncoding::Table(id) => Some(Charset::Table(tables.get(id)?)),
+            TextEncoding::Image => Some(Charset::Image),
             _ => None,
         })
     }
@@ -688,6 +696,7 @@ impl<'a> Charset<'a> {
         match self {
             Charset::Ascii => (' '..='~').collect(),
             Charset::Table(table) => table.charset(),
+            Charset::Image => crate::images::font::charset(),
         }
     }
 
@@ -703,6 +712,15 @@ impl<'a> Charset<'a> {
                 (fitted != text).then_some(fitted)
             }
             Charset::Table(table) => table.drop_missing_accents(text),
+            Charset::Image => {
+                let draws = |s: &str| s.chars().all(|c| crate::images::font::glyph(c).is_some());
+                let plain = |ch: char| match plain_equivalent(ch) {
+                    Some(plain) if !draws(&ch.to_string()) && draws(&plain) => plain,
+                    _ => ch.to_string(),
+                };
+                let fitted: String = text.chars().map(plain).collect();
+                (fitted != text).then_some(fitted)
+            }
         }
     }
 
@@ -721,6 +739,8 @@ impl<'a> Charset<'a> {
                     .encode_slot_with(text, slot, fill(entry).as_deref())
                     .is_ok_and(|bytes| bytes.len() <= slot || entry.can_grow())
             }
+            Charset::Image => crate::images::place_of(entry)
+                .is_some_and(|(_, block)| crate::images::layout(text, &block).is_ok()),
         }
     }
 }
@@ -732,6 +752,7 @@ fn charset_group(entry: &TextEntry) -> (u8, &str) {
     match &entry.encoding {
         TextEncoding::Ascii | TextEncoding::ShiftJis => (1, ""),
         TextEncoding::Table(id) => (2, id),
+        TextEncoding::Image => (3, ""),
         _ => (0, ""),
     }
 }
@@ -770,6 +791,11 @@ fn excess(entry: &TextEntry, text: &str, charset: Option<Charset>) -> Option<usi
     let table = match charset {
         Charset::Table(table) => Some(table),
         Charset::Ascii => None,
+        // Desenho: 1 = nao cabe (a conta e em pixels, nao em bytes).
+        Charset::Image => {
+            let (_, block) = crate::images::place_of(entry)?;
+            return Some(usize::from(crate::images::layout(text, &block).is_err()));
+        }
     };
     let EncodedLen::Bytes(len) = encoded_len(text, &entry.encoding, table) else {
         return None;
@@ -878,6 +904,10 @@ fn shorter_please(item: &mut BatchItem, entry: &TextEntry, charset: Option<Chars
             entry.original_bytes.len(),
             &extract_tokens(&entry.source_text),
         ),
+        Charset::Image => match crate::images::place_of(entry) {
+            Some((_, block)) => crate::images::chars_that_fit(&block),
+            None => return,
+        },
     };
     let note = format!(
         "Your previous translation \"{previous}\" does not fit: it has {} characters and the \

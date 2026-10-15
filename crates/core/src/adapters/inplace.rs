@@ -72,6 +72,11 @@ fn encode(entry: &TextEntry, text: &str) -> Result<Option<Vec<u8>>> {
                 "entry {entry_id}: a traducao tem o caractere {ch:?}, que nao existe em Shift-JIS"
             ))
         }),
+        // Texto desenhado nao vira bytes: quem escreve e `images::apply`, que a
+        // reinsercao chama a parte.
+        TextEncoding::Image => Err(CoreError::Project(format!(
+            "entry {entry_id}: texto desenhado numa imagem chegou na gravacao de texto"
+        ))),
     }
 }
 

@@ -3570,6 +3570,7 @@ dependencies = [
  "icu_normalizer",
  "keyring",
  "memmap2",
+ "png 0.18.1",
  "reqwest",
  "rusqlite",
  "serde",

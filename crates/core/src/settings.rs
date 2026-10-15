@@ -35,6 +35,11 @@ pub struct CodexCliSettings {
     pub command: String,
     /// Vazio = o modelo padrao do Codex.
     pub model: String,
+    /// Modelo pra ler texto desenhado em imagem (`images`). Vazio = o padrao
+    /// do Codex, nao o de `model`: medido em 14/10/2026, o modelo leve
+    /// inventava palavra de jogo ("スコア", "ステージ") onde a letra e miuda, e
+    /// o padrao leu certo por menos tokens.
+    pub image_model: String,
     /// `true` = o app usa um login so dele (pasta propria); `false` = a conta
     /// em que o Codex deste computador ja esta logado.
     pub own_account: bool,
@@ -45,6 +50,7 @@ impl Default for CodexCliSettings {
         CodexCliSettings {
             command: crate::providers::codex_cli::DEFAULT_COMMAND.to_string(),
             model: String::new(),
+            image_model: String::new(),
             own_account: false,
         }
     }
@@ -325,7 +331,8 @@ pub fn build_provider(
                 &codex.model,
                 codex.own_account,
                 cfg.timeout_secs,
-            )?;
+            )?
+            .with_image_model(&codex.image_model);
             let label = match codex.model.trim() {
                 "" => "codex (modelo padrao)".to_string(),
                 model => format!("codex ({model})"),

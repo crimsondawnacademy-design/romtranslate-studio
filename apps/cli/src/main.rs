@@ -134,6 +134,28 @@ enum Command {
         #[arg(long)]
         redo_errors: bool,
     },
+    /// Acha as imagens com letra do arquivo e grava a folha de cada uma em
+    /// <projeto>/imagens (sem IA): e nelas que se ve quais tem japones
+    Pictures {
+        #[arg(value_name = "PROJETO")]
+        project: PathBuf,
+    },
+    /// A IA le o texto das imagens escolhidas (uma chamada por imagem) e cada
+    /// trecho com japones vira uma frase do projeto, que o app redesenha ao reinserir
+    ReadPictures {
+        #[arg(value_name = "PROJETO")]
+        project: PathBuf,
+        /// Ids das imagens, como o comando pictures lista (img-xxxxxxxx)
+        #[arg(value_name = "ID", required = true)]
+        ids: Vec<String>,
+        /// So grava em <projeto>/imagens a folha dos trechos que iria pra IA
+        #[arg(long)]
+        preview: bool,
+        /// Modelo do Codex so pra esta leitura [padrao: o de ler imagem das
+        /// configuracoes do app; vazio la = o padrao do Codex]
+        #[arg(long, value_name = "MODELO")]
+        model: Option<String>,
+    },
     /// Grava traducoes de um arquivo (uma por linha: id<TAB>traducao) e valida
     Apply {
         #[arg(value_name = "PROJETO")]
@@ -462,6 +484,69 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             opts.redo_errors = redo_errors;
             translate(&project, &opts, &cfg, &cfg_dir)
         }
+        Command::Pictures { project } => {
+            load(&project)?;
+            let pictures = romtranslate_core::images::list_pictures(&project)?;
+            let mut text = format!(
+                "imagens com letra: {} (folhas em {})",
+                pictures.len(),
+                project
+                    .join(romtranslate_core::images::PICTURES_DIR)
+                    .display()
+            );
+            for p in &pictures {
+                text.push_str(&format!(
+                    "\n{}  {}  {} quadros, {} com letra",
+                    p.id,
+                    if p.packed.is_some() { "lz77" } else { "cru " },
+                    p.bytes / romtranslate_core::images::TILE_BYTES,
+                    p.lettered
+                ));
+            }
+            Ok(Output::new(text, serde_json::to_value(&pictures)?))
+        }
+        Command::ReadPictures {
+            project,
+            ids,
+            preview,
+            model,
+        } => {
+            load(&project)?;
+            let cfg_dir = config_dir()?;
+            let mut cfg = settings::load_settings(&cfg_dir);
+            if let Some(model) = model {
+                cfg.codex_cli.image_model = model;
+            }
+            let provider = if preview {
+                None
+            } else {
+                let (provider, model) = settings::build_provider(&cfg, &cfg_dir)?;
+                eprintln!(
+                    "provider: {} ({model}), {} imagens",
+                    cfg.provider,
+                    ids.len()
+                );
+                Some(provider)
+            };
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("nao foi possivel iniciar a leitura: {e}"))?;
+            let outcome = runtime.block_on(romtranslate_core::images::read_pictures(
+                &project,
+                provider.as_deref(),
+                &ids,
+            ))?;
+            let used = provider.as_ref().map(|p| p.usage()).unwrap_or_default();
+            let mut text = format!(
+                "imagens lidas: {}, trechos de letra: {}, frases com japones: {}, tokens cobrados: {} de entrada, {} de saida",
+                outcome.pictures, outcome.blocks, outcome.entries, used.input_tokens, used.output_tokens
+            );
+            for (id, why) in &outcome.failed {
+                text.push_str(&format!("\nnao lida {id}: {why}"));
+            }
+            Ok(Output::new(text, serde_json::to_value(&outcome)?))
+        }
         Command::Apply { project, tsv } => apply(&project, &tsv),
         Command::Validate { project } => {
             load(&project)?;
@@ -485,6 +570,18 @@ fn run(cli: Cli) -> Result<Output, Failure> {
                 outcome.apply.no_room,
                 if outcome.verification.ok { "ok" } else { "FALHOU" }
             );
+            if outcome.pictures.pictures > 0 || !outcome.pictures.left_out.is_empty() {
+                let _ = write!(
+                    text,
+                    "\nimagens redesenhadas: {}, frases desenhadas: {}, no original: {}",
+                    outcome.pictures.pictures,
+                    outcome.pictures.drawn,
+                    outcome.pictures.left_out.len()
+                );
+                for (id, why) in &outcome.pictures.left_out {
+                    let _ = write!(text, "\n  {id}: {why}");
+                }
+            }
             for problem in &outcome.verification.problems {
                 let _ = write!(text, "\n  problema: {problem}");
             }

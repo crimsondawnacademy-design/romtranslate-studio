@@ -83,7 +83,7 @@
     ollama: { baseUrl: "http://localhost:11434", model: "llama3.2:3b" },
     openaiCompatible: { baseUrl: "https://api.example.test/v1", model: "" },
     anthropic: { baseUrl: "", model: "claude-opus-5-5" },
-    codexCli: { command: "codex", model: "", ownAccount: false },
+    codexCli: { command: "codex", model: "", imageModel: "", ownAccount: false },
     priceInput: 0,
     priceOutput: 0,
     allowRemoteTranslation: false,
@@ -198,6 +198,29 @@
     update_entry: ({ id }) => issues.filter((i) => i.entryId === id),
     set_entry_reviewed: () => "reviewed",
     unmark_internal: () => null,
+    // Texto em imagem: tres imagens ficticias com "letras" desenhadas na hora.
+    list_pictures: () => [
+      { id: "img-01ba0000", offset: 0x1ba0000, packed: null, bytes: 49152, lettered: 315 },
+      { id: "img-01c8deb4", offset: 0x1c8deb4, packed: 3441, bytes: 17408, lettered: 248 },
+      { id: "img-00fe53e4", offset: 0xfe53e4, packed: 2210, bytes: 8192, lettered: 96 },
+    ],
+    picture_png: async ({ id }) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 256;
+      canvas.height = 128;
+      const g = canvas.getContext("2d");
+      g.fillStyle = "#eee";
+      g.fillRect(0, 0, 256, 128);
+      g.fillStyle = "#222";
+      g.font = "14px sans-serif";
+      g.fillText(id.endsWith("deb4") ? "警告－健康と安全のために" : "おまかせ  もどる  おわり", 12, 40);
+      const blob = await new Promise((done) => canvas.toBlob(done, "image/png"));
+      return [...new Uint8Array(await blob.arrayBuffer())];
+    },
+    read_pictures: async ({ ids }) => (
+      await sleep(Number(q.get("slow") ?? 600)),
+      { pictures: ids.length, blocks: 9 * ids.length, entries: 3 * ids.length, failed: [] }
+    ),
     reinsert_project: () => ({
       workingPath: `${DIR}/working/brisa-e-o-farol-de-papel.rtsf`,
       apply: { applied: 11, keptOriginal: 7, ignoredGeneric: 0, relocated: 2, packedLeftOut: 0, noRoom: 0 },
@@ -208,6 +231,7 @@
       },
       forcedErrors: 0,
       skippedErrors: 2,
+      pictures: { pictures: 1, drawn: 3, leftOut: [] },
     }),
     export_patch: () => ({
       patchPath: `${DIR}/exports/brisa-pt-BR.bps`,

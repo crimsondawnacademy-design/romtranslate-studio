@@ -1230,3 +1230,32 @@ table.strings tr.selected td:first-child {
     margin-bottom: 8px;
   }
 }
+
+/* Texto em imagem: miniaturas das imagens com letra, pra marcar as que tem japones. */
+.pictures {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+.picture {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.picture.chosen {
+  border-color: var(--accent, #c0392b);
+}
+.picture img,
+.picture-empty {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  object-position: top;
+  image-rendering: pixelated;
+  background: #fff;
+}
