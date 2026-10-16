@@ -259,6 +259,24 @@ de títulos de música): só vale a sequência que tem pelo menos duas vizinhas
 a até 128 bytes, ou a que é longa sozinha, e que começa logo depois do fim
 de outra mensagem, de um comando ou de preenchimento.
 
+**Kanji pela fonte do jogo.** Se o cartucho guarda a fonte com o código
+Shift-JIS de cada desenho na frente (o jogo medido tem duas assim), o código
+do texto é a posição do desenho nessa fonte, e não a da tabela JIS: no jogo
+medido a fonte pula seis linhas vazias do JIS, o kana coincide e todo kanji
+fica 564 posições antes (sem isso, 父 era lido 茶). A extração acha a fonte
+sozinha e a tabela gerada segue a ordem dela.
+
+**Outro alfabeto depois de um comando.** Um jogo pode escrever certas falas
+com uma fonte própria, ligada por um comando (no jogo medido, as do Sr.
+Saturno, com `FF0B` e 66 desenhos de hiragana). O app não tem como saber que
+letra é cada desenho: quem sabe escreve a tabela em
+`tables/<tabela>@<COMANDO>.tbl` (ex.: `jis16@FF0B.tbl`), com as chaves como
+as da tabela principal (`0100=あ` é o código 1). Com ela, a extração lê essas
+falas dentro das mensagens do banco (o comando some do texto e "て゛" vira
+"で"), e a tradução é gravada na fonte normal. Pra descobrir os desenhos, uma
+fala de teste com todos os códigos, numa cópia do jogo, fotografada no
+emulador (`tools/gba-tela`).
+
 O leitor faz duas passadas, e na primeira aprende o jeito daquele jogo:
 
 - **comando com parâmetro**: o comando que quase nunca é seguido de algo que
@@ -267,7 +285,8 @@ O leitor faz duas passadas, e na primeira aprende o jeito daquele jogo:
   comando pode levar dois ou três (`[FF26:0003:0001]`). Sem isso o número era
   lido como letra, e traduzir a frase trocava o parâmetro do comando. Número
   em mais de quatro posições seguidas não é parâmetro: é texto escrito com
-  outro alfabeto do jogo, e a leitura para ali;
+  outro alfabeto do jogo, e a leitura para ali — a não ser que o projeto
+  tenha a tabela desse alfabeto (abaixo);
 - **marca de fala e número de cabeçalho**: as figuras com que as falas abrem
   ("◆", "◇"); um valor baixo entre o fim de uma mensagem e a marca é
   cabeçalho, e fica fora da frase;

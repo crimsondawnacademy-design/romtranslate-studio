@@ -2034,3 +2034,23 @@ refazer, direto no banco do projeto) e 14 frases novas.
 **Não feito:** a extração não apaga sozinha a tradução de frase cujo original
 mudou (o caso daqui foi limpo à mão). Jogo cuja fonte não guarda o código de
 cada desenho continua na ordem padrão.
+
+## 2026-10-16 — Alfabeto ensinado pelo projeto depois de um comando (Sr. Saturno)
+
+**Contexto:** as 188 falas dos Sr. Saturno no Mother 3 são escritas com o
+comando `FF0B` seguido de códigos 1 a 66 de uma fonte própria (hiragana na
+ordem do silabário, kana pequeno, ゛ e ゜ como desenhos separados, ◆。？！ e o
+espaço). A fonte não guarda o código de cada desenho; a leitura parava no
+comando e as falas ficavam de fora.
+
+**Decisão:** (1) o alfabeto vem de uma tabela do projeto,
+`tables/<tabela>@<COMANDO>.tbl`, lida pela extração e pela auditoria
+(`adapters::hints` → `GameAdapter::extract_with`, cujo padrão ignora as
+dicas); (2) a troca só vale dentro de mensagem que começa onde a tabela de um
+banco aponta — fora dela o comando é número qualquer e os números pequenos
+depois dele virariam kana falso; (3) o comando some do texto (`Piece::Switch`)
+e a letra se junta ao sinal de sonorização; (4) a tradução é gravada na fonte
+normal (a do Sr. Saturno não tem letra latina): o português aparece legível,
+sem a letra especial. Os desenhos foram lidos no emulador: numa cópia do
+jogo, a primeira fala trocada por `FF0B` + os códigos 1 a 66. Mother 3: 190
+frases novas.

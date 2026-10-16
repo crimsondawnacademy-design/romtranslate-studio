@@ -156,7 +156,9 @@ pub fn audit_project(project_dir: &Path) -> Result<AuditReport> {
     };
 
     let data = crate::fileio::read_view(&working_path)?;
-    let again = adapter.extract(&data)?.entries;
+    let again = adapter
+        .extract_with(&data, &adapters::hints(project_dir)?)?
+        .entries;
     let stray: HashSet<String> = crate::scan::stray_ids(&again).into_iter().collect();
     for e in again
         .iter()

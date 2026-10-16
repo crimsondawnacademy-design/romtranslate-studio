@@ -124,6 +124,16 @@ pub struct Extraction {
     pub tables: Vec<(String, String)>,
 }
 
+/// O que o projeto ensinou a mao sobre o texto do jogo, pra extracao usar
+/// (`GameAdapter::extract_with`).
+#[derive(Debug, Clone, Default)]
+pub struct ExtractHints {
+    /// Alfabetos que valem depois de um comando, ate o fim da mensagem:
+    /// (comando, codigo -> caractere). No jogo medido, as falas dos Sr.
+    /// Saturno sao escritas com `FF0B` e uma fonte propria de 66 desenhos.
+    pub alphabets: Vec<(u16, std::collections::HashMap<u16, char>)>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VerificationReport {
@@ -163,6 +173,11 @@ pub trait GameAdapter: Send + Sync {
     /// cima de tile ou de codigo.
     fn extract(&self, _data: &[u8]) -> Result<Extraction> {
         unsupported(self.id(), "extracao estruturada")
+    }
+
+    /// `extract` com as dicas do projeto (`ExtractHints`). O padrao as ignora.
+    fn extract_with(&self, data: &[u8], _hints: &ExtractHints) -> Result<Extraction> {
+        self.extract(data)
     }
 
     /// So as entries de `extract`.

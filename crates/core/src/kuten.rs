@@ -210,6 +210,14 @@ struct Dialect {
     /// A ordem da fonte do jogo (`font_order`), se o cartucho a guarda; sem
     /// ela, a tabela padrao.
     font: Option<Vec<u16>>,
+    /// Alfabetos ensinados pelo projeto, que valem depois de um comando ate o
+    /// fim da mensagem (`ExtractHints::alphabets`).
+    switches: HashMap<u16, HashMap<u16, char>>,
+    /// Onde cada um vale: (unidade do comando, unidade do fim da mensagem),
+    /// em ordem. So dentro de mensagem de banco (`honored`): fora dela o
+    /// comando e um numero qualquer, e os numeros pequenos depois dele
+    /// virariam kana.
+    shifted: Vec<(usize, usize)>,
 }
 
 impl Dialect {
@@ -222,6 +230,17 @@ impl Dialect {
                 .and_then(|unit| char::from_u32(*unit as u32)),
             None => decode(code),
         }
+    }
+
+    /// O alfabeto que vale na unidade `i`, se ela esta depois de um comando de
+    /// troca (`shifted`).
+    fn alphabet_at(&self, codes: &[u16], i: usize) -> Option<&HashMap<u16, char>> {
+        let k = self
+            .shifted
+            .partition_point(|&(at, _)| at < i)
+            .checked_sub(1)?;
+        let (at, end) = self.shifted[k];
+        (i < end).then(|| self.switches.get(&codes[at])).flatten()
     }
 
     /// Ate onde vao os desenhos da fonte: abaixo disto, codigo sem caractere
@@ -292,6 +311,59 @@ fn table_with(dialect: &Dialect, commands: &BTreeSet<Vec<u16>>) -> String {
         let _ = writeln!(out, "{keys}={}", token_of(units));
     }
     out
+}
+
+/// Onde vale cada troca de alfabeto de `switches`: (comando, fim da
+/// mensagem), so quando a mensagem comeca onde a tabela de um banco aponta
+/// (`starts`, em unidades) — a do comeco de uma sala vem logo depois do
+/// cabecalho (fim de mensagem e a quantidade).
+fn honored(
+    codes: &[u16],
+    starts: &HashSet<usize>,
+    switches: &HashMap<u16, HashMap<u16, char>>,
+) -> Vec<(usize, usize)> {
+    if switches.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for (i, code) in codes.iter().enumerate() {
+        if !switches.contains_key(code) {
+            continue;
+        }
+        let back = i.saturating_sub(MAX_SPAN);
+        let Some(begin) = (back..i).rev().find(|&k| codes[k] == END).map(|k| k + 1) else {
+            continue;
+        };
+        if !(starts.contains(&begin) || starts.contains(&(begin + 1))) {
+            continue;
+        }
+        let end = (i..codes.len().min(i + MAX_SPAN))
+            .find(|&k| codes[k] == END)
+            .unwrap_or(i + 1);
+        out.push((i, end));
+    }
+    out
+}
+
+/// A letra com o sinal de sonorizacao (゛) ou de semissonorizacao (゜), se
+/// existe: て゛ = で, は゜ = ぱ.
+fn voiced(base: char, mark: char) -> Option<char> {
+    let step = match mark {
+        '゛' => 1,
+        '゜' => 2,
+        _ => return None,
+    };
+    if base == 'う' && step == 1 {
+        return Some('ゔ');
+    }
+    let rows = if step == 1 {
+        "かきくけこさしすせそたちつてとはひふへほカキクケコサシスセソタチツテトハヒフヘホ"
+    } else {
+        "はひふへほハヒフヘホ"
+    };
+    rows.contains(base)
+        .then(|| char::from_u32(base as u32 + step))
+        .flatten()
 }
 
 /// Texto achado nesta codificacao.
@@ -434,6 +506,9 @@ fn stands_alone(text: &str) -> bool {
 enum Piece {
     /// Caractere da tabela (o espaco do jogo vem como ' ').
     Char(char),
+    /// Comando que troca de alfabeto: nao aparece no texto, e a traducao,
+    /// escrita na fonte normal, nao o leva.
+    Switch,
     /// Desenho proprio do jogo num codigo que a tabela deixa vazio.
     Glyph,
     /// Comando do jogo, com ou sem parametro.
@@ -453,6 +528,20 @@ impl Dialect {
     /// ela aparece no texto.
     fn piece(&self, codes: &[u16], i: usize) -> (Piece, usize) {
         let code = codes[i];
+        if self.shifted.binary_search_by_key(&i, |&(at, _)| at).is_ok() {
+            return (Piece::Switch, 1);
+        }
+        if let Some(alphabet) = self.alphabet_at(codes, i).filter(|_| code < CONTROL) {
+            let Some(&c) = alphabet.get(&code) else {
+                return (Piece::Other, 1);
+            };
+            // Sinal de sonorizacao vem como desenho separado: junta na letra.
+            let next = codes.get(i + 1).and_then(|n| alphabet.get(n));
+            return match next.and_then(|&mark| voiced(c, mark)) {
+                Some(v) => (Piece::Char(v), 2),
+                None => (Piece::Char(c), 1),
+            };
+        }
         if Some(code) == self.space {
             (Piece::Char(' '), 1)
         } else if (CONTROL..END).contains(&code) {
@@ -483,6 +572,7 @@ impl Dialect {
     fn text_of(&self, codes: &[u16], i: usize) -> String {
         match self.piece(codes, i) {
             (Piece::Char(c), _) => c.to_string(),
+            (Piece::Switch, _) => String::new(),
             (Piece::Control, len) => token_of(&codes[i..i + len]),
             _ => token_of(&codes[i..=i]),
         }
@@ -541,7 +631,7 @@ fn span_at(codes: &[u16], dialect: &Dialect, starts: &HashSet<usize>, at: usize)
                 span.chars += 1;
                 span.end = i + len;
             }
-            Piece::Control => {}
+            Piece::Control | Piece::Switch => {}
             Piece::Other => break,
         }
         i += len;
@@ -760,13 +850,20 @@ fn missed_records(
 /// `starts` = posicoes (em bytes) onde se sabe que uma mensagem comeca, de
 /// quem conhece a estrutura em volta do texto (`adapters::bank`). Pode vir
 /// vazio.
-pub fn extract(data: &[u8], starts: &HashSet<usize>) -> Option<Kuten16> {
+pub fn extract(
+    data: &[u8],
+    starts: &HashSet<usize>,
+    alphabets: &[(u16, HashMap<u16, char>)],
+) -> Option<Kuten16> {
     let starts: HashSet<usize> = starts.iter().map(|at| at / 2).collect();
     let starts = &starts;
     let codes = units(data);
+    let switches: HashMap<u16, HashMap<u16, char>> = alphabets.iter().cloned().collect();
     let mut dialect = Dialect {
         space: find_space(&codes),
         font: font_order(data),
+        shifted: honored(&codes, starts, &switches),
+        switches,
         ..Dialect::default()
     };
     let first = scan(&codes, &dialect, starts);
@@ -928,8 +1025,50 @@ mod tests {
             codes.extend([0xFF03, 0xFF00, END]);
         }
         let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
-        let found = extract(&data, &HashSet::new())?;
+        let found = extract(&data, &HashSet::new(), &[])?;
         Some(found.entries[60].source_text.clone())
+    }
+
+    /// 120 mensagens de banco "◆<kana>" + `FF0B` + `saturn` (no alfabeto do
+    /// comando) + fim; com `alphabet` ensinado ou nao, e `starts` (onde as
+    /// mensagens comecam) ou nao, como a mensagem do meio sai lida.
+    fn read_switched(saturn: &[u16], taught: bool, banked: bool) -> String {
+        let kana = |text: &str| text.chars().map(|c| encode(c).unwrap()).collect::<Vec<_>>();
+        let mut codes = Vec::new();
+        let mut starts = HashSet::new();
+        for _ in 0..120 {
+            starts.insert(codes.len() * 2);
+            codes.push(encode('◆').unwrap());
+            codes.extend(kana("むらのひとは"));
+            codes.push(0xFF0B);
+            codes.extend(saturn);
+            codes.extend([0xFF03, 0xFF00, END]);
+        }
+        let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
+        let alphabet: HashMap<u16, char> =
+            [(19, 'て'), (59, '゛'), (13, 'す'), (62, '◆'), (63, '。')].into();
+        let alphabets = if taught {
+            vec![(0xFF0B, alphabet)]
+        } else {
+            Vec::new()
+        };
+        let starts = if banked { starts } else { HashSet::new() };
+        let found = extract(&data, &starts, &alphabets).unwrap();
+        found.entries[60].source_text.clone()
+    }
+
+    #[test]
+    fn an_alphabet_taught_after_a_command_is_read_inside_bank_messages() {
+        let saturn = [62, 19, 59, 13, 63];
+        // Ensinado e dentro de mensagem de banco: o comando some e a letra
+        // junta com o sinal de sonorizacao.
+        assert_eq!(read_switched(&saturn, true, true), "◆むらのひとは◆です。");
+        // Sem o alfabeto, ou fora de mensagem conhecida: a leitura para no
+        // comando, como antes.
+        assert_eq!(read_switched(&saturn, false, true), "◆むらのひとは");
+        assert_eq!(read_switched(&saturn, true, false), "◆むらのひとは");
+        assert_eq!(voiced('は', '゜'), Some('ぱ'));
+        assert_eq!(voiced('あ', '゛'), None);
     }
 
     #[test]
@@ -952,7 +1091,7 @@ mod tests {
             }
         }
         let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
-        let found = extract(&data, &HashSet::new()).unwrap();
+        let found = extract(&data, &HashSet::new(), &[]).unwrap();
         let name = found
             .entries
             .iter()
@@ -998,7 +1137,7 @@ mod tests {
         }
         codes.extend([0, 0, 0, 0]);
         let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
-        let found = extract(&data, &HashSet::new()).unwrap();
+        let found = extract(&data, &HashSet::new(), &[]).unwrap();
         let entry = |name: &str| {
             found
                 .entries
@@ -1052,7 +1191,7 @@ mod tests {
         }
         codes.extend([0, 0, 0, 0]);
         let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
-        let found = extract(&data, &HashSet::new()).unwrap();
+        let found = extract(&data, &HashSet::new(), &[]).unwrap();
         let first = found
             .entries
             .iter()
@@ -1084,7 +1223,7 @@ mod tests {
             codes.push(END);
         }
         let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
-        let found = extract(&data, &HashSet::new()).unwrap();
+        let found = extract(&data, &HashSet::new(), &[]).unwrap();
         let texts: Vec<&str> = found
             .entries
             .iter()
@@ -1116,13 +1255,13 @@ mod tests {
 
     #[test]
     fn noise_and_small_numbers_are_not_text() {
-        assert!(extract(&make_random(1 << 20, 5), &HashSet::new()).is_none());
+        assert!(extract(&make_random(1 << 20, 5), &HashSet::new(), &[]).is_none());
         // Rampa de valores pequenos, como um mapa de tiles: cai nos kana.
         let ramp: Vec<u8> = (0..40_000u32)
             .flat_map(|i| ((280 + i % 90) as u16).to_le_bytes())
             .collect();
-        assert!(extract(&ramp, &HashSet::new()).is_none());
-        assert!(extract(&[], &HashSet::new()).is_none());
-        assert!(extract(&[0x1B], &HashSet::new()).is_none());
+        assert!(extract(&ramp, &HashSet::new(), &[]).is_none());
+        assert!(extract(&[], &HashSet::new(), &[]).is_none());
+        assert!(extract(&[0x1B], &HashSet::new(), &[]).is_none());
     }
 }

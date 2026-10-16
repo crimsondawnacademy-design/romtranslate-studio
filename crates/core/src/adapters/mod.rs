@@ -17,7 +17,7 @@ pub mod wii;
 pub mod wiiu;
 
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -79,6 +79,51 @@ pub struct ExtractOutcome {
     pub reread: usize,
 }
 
+/// As dicas do projeto pra extracao (`ExtractHints`): cada
+/// `tables/<tabela>@<COMANDO>.tbl` (ex.: `jis16@FF0B.tbl`) e o alfabeto que
+/// vale depois do comando, uma linha por codigo, a chave como na tabela
+/// principal (os 2 bytes do codigo, o menos significativo primeiro):
+/// `0100=あ` e o codigo 1. Feito a mao, olhando a fonte do jogo no emulador.
+pub fn hints(project_dir: &Path) -> Result<crate::adapter::ExtractHints> {
+    let mut hints = crate::adapter::ExtractHints::default();
+    let dir = project_dir.join(crate::tbl::TABLES_DIR);
+    let Ok(list) = std::fs::read_dir(&dir) else {
+        return Ok(hints);
+    };
+    let mut files: Vec<PathBuf> = list.filter_map(|e| e.ok().map(|e| e.path())).collect();
+    files.sort();
+    for path in files {
+        let Some(stem) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_suffix(".tbl"))
+        else {
+            continue;
+        };
+        let Some(command) = stem
+            .split_once('@')
+            .and_then(|(_, hex)| u16::from_str_radix(hex, 16).ok())
+        else {
+            continue;
+        };
+        let text = std::fs::read_to_string(&path).map_err(|e| CoreError::io(&path, e))?;
+        let mut alphabet = HashMap::new();
+        for line in text.lines().map(|line| line.trim_end_matches('\r')) {
+            let Some((key, value)) = line.split_once('=') else {
+                continue;
+            };
+            let (Ok(code), Some(c)) = (u16::from_str_radix(key, 16), value.chars().next()) else {
+                continue;
+            };
+            if key.len() == 4 && !line.starts_with('#') {
+                alphabet.insert(code.swap_bytes(), c);
+            }
+        }
+        hints.alphabets.push((command, alphabet));
+    }
+    Ok(hints)
+}
+
 /// Extracao estruturada do arquivo de origem de um projeto, gravada no banco.
 /// O upsert e por id (`scan-<offset>` nos adapters que varrem), entao extrair
 /// de novo atualiza limites e ponteiros e mantem as traducoes ja feitas.
@@ -90,7 +135,7 @@ pub fn extract_project(project_dir: &Path) -> Result<ExtractOutcome> {
         .ok_or_else(|| CoreError::Project(format!("adapter {} nao existe", game.adapter_id)))?;
     // mmap: DVD de PS2 (>2 GiB) extrai sem carregar o arquivo em RAM.
     let data = crate::fileio::read_view(&game.source_path)?;
-    let extraction = adapter.extract(&data)?;
+    let extraction = adapter.extract_with(&data, &hints(project_dir)?)?;
     // A tabela de antes fica a mao: e com ela que as traducoes ja feitas
     // foram escritas.
     let mut older = HashMap::new();

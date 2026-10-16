@@ -28,7 +28,9 @@ use super::pointers::{
     ensure_pointers_untouched, find_pointer_tables, is_terminated, mark_relocatable, relocate,
     PointerFormat,
 };
-use crate::adapter::{AppliedImage, Extraction, GameAdapter, GameInput, VerificationReport};
+use crate::adapter::{
+    AppliedImage, ExtractHints, Extraction, GameAdapter, GameInput, VerificationReport,
+};
 use crate::error::{CoreError, Result};
 use crate::scan::{keep_text, scan_bytes, ScanConfig, ScanEncoding, MAX_ENTRIES};
 use crate::types::{
@@ -64,7 +66,7 @@ pub fn header_checksum(header: &[u8]) -> u8 {
 }
 
 /// A extracao, com o teto injetavel (o teste usa um pequeno).
-fn extract_capped(data: &[u8], cap: usize) -> Result<Extraction> {
+fn extract_capped(data: &[u8], cap: usize, hints: &ExtractHints) -> Result<Extraction> {
     if data.len() < HEADER_LEN {
         return Err(CoreError::Project(
             "gba: arquivo menor que o header do cartucho".to_string(),
@@ -124,7 +126,9 @@ fn extract_capped(data: &[u8], cap: usize) -> Result<Extraction> {
     // (o teto corta o fim) e nenhuma outra leitura fica com os bytes dele.
     let mut tables = Vec::new();
     let banks = bank::find(data);
-    if let Some(mut found) = crate::kuten::extract(data, &bank::message_starts(&banks)) {
+    if let Some(mut found) =
+        crate::kuten::extract(data, &bank::message_starts(&banks), &hints.alphabets)
+    {
         // Mensagem dentro de um banco em blocos pode crescer.
         bank::tag(&mut found.entries, &banks);
         discarded += packed::drop_overlapping(&mut entries, &found.spans);
@@ -233,7 +237,11 @@ impl GameAdapter for GbaAdapter {
     /// antes, o lixo do comeco do cartucho escondia o texto do fim: no jogo
     /// medido em 12/10/2026, 16,4 mil das 20 mil primeiras eram lixo.
     fn extract(&self, data: &[u8]) -> Result<Extraction> {
-        extract_capped(data, MAX_ENTRIES)
+        extract_capped(data, MAX_ENTRIES, &ExtractHints::default())
+    }
+
+    fn extract_with(&self, data: &[u8], hints: &ExtractHints) -> Result<Extraction> {
+        extract_capped(data, MAX_ENTRIES, hints)
     }
 
     /// In-place do que cabe; o que nao cabe e tem ponteiros em tabela vai pro
@@ -368,7 +376,7 @@ mod tests {
             .unwrap();
         assert!(first_phrase > 40, "lixo antes do texto: {first_phrase}");
 
-        let out = extract_capped(&rom, 40).unwrap();
+        let out = extract_capped(&rom, 40, &ExtractHints::default()).unwrap();
         assert!(!out.truncated, "{} entries", out.entries.len());
         let texts: Vec<&str> = out.entries.iter().map(|e| e.source_text.as_str()).collect();
         for phrase in synth::JUNK_ROM_PHRASES {
@@ -377,7 +385,7 @@ mod tests {
         assert_eq!(out.discarded + out.entries.len(), raw.len());
 
         // Teto menor que o texto: corta, e avisa.
-        let cut = extract_capped(&rom, 3).unwrap();
+        let cut = extract_capped(&rom, 3, &ExtractHints::default()).unwrap();
         assert_eq!((cut.entries.len(), cut.truncated), (3, true));
     }
 

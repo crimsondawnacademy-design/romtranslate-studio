@@ -645,7 +645,9 @@ mod jis16 {
             assert!(out.tables.is_empty());
             assert!(!out.entries.iter().any(|e| e.encoding == table_encoding()));
         }
-        assert!(kuten::extract(&synth::make_gba_rom_japanese(), &Default::default()).is_none());
+        assert!(
+            kuten::extract(&synth::make_gba_rom_japanese(), &Default::default(), &[]).is_none()
+        );
     }
 
     #[test]
