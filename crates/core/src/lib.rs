@@ -5,6 +5,7 @@
 
 pub mod adapter;
 pub mod adapters;
+pub mod audit;
 pub mod cue;
 pub mod db;
 pub mod detect;

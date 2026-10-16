@@ -192,7 +192,7 @@
         emit("translation-progress", { done, total, phase: done < 4 ? "tm" : "translate" });
         await sleep(Number(q.get("tick") ?? 250));
       }
-      return { translated: count("machine"), tmHits: 3, failed: count("error"), cancelled: false, stopped: null, inputTokens: 0, outputTokens: 0 };
+      return { translated: count("machine"), tmHits: 3, failed: count("error"), cancelled: false, stopped: null, shortened: 0, tooLong: 0, notText: 0, inputTokens: 0, outputTokens: 0 };
     },
     cancel_translation: () => null,
     update_entry: ({ id }) => issues.filter((i) => i.entryId === id),

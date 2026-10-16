@@ -1937,3 +1937,77 @@ jogo copia uma janela que começa no meio do texto sai com a ponta cortada.
 Imagem montada por mapa de quadros fora de ordem, 8bpp ou comprimida que
 cresce não é tratada. A leitura da IA varia de uma vez pra outra em letra
 miúda ("おそい" lido "はちみつ"): conferir na lista antes de traduzir.
+
+## 2026-10-16 — "100% traduzido" se mede no jogo: `audit`
+
+**Contexto:** o Rhuan pediu o Mother 3 100% em português, validado, como
+modelo pros outros jogos de GBA. A lista de frases do projeto não prova isso:
+frase com erro fica no original, tradução pode voltar em japonês, e texto que
+a extração não leu nem aparece.
+
+**Decisão:** `audit::audit_project` relê a cópia traduzida com a mesma
+extração do app e conta os caracteres do idioma de origem que sobraram (kana e
+kanji; em outro idioma, o trecho igual ao original), cada trecho com o motivo
+(sem tradução, com erro, traduzida e não gravada, fora do projeto). Frase
+desenhada e imagem não conferida ficam em contas à parte (a releitura não vê
+pixel). Linha de base do Mother 3 em 16/10: 95,17% (14.962 de 309.780
+caracteres), sem contar as 188 mensagens da fonte especial e 306 imagens.
+Imagem conferida sem texto vai pra `imagens/sem-texto.txt`.
+
+## 2026-10-16 — Resposta da IA julgada antes de gravar; lixo nunca por cima de dado
+
+**Contexto (medido no Mother 3):** 71 trechos de dado lidos como texto foram
+"traduzidos" como "?????", "..." ou "?" e GRAVADOS por cima de tabelas e mapas
+de quadros (as faixas escuras da tela de ajustes eram isso), e a lista de
+sílabas do teclado virou "lista de silabas". 57 falas voltaram do modelo em
+japonês, sem as quebras, e a memória de tradução espalhou isso pras repetidas.
+As fileiras da grade do teclado de nomes foram "traduzidas" como alfabeto: o
+que se via na aba Hira não era o que se digitava.
+
+**Decisão:** (1) o prompt pede `<NOT_TEXT>` pro que não é texto, e o app marca
+como não-texto (com desfazer); (2) resposta com kana ou kanji pra original
+japonês não é tradução: fica pendente e não entra na memória, nem a lida da
+memória serve; (3) validação: `no_letters` (tradução sem letra nem código pra
+original com letra) e `source_script` (tradução com japonês) são erro, então
+não vão pro jogo; (4) `not-text` na CLI marca por id ou por tipo de erro.
+**Não** foi adotado "japonês devolvido igual = não-texto": o modelo devolve
+fala de verdade assim, e ela sumiria da conta.
+
+## 2026-10-16 — Diretórios mistos: salas de texto entre gráficos
+
+**Contexto:** dicas, descrições de itens, de inimigos e de PSI, nomes de
+lugares e o texto de sistema do Mother 3 ficam em salas iguais às do banco do
+roteiro (tabela u16 + bloco que abre com `FFFF` e a quantidade), mas em
+diretórios que também apontam pra gráficos e tabelas, às vezes num par não
+alinhado (tabela na entrada 3). O app só aceitava diretório todo de texto:
+essas frases tinham que caber no espaço do japonês (2 bytes por letra) e
+saíam cortadas ou sem as quebras.
+
+**Decisão:** `bank_at` tenta o diretório de pares como antes e, se não for,
+aceita cada sala com a assinatura inteira (cabeçalho com a quantidade igual ao
+tamanho da tabela ou um a menos, primeiro offset 4, todo offset dentro do
+bloco e logo depois de um fim de mensagem, ou 0). A posição no diretório passa
+a ser a entrada (`"entry"`; `"pair"` antigo é lido como `2p`). A largura da
+caixa é aprendida por sala nos mistos. Mother 3: de 7.335 para 8.780 frases
+que crescem, em três diretórios (`0x1B8FFC0`, `0xD1EE78`, `0x1AF3790`).
+
+**Cuidado que ficou:** rótulo de menu numa sala que cresce perde o limite que
+o protegia. A fonte do jogo dá uma casa inteira a cada letra latina, então
+"かう" comporta 2 letras: "Comprar" invade o menu. As traduções curtas desses
+rótulos ficam como estão até a largura de cada menu ser medida no emulador.
+
+## 2026-10-16 — Linha maior que a janela fixa é erro
+
+Onde o app não quebra as linhas (janela que não rola: descrições de inimigos,
+14 letras por linha), a linha longa é gravada como está e passa da borda com
+certeza: virou erro (era aviso). Onde o app quebra, só sobra a palavra que
+sozinha não cabe, e isso continua aviso.
+
+## 2026-10-16 — Emulador de conferência no repositório (`tools/gba-tela`)
+
+O programa sem janela que roda o jogo e fotografa a tela foi escrito e apagado
+quatro vezes, porque morava na pasta temporária da sessão. Agora mora em
+`tools/gba-tela` (script que baixa o mGBA 0.10.5 oficial e compila, roteiro
+de teclas com foto, memória, estado salvo e escrita de memória; roda em
+`sandbox-exec`, sem rede). Faz parte do modelo de processo: fora do app,
+nenhum byte de jogo no repositório.

@@ -139,6 +139,10 @@ enum Command {
     Pictures {
         #[arg(value_name = "PROJETO")]
         project: PathBuf,
+        /// Marca estas imagens como conferidas, sem texto pra traduzir (a
+        /// auditoria para de cobrar por elas)
+        #[arg(long = "sem-texto", value_name = "ID", num_args = 1..)]
+        without_text: Vec<String>,
     },
     /// A IA le o texto das imagens escolhidas (uma chamada por imagem) e cada
     /// trecho com japones vira uma frase do projeto, que o app redesenha ao reinserir
@@ -168,6 +172,23 @@ enum Command {
         #[arg(value_name = "PROJETO")]
         project: PathBuf,
     },
+    /// Marca frases como nao-texto (dado lido como texto): saem da traducao e
+    /// nao sao gravadas. Por id, ou todas com um tipo de erro da validacao
+    NotText {
+        #[arg(value_name = "PROJETO")]
+        project: PathBuf,
+        #[arg(value_name = "ID")]
+        ids: Vec<String>,
+        /// Todas as frases com este erro de validacao (ex.: no_letters)
+        #[arg(long, value_name = "TIPO")]
+        kind: Option<String>,
+    },
+    /// Le a copia traduzida de novo e conta o que segue no idioma de origem,
+    /// com o motivo de cada trecho (rode depois do reinsert)
+    Audit {
+        #[arg(value_name = "PROJETO")]
+        project: PathBuf,
+    },
     /// Grava as traducoes numa copia do arquivo e confere a copia
     Reinsert {
         #[arg(value_name = "PROJETO")]
@@ -193,6 +214,66 @@ enum Command {
         #[arg(long, default_value = "json", value_parser = ["json", "csv"])]
         format: String,
     },
+}
+
+/// O resumo da auditoria: a conta, o motivo de cada trecho e as regioes do
+/// arquivo onde sobrou mais.
+fn audit_text(report: &romtranslate_core::audit::AuditReport) -> String {
+    use romtranslate_core::audit::Why;
+    let done = report.source_chars.saturating_sub(report.remaining_chars);
+    let percent = if report.source_chars == 0 {
+        100.0
+    } else {
+        100.0 * done as f64 / report.source_chars as f64
+    };
+    let mut text = format!(
+        "idioma de origem no jogo: {} de {} caracteres seguem ({percent:.2}% traduzido)",
+        report.remaining_chars, report.source_chars
+    );
+    let mut by_why: BTreeMap<Why, (usize, usize)> = BTreeMap::new();
+    let mut by_region: BTreeMap<u64, (usize, usize)> = BTreeMap::new();
+    for l in &report.remaining {
+        let w = by_why.entry(l.why).or_default();
+        w.0 += 1;
+        w.1 += l.chars;
+        if let Some(offset) = l.offset {
+            let r = by_region.entry(offset >> 16 << 16).or_default();
+            r.0 += 1;
+            r.1 += l.chars;
+        }
+    }
+    for (why, (n, chars)) in &by_why {
+        let label = match why {
+            Why::Untranslated => "sem traducao",
+            Why::Error => "traducao com erro (fica o original)",
+            Why::NotWritten => "traduzida e nao gravada",
+            Why::NotInProject => "fora do projeto (a extracao nao leu)",
+        };
+        let _ = write!(text, "\n  {label}: {n} trechos, {chars} caracteres");
+    }
+    let mut regions: Vec<_> = by_region.into_iter().collect();
+    regions.sort_by_key(|(_, (_, chars))| std::cmp::Reverse(*chars));
+    if !regions.is_empty() {
+        text.push_str("\nonde sobrou mais:");
+        for (at, (n, chars)) in regions.iter().take(10) {
+            let _ = write!(text, "\n  0x{at:07X}: {n} trechos, {chars} caracteres");
+        }
+    }
+    let _ = write!(
+        text,
+        "\nmarcadas como nao-texto, com escrita do idioma de origem: {} (fora da conta; confira se nenhuma e fala)",
+        report.not_text
+    );
+    let p = &report.pictures;
+    let _ = write!(
+        text,
+        "\nimagens com letra: {}; lidas: {}, conferidas sem texto: {}, sem conferir: {}",
+        p.found,
+        p.read,
+        p.without_text,
+        p.unchecked.len()
+    );
+    text
 }
 
 /// `--region`: (inicio, fim), cada lado opcional.
@@ -484,7 +565,18 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             opts.redo_errors = redo_errors;
             translate(&project, &opts, &cfg, &cfg_dir)
         }
-        Command::Pictures { project } => {
+        Command::Pictures {
+            project,
+            without_text,
+        } if !without_text.is_empty() => {
+            load(&project)?;
+            let added = romtranslate_core::audit::mark_without_text(&project, &without_text)?;
+            Ok(Output::new(
+                format!("conferidas sem texto: {added} novas"),
+                json!({ "added": added }),
+            ))
+        }
+        Command::Pictures { project, .. } => {
             load(&project)?;
             let pictures = romtranslate_core::images::list_pictures(&project)?;
             let mut text = format!(
@@ -553,6 +645,42 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             let report = validate_project_db(&mut ProjectDb::open(&project)?)?;
             let (text, json) = validation(&report)?;
             Ok(Output::new(text, json))
+        }
+        Command::NotText {
+            project,
+            mut ids,
+            kind,
+        } => {
+            load(&project)?;
+            let mut db = ProjectDb::open(&project)?;
+            if let Some(kind) = kind {
+                let report = validate_project_db(&mut db)?;
+                ids.extend(
+                    report
+                        .issues
+                        .into_iter()
+                        .filter(|i| serde_json::to_value(i.kind).ok() == Some(json!(kind)))
+                        .map(|i| i.entry_id),
+                );
+            }
+            ids.sort();
+            ids.dedup();
+            let marked = db.mark_stray(&ids)?;
+            Ok(Output::new(
+                format!(
+                    "marcadas como nao-texto: {marked} (de {} pedidas)",
+                    ids.len()
+                ),
+                json!({ "marked": marked, "asked": ids.len() }),
+            ))
+        }
+        Command::Audit { project } => {
+            load(&project)?;
+            let report = romtranslate_core::audit::audit_project(&project)?;
+            Ok(Output::new(
+                audit_text(&report),
+                serde_json::to_value(&report)?,
+            ))
         }
         Command::Reinsert { project, policy } => {
             load(&project)?;
@@ -756,6 +884,13 @@ fn translate(
         "traduzidas pelo provider: {}, pela memoria: {}, falharam: {}",
         summary.translated, summary.tm_hits, summary.failed
     );
+    if summary.not_text > 0 {
+        let _ = write!(
+            text,
+            "\nnao eram texto, segundo o provider (viraram nao-texto): {}",
+            summary.not_text
+        );
+    }
     if summary.shortened + summary.too_long > 0 {
         let _ = write!(
             text,

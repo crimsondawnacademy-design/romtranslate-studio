@@ -174,6 +174,7 @@ const messages = {
     "translate.phase.shorten": "encurtando as que não couberam",
     "translate.summaryShortened": " · {shortened} encurtadas pra caber",
     "translate.summaryTooLong": " · {tooLong} ainda não cabem",
+    "translate.summaryNotText": " · {notText} não eram texto (dado lido como texto): ficaram fora, com desfazer em “nomes internos”",
     "translate.summary":
       "{translated} traduzidas · {tmHits} da memória · {failed} falharam",
     "translate.summaryCancelled": " · cancelado",
@@ -466,6 +467,7 @@ const messages = {
     "translate.phase.shorten": "shortening the ones that did not fit",
     "translate.summaryShortened": " · {shortened} shortened to fit",
     "translate.summaryTooLong": " · {tooLong} still too long",
+    "translate.summaryNotText": " · {notText} were not text (data read as text): left out, with undo under “internal names”",
     "translate.summary": "{translated} translated · {tmHits} from memory · {failed} failed",
     "translate.summaryCancelled": " · cancelled",
     "translate.internal":

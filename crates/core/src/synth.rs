@@ -1100,6 +1100,83 @@ fn jis16_bank(padding: bool, scrolls: bool, repeated: bool) -> Vec<u8> {
     rom
 }
 
+/// Onde comeca o diretorio misto de `make_gba_rom_jis16_mixed`.
+pub const JIS16_MIXED_AT: usize = 0x8000;
+/// As entradas do diretorio misto com a tabela de uma sala (o texto e a
+/// entrada seguinte); as outras apontam pra dado.
+pub const JIS16_MIXED_ROOMS: [usize; 2] = [1, 5];
+/// O preenchimento (0xFF) de `make_gba_rom_jis16_mixed`: o espaco livre.
+pub const JIS16_MIXED_PADDING: std::ops::Range<usize> = 0x20000..0x38000;
+
+/// GBA de 256 KiB com um diretorio MISTO, como os do jogo medido em
+/// 16/10/2026 (descricoes de itens, dicas): em `JIS16_MIXED_AT`, um u32 com 8
+/// e 8 offsets u32 relativos ao diretorio — dado, tabela, texto, dado, dado,
+/// tabela, texto, dado. A sala `r` guarda as mensagens `60 * r` a `60 * r +
+/// 59` de `jis16_message`: tabela com um offset u16 por mensagem (o primeiro
+/// e 4) e bloco de texto que abre com 0xFFFF e a quantidade de mensagens. O
+/// dado e ruido; 96 KiB de 0xFF em `JIS16_MIXED_PADDING`.
+pub fn make_gba_rom_jis16_mixed() -> Vec<u8> {
+    let mut rom = make_gba_rom("JISMIXED");
+    rom.resize(256 * 1024, 0);
+    let units = |text: &str| -> Vec<u16> {
+        text.chars()
+            .map(|c| match c {
+                ' ' => JIS16_SPACE,
+                c => crate::kuten::encode(c).expect("caractere da fixture existe no JIS"),
+            })
+            .collect()
+    };
+    let per_room = 60;
+    let entries = 8usize;
+    let first = (4 + 4 * entries).next_multiple_of(8);
+    let mut blocks: Vec<u8> = Vec::new();
+    let mut dir = vec![0u32; entries];
+    let (mut i, mut room) = (0, 0);
+    while i < entries {
+        dir[i] = (first + blocks.len()) as u32;
+        if !JIS16_MIXED_ROOMS.contains(&i) {
+            blocks.extend(make_random(0x100, 0x51 + i as u64));
+            i += 1;
+            continue;
+        }
+        let mut text: Vec<u16> = vec![0xFFFF, per_room as u16];
+        let mut table: Vec<u16> = Vec::new();
+        for k in room * per_room..(room + 1) * per_room {
+            table.push(2 * text.len() as u16);
+            let (s, p) = (k / JIS16_PREDICATES.len(), k % JIS16_PREDICATES.len());
+            match jis16_pattern(k) {
+                1 => text.extend([0xFF08, 0x0003]),
+                2 => text.push(0x0005 + p as u16),
+                _ => {}
+            }
+            text.push(crate::kuten::encode('◆').expect("losango"));
+            text.extend(units(JIS16_SUBJECTS[s]));
+            if jis16_pattern(k) == 3 {
+                text.extend([0xFF23, 0x0001]);
+            }
+            text.push(0xFF01);
+            text.extend(units(JIS16_PREDICATES[p]));
+            text.extend([0xFF03, 0xFF00, 0xFFFF]);
+        }
+        if text.len() % 2 == 1 {
+            text.push(0xFFFF);
+        }
+        blocks.extend(table.iter().flat_map(|c| c.to_le_bytes()));
+        dir[i + 1] = (first + blocks.len()) as u32;
+        blocks.extend(text.iter().flat_map(|c| c.to_le_bytes()));
+        (i, room) = (i + 2, room + 1);
+    }
+    let mut bank = (entries as u32).to_le_bytes().to_vec();
+    bank.extend(dir.iter().flat_map(|v| v.to_le_bytes()));
+    bank.resize(first, 0);
+    bank.extend(blocks);
+    plant(&mut rom, JIS16_MIXED_AT, &bank);
+    rom[JIS16_MIXED_PADDING].fill(0xFF);
+    let tail = make_random(rom.len() - JIS16_MIXED_PADDING.end, 29);
+    plant(&mut rom, JIS16_MIXED_PADDING.end, &tail);
+    rom
+}
+
 /// Texto de verdade do `make_gba_rom_with_junk`, na ordem em que aparece.
 pub const JUNK_ROM_PHRASES: [&str; 3] = [
     "The old bridge is out. Take the forest road.",

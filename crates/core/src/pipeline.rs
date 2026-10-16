@@ -73,6 +73,9 @@ pub struct TranslateSummary {
     pub shortened: usize,
     /// Traducoes desta rodada que continuam maiores que o espaco da frase.
     pub too_long: usize,
+    /// Itens que o provider disse nao serem texto (`NOT_TEXT`): viraram
+    /// nao-texto, com desfazer por entry.
+    pub not_text: usize,
     /// Tokens que o provider declarou ter cobrado nesta rodada (zero quando
     /// ele nao informa, como o Codex CLI).
     pub input_tokens: u64,
@@ -293,6 +296,7 @@ pub async fn run_translation(
         stopped: None,
         shortened: 0,
         too_long: 0,
+        not_text: 0,
         input_tokens: 0,
         output_tokens: 0,
     };
@@ -325,7 +329,9 @@ pub async fn run_translation(
         // outro encoding, de outro projeto ou de uma resposta que estourou),
         // nao serve: o provider recebe a lista de caracteres e o teto, e
         // responde de novo.
-        let hit = hit.filter(|hit| charset.is_none_or(|charset| charset.accepts(&entry, hit)));
+        let hit = hit
+            .filter(|hit| judge(&entry, hit) == Answer::Translation)
+            .filter(|hit| charset.is_none_or(|charset| charset.accepts(&entry, hit)));
         if let Some(hit) = hit {
             save_translation(db, &entry, &hit, charset)?;
             summary.tm_hits += 1;
@@ -409,6 +415,18 @@ pub async fn run_translation(
                         let Some(entry) = batch.iter().find(|e| e.id == item.id) else {
                             continue; // id inventado pelo modelo: ignora
                         };
+                        match judge(entry, &item.translation) {
+                            Answer::Translation => {}
+                            Answer::NotText => {
+                                db.mark_stray(std::slice::from_ref(&entry.id))?;
+                                summary.not_text += 1;
+                                continue;
+                            }
+                            Answer::Untranslated => {
+                                summary.failed += 1;
+                                continue;
+                            }
+                        }
                         save_translation(db, entry, &item.translation, charset)?;
                         db.tm_store(
                             &entry.source_text,
@@ -525,7 +543,10 @@ pub async fn run_translation(
                     let fitted = charset.and_then(|charset| charset.fit(&item.translation));
                     let answer = fitted.as_deref().unwrap_or(&item.translation);
                     // Resposta vazia "cabe" em qualquer espaco: nao e traducao.
-                    if answer.trim().is_empty() || excess(entry, answer, charset) != Some(0) {
+                    if answer.trim().is_empty()
+                        || judge(entry, &item.translation) != Answer::Translation
+                        || excess(entry, answer, charset) != Some(0)
+                    {
                         continue; // ainda nao cabe: fica a de antes
                     }
                     save_translation(db, entry, &item.translation, charset)?;
@@ -599,7 +620,11 @@ pub async fn run_translation(
                     let fitted = charset.and_then(|charset| charset.fit(&item.translation));
                     let answer = fitted.as_deref().unwrap_or(&item.translation);
                     let fits = !matches!(excess(entry, answer, charset), Some(over) if over > 0);
-                    if answer.trim().is_empty() || !fits || loses_codes(entry, answer, charset) {
+                    if answer.trim().is_empty()
+                        || judge(entry, &item.translation) != Answer::Translation
+                        || !fits
+                        || loses_codes(entry, answer, charset)
+                    {
                         continue; // ainda errada: fica a de antes
                     }
                     save_translation(db, entry, &item.translation, charset)?;
@@ -755,6 +780,34 @@ fn charset_group(entry: &TextEntry) -> (u8, &str) {
         TextEncoding::Image => (3, ""),
         _ => (0, ""),
     }
+}
+
+/// O que uma resposta do provider (ou da memoria) e pra `entry`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Answer {
+    Translation,
+    /// `NOT_TEXT`: dado lido como texto.
+    NotText,
+    /// Japones que voltou com kana ou kanji: nao e traducao. Medido em
+    /// 16/10/2026: o modelo devolveu 57 falas do jogo como vieram, sem as
+    /// quebras de linha, e a memoria espalhou isso pras repetidas.
+    Untranslated,
+}
+
+fn judge(entry: &TextEntry, answer: &str) -> Answer {
+    if answer.trim() == crate::provider::NOT_TEXT {
+        Answer::NotText
+    } else if has_japanese(&entry.source_text) && has_japanese(answer) {
+        Answer::Untranslated
+    } else {
+        Answer::Translation
+    }
+}
+
+/// Kana ou kanji.
+pub(crate) fn has_japanese(text: &str) -> bool {
+    text.chars()
+        .any(|c| crate::sjis::is_kana(c) || crate::sjis::is_kanji(c))
 }
 
 /// Grava a traducao automatica da entry. Texto de conjunto restrito (ASCII,

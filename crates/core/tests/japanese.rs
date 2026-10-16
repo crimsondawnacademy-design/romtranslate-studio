@@ -321,6 +321,56 @@ fn the_translation_goes_back_in_place_or_relocated() {
     by_text(&again, found);
 }
 
+/// O que a IA diz nao ser texto (`<NOT_TEXT>`) sai da traducao como
+/// nao-texto; japones que volta japones nao e traducao: fica pendente e nao
+/// entra na memoria.
+#[tokio::test]
+async fn not_text_is_left_out_and_japanese_back_is_not_a_translation() {
+    let tmp = TempDir::new("echo");
+    let (dir, _) = tmp.project();
+    let provider = FakeProvider {
+        answers: [
+            (JP_YES, JP_YES),
+            (JP_NO, "<NOT_TEXT>"),
+            (JP_FOUND, "Achou!"),
+        ]
+        .into_iter()
+        .collect(),
+        requests: Mutex::new(Vec::new()),
+    };
+    let opts = TranslateOptions {
+        source_language: Some("ja".to_string()),
+        ..TranslateOptions::new("pt-BR")
+    };
+    let mut db = ProjectDb::open(&dir).unwrap();
+    let summary = run_translation(
+        &mut db,
+        None,
+        &provider,
+        "fake-model",
+        &opts,
+        &AtomicBool::new(false),
+        &|_| {},
+    )
+    .await
+    .unwrap();
+
+    let entries = db.load_entries().unwrap();
+    let no = by_text(&entries, JP_NO);
+    assert_eq!(no.status, TranslationStatus::Internal);
+    assert_eq!(no.translated_text, None);
+    let yes = by_text(&entries, JP_YES);
+    assert_eq!(yes.status, TranslationStatus::Untranslated);
+    assert_eq!(yes.translated_text, None);
+    assert!(db.tm_lookup(JP_YES, "ja", "pt-BR").unwrap().is_none());
+    assert_eq!(
+        by_text(&entries, JP_FOUND).translated_text.as_deref(),
+        Some("Achou!")
+    );
+    assert_eq!(summary.not_text, 1);
+    assert!(summary.failed >= 1);
+}
+
 #[tokio::test]
 async fn the_ai_gets_the_space_up_front_and_accents_become_plain_letters() {
     let tmp = TempDir::new("translate");
@@ -863,7 +913,7 @@ mod bank {
         assert_eq!(first.max_bytes, None);
         assert!(first.can_grow());
         assert_eq!(first.metadata["bank"]["at"], JIS16_BANK_AT);
-        assert_eq!(first.metadata["bank"]["pair"], JIS16_BANK_PAIRS[0]);
+        assert_eq!(first.metadata["bank"]["entry"], 2 * JIS16_BANK_PAIRS[0]);
         // A maior linha do roteiro: "おいしい スープを つくっている。" e o
         // sujeito mais comprido com o losango.
         let longest = (0..120)
@@ -884,7 +934,8 @@ mod bank {
         by_text(&out.entries, &synth::jis16_message(119));
 
         // Maior que o original nao e erro, e dentro da caixa nem aviso de
-        // linha; linha maior que a caixa e aviso.
+        // linha; linha maior que a caixa (que nao rola: o app nao quebra as
+        // linhas) e erro, porque passa da borda com certeza.
         let table = romtranslate_core::tbl::TblTable::parse(&out.tables[0].1).unwrap();
         let issues = validate_entry(&translated(first, LONG), Some(&table));
         assert!(
@@ -898,9 +949,79 @@ mod bank {
         assert!(
             issues
                 .iter()
-                .any(|i| i.severity == Severity::Warning && i.message.contains("caixa de texto")),
+                .any(|i| i.severity == Severity::Error && i.message.contains("caixa de texto")),
             "{issues:?}"
         );
+    }
+
+    /// Diretorio misto (dado, sala, dado, sala), como os das descricoes de
+    /// itens e das dicas do jogo medido: a sala que cresce muda de lugar, as
+    /// duas entradas dela sao reapontadas, e o resto do diretorio e o dado
+    /// ficam como estavam.
+    #[test]
+    fn a_room_in_a_mixed_directory_grows_and_the_data_around_it_stays() {
+        use romtranslate_core::synth::{JIS16_MIXED_AT, JIS16_MIXED_PADDING, JIS16_MIXED_ROOMS};
+        let tmp = TempDir::new("bank-mixed");
+        let rom = synth::make_gba_rom_jis16_mixed();
+        let source = tmp.0.join("game.gba");
+        fs::write(&source, &rom).unwrap();
+        let dir = tmp.0.join("game.rtsproj");
+        create_project(CreateProjectArgs {
+            source_path: source,
+            platform: Platform::Gba,
+            adapter_id: GbaAdapter.id().to_string(),
+            source_language: Some("ja".to_string()),
+            target_language: "pt-BR".to_string(),
+            project_dir: dir.clone(),
+        })
+        .unwrap();
+        extract_project(&dir).unwrap();
+
+        let entries = ProjectDb::open(&dir).unwrap().load_entries().unwrap();
+        for (room, &index) in JIS16_MIXED_ROOMS.iter().enumerate() {
+            let entry = by_text(&entries, &synth::jis16_message(60 * room));
+            assert!(entry.can_grow(), "sala {room}");
+            assert_eq!(entry.metadata["bank"]["at"], JIS16_MIXED_AT);
+            assert_eq!(entry.metadata["bank"]["entry"], index);
+        }
+
+        set_translations(&dir, &[(&synth::jis16_message(0), LONG)]);
+        let outcome = reinsert_project_with(&dir, ErrorPolicy::Block).unwrap();
+        assert_eq!(outcome.apply.applied, 1);
+        assert_eq!(outcome.apply.relocated, 1);
+        let working = fs::read(&outcome.working_path).unwrap();
+        let entry = |rom: &[u8], i: usize| u32_at(rom, JIS16_MIXED_AT + 4 + 4 * i);
+        let (table, text) = (
+            JIS16_MIXED_AT + entry(&working, 1),
+            JIS16_MIXED_AT + entry(&working, 2),
+        );
+        assert!(JIS16_MIXED_PADDING.contains(&table), "0x{table:X}");
+        assert_eq!(text - table, entry(&rom, 2) - entry(&rom, 1));
+        // Lida pela tabela nova, a mensagem 0 e a traducao.
+        let mut at = text + u16_at(&working, table);
+        let mut read = String::new();
+        while u16_at(&working, at) != 0xFFFF {
+            let code = u16_at(&working, at) as u16;
+            read.push_str(&match code {
+                synth::JIS16_SPACE => " ".to_string(),
+                code if code >= 0xFF00 => format!("[{code:04X}]"),
+                code => kuten::decode(code).map_or(format!("<{code:04X}>"), String::from),
+            });
+            at += 2;
+        }
+        assert!(read.starts_with("◆Ｔｏｄｏ ｏ ｐｏｖｏ"), "{read}");
+        // O resto do diretorio e o dado entre as salas: como estavam.
+        for i in [0, 3, 4, 5, 6, 7] {
+            assert_eq!(entry(&working, i), entry(&rom, i), "entrada {i}");
+        }
+        for i in [0, 3, 4, 7] {
+            let from = JIS16_MIXED_AT + entry(&rom, i);
+            assert_eq!(
+                working[from..from + 0x100],
+                rom[from..from + 0x100],
+                "dado {i}"
+            );
+        }
     }
 
     #[test]

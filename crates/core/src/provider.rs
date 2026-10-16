@@ -95,6 +95,10 @@ pub trait TranslationProvider: Send + Sync {
     }
 }
 
+/// A resposta do provider pro item que nao e texto (dado lido como texto): o
+/// prompt pede exatamente isto.
+pub const NOT_TEXT: &str = "<NOT_TEXT>";
+
 pub fn build_system_prompt(req: &TranslationRequest) -> String {
     let mut p = String::from("You are translating text extracted from a video game.\n");
     p.push_str(&format!("Target language: {}.\n", req.target_language));
@@ -106,7 +110,8 @@ pub fn build_system_prompt(req: &TranslationRequest) -> String {
          - Preserve ALL placeholders, control codes, tags and escape sequences exactly as-is (e.g. {0}, %s, <BR>, \\n).\n\
          - Do not add explanations, notes or romanization.\n\
          - Keep tone consistent with game UI/dialogue.\n\
-         - When an item has \"maxBytes\", prefer concise wording.\n",
+         - When an item has \"maxBytes\", prefer concise wording.\n\
+         - If an item is not text (binary data read as text: random symbols, a list of single characters), answer exactly <NOT_TEXT>.\n",
     );
     if !req.glossary.is_empty() {
         p.push_str("Glossary (MUST be respected):\n");
@@ -279,6 +284,7 @@ mod tests {
         - Do not add explanations, notes or romanization.\n\
         - Keep tone consistent with game UI/dialogue.\n\
         - When an item has \"maxBytes\", prefer concise wording.\n\
+        - If an item is not text (binary data read as text: random symbols, a list of single characters), answer exactly <NOT_TEXT>.\n\
         Glossary (MUST be respected):\n\
         - \"POTION\" -> \"POÇÃO\"\n\
         - \"HP\" -> DO NOT TRANSLATE\n\

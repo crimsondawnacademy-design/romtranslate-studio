@@ -40,6 +40,14 @@ pub enum IssueKind {
     /// tipograficos) que o texto da string nao escreve — ASCII ou a tabela do
     /// jogo — e foi gravada com o equivalente simples (Warning).
     AccentDropped,
+    /// O original tem letra e a traducao nenhuma ("?????", "..."): quase
+    /// sempre dado lido como texto, que a IA nao soube traduzir. Gravar isso
+    /// troca o dado do jogo por pontuacao (medido em 16/10/2026: tabelas,
+    /// mapas de quadros e a lista de silabas do teclado de nomes).
+    NoLetters,
+    /// Original japones e traducao ainda com kana ou kanji: nao foi
+    /// traduzida (o modelo devolveu o japones).
+    SourceScript,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,6 +168,15 @@ pub fn extract_tokens(text: &str) -> Vec<String> {
     tokens
 }
 
+/// Letras de `text` (de qualquer escrita), sem contar as dos codigos.
+fn letters(text: &str) -> usize {
+    let mut rest = text.to_string();
+    for token in extract_tokens(text) {
+        rest = rest.replacen(&token, "", 1);
+    }
+    rest.chars().filter(|c| c.is_alphabetic()).count()
+}
+
 fn count_tokens(text: &str) -> HashMap<String, i32> {
     let mut map = HashMap::new();
     for token in extract_tokens(text) {
@@ -190,6 +207,34 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
             Severity::Error,
             IssueKind::EmptyTranslation,
             "traducao vazia para texto nao-vazio".to_string(),
+        );
+        return issues;
+    }
+
+    // Codigo do jogo conta como conteudo: "◆[FF23:0001]!" e o nome de alguem
+    // com exclamacao (o original era "◆[FF23:0001]さん！").
+    if letters(translation) == 0
+        && extract_tokens(translation).is_empty()
+        && letters(&entry.source_text) > 0
+    {
+        push(
+            Severity::Error,
+            IssueKind::NoLetters,
+            format!(
+                "a traducao {translation:?} nao tem nenhuma letra: se o original nao e texto, \
+                 marque como nao-texto; senao, traduza de novo"
+            ),
+        );
+        return issues;
+    }
+
+    if crate::pipeline::has_japanese(&entry.source_text)
+        && crate::pipeline::has_japanese(translation)
+    {
+        push(
+            Severity::Error,
+            IssueKind::SourceScript,
+            "a traducao ainda tem japones: traduza de novo".to_string(),
         );
         return issues;
     }
@@ -333,8 +378,11 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
                 ),
             );
         } else if line > width {
+            // Sem a quebra do app, a linha e gravada como esta: passa da borda
+            // da janela com certeza (16/10/2026: descricoes de inimigos com
+            // linhas de 34 letras numa janela de 14).
             push(
-                Severity::Warning,
+                Severity::Error,
                 IssueKind::ByteOverflow,
                 format!(
                     "uma linha da traducao tem {line} caracteres; a caixa de texto do jogo \
@@ -614,6 +662,32 @@ mod tests {
             encoded_len("Olá", &TextEncoding::ShiftJis, None),
             EncodedLen::Unencodable(why) if why.contains("'á'")
         ));
+    }
+
+    #[test]
+    fn a_translation_without_letters_is_not_written() {
+        let jis16 = TextEncoding::Table(crate::kuten::TABLE_ID.to_string());
+        let check = |source: &str, answer: &str| {
+            kinds(&validate_entry(&entry(source, answer, jis16.clone()), None))
+        };
+        for answer in ["?????", "...", "※"] {
+            assert_eq!(
+                check("Ｙこ÷り＊", answer),
+                [IssueKind::NoLetters],
+                "{answer}"
+            );
+        }
+        // O codigo que escreve um nome e conteudo.
+        assert!(!check("◆[FF23:0001]さん！", "◆[FF23:0001]!").contains(&IssueKind::NoLetters));
+        // Pontuacao no original, pontuacao na traducao: nada a dizer.
+        assert!(!check("・・・！", "...!").contains(&IssueKind::NoLetters));
+        assert!(!check("ＰＳＩ", "PSI").contains(&IssueKind::NoLetters));
+        // Japones que voltou japones nao e traducao.
+        assert_eq!(
+            check("◆あなたは えがおで", "◆あなたは えがおで"),
+            [IssueKind::SourceScript]
+        );
+        assert!(!check("◆あなたは えがおで", "◆Voce sorri?").contains(&IssueKind::SourceScript));
     }
 
     #[test]

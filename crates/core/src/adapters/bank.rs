@@ -10,6 +10,14 @@
 //!   (0xFFFF = sem mensagem), um por mensagem;
 //! - cada mensagem fecha com 0xFFFF.
 //!
+//! O mesmo jogo tem diretorios MISTOS (16/10/2026): descricoes de itens,
+//! dicas e nomes de lugares em salas iguais a essas, num diretorio que tambem
+//! aponta pra graficos e tabelas, e nem sempre num par alinhado (tabela na
+//! entrada 3 e texto na 4). Ali cada sala e reconhecida pela propria
+//! assinatura: o bloco de texto abre com 0xFFFF e a quantidade de mensagens
+//! (o tamanho da tabela, ou um a menos), e o primeiro offset e 4, logo depois
+//! desse cabecalho — como nas 481 salas do banco principal.
+//!
 //! Nada aqui supoe um jogo: o banco e reconhecido pela propria estrutura, com
 //! centenas de offsets que tem que cair no lugar certo. Com ele, mensagem que
 //! cresce nao precisa caber no espaco da original: o bloco e remontado com as
@@ -51,8 +59,9 @@ fn u32_at(data: &[u8], at: usize) -> Option<usize> {
 /// Um bloco: a tabela de offsets e o texto das mensagens.
 #[derive(Debug, Clone)]
 pub(crate) struct Room {
-    /// Os pares do diretorio que apontam pra este bloco (quase sempre um).
-    pairs: Vec<usize>,
+    /// As entradas do diretorio com o offset da tabela deste bloco (quase
+    /// sempre uma); a do texto e a seguinte.
+    entries: Vec<usize>,
     table: usize,
     /// Quantos offsets a tabela tem.
     slots: usize,
@@ -93,6 +102,9 @@ pub(crate) struct Bank {
     /// Onde o banco comeca (o u32 da quantidade).
     pub at: usize,
     rooms: Vec<Room>,
+    /// Diretorio que tambem aponta pra outros dados: cada sala e um tipo de
+    /// texto (itens, dicas, lugares), numa janela propria.
+    mixed: bool,
 }
 
 impl Bank {
@@ -110,7 +122,7 @@ impl Bank {
 /// O banco que comeca em `at`, se a estrutura inteira confere.
 fn bank_at(data: &[u8], at: usize) -> Option<Bank> {
     let count = u32_at(data, at)?;
-    if !DIR_ENTRIES.contains(&count) || count % 2 != 0 {
+    if !DIR_ENTRIES.contains(&count) {
         return None;
     }
     let dir_len = 4 + 4 * count;
@@ -140,6 +152,23 @@ fn bank_at(data: &[u8], at: usize) -> Option<Bank> {
     let dir: Vec<usize> = (0..count)
         .map(|i| u32_at(data, at + 4 + 4 * i))
         .collect::<Option<_>>()?;
+    if count % 2 == 0 {
+        if let Some(bank) = paired(data, at, &dir) {
+            return Some(bank);
+        }
+    }
+    let rooms = loose_rooms(data, at, &dir);
+    (!rooms.is_empty()).then_some(Bank {
+        at,
+        rooms,
+        mixed: true,
+    })
+}
+
+/// O banco em que o diretorio inteiro e de pares (tabela, texto), se quase
+/// todo offset cai no lugar.
+fn paired(data: &[u8], at: usize, dir: &[usize]) -> Option<Bank> {
+    let count = dir.len();
     // Onde cada bloco de texto termina: no proximo offset do diretorio.
     let mut bounds: Vec<usize> = dir.iter().copied().filter(|v| *v != 0).collect();
     bounds.dedup();
@@ -156,7 +185,7 @@ fn bank_at(data: &[u8], at: usize) -> Option<Bank> {
             continue;
         }
         if let Some(room) = by_block.get_mut(&(a, b)) {
-            room.pairs.push(pair);
+            room.entries.push(2 * pair);
             continue;
         }
         let (table, text, slots) = (at + a, at + b, (b - a) / 2);
@@ -198,7 +227,7 @@ fn bank_at(data: &[u8], at: usize) -> Option<Bank> {
         by_block.insert(
             (a, b),
             Room {
-                pairs: vec![pair],
+                entries: vec![2 * pair],
                 table,
                 slots,
                 text,
@@ -216,6 +245,91 @@ fn bank_at(data: &[u8], at: usize) -> Option<Bank> {
     sound.then(|| Bank {
         at,
         rooms: by_block.into_values().collect(),
+        mixed: false,
+    })
+}
+
+/// As salas de um diretorio misto: entradas vizinhas (tabela, texto) com a
+/// assinatura inteira — cabecalho com a quantidade, primeiro offset 4, e todo
+/// offset dentro do bloco, logo depois de um fim de mensagem (ou 0: o 0xFFFF
+/// do cabecalho, a mensagem vazia). O resto do diretorio (graficos, tabelas)
+/// nao e tocado.
+fn loose_rooms(data: &[u8], at: usize, dir: &[usize]) -> Vec<Room> {
+    let mut bounds: Vec<usize> = dir.iter().copied().filter(|v| *v != 0).collect();
+    bounds.sort_unstable();
+    bounds.dedup();
+    let mut rooms: BTreeMap<(usize, usize), Room> = BTreeMap::new();
+    for i in 0..dir.len().saturating_sub(1) {
+        let (a, b) = (dir[i], dir[i + 1]);
+        if a == 0 || b <= a || (b - a) % 2 != 0 {
+            continue;
+        }
+        if let Some(room) = rooms.get_mut(&(a, b)) {
+            room.entries.push(i);
+            continue;
+        }
+        if let Some(room) = loose_room(data, at, a, b, &bounds) {
+            rooms.insert(
+                (a, b),
+                Room {
+                    entries: vec![i],
+                    ..room
+                },
+            );
+        }
+    }
+    rooms.into_values().collect()
+}
+
+fn loose_room(data: &[u8], at: usize, a: usize, b: usize, bounds: &[usize]) -> Option<Room> {
+    let (table, text, slots) = (at + a, at + b, (b - a) / 2);
+    let count = usize::from(u16_at(data, text + 2)?);
+    if u16_at(data, text)? != END || !(count == slots || count + 1 == slots) {
+        return None;
+    }
+    if u16_at(data, table)? != 4 {
+        return None;
+    }
+    let offsets: Vec<usize> = (0..slots)
+        .map(|k| u16_at(data, table + 2 * k))
+        .collect::<Option<Vec<u16>>>()?
+        .into_iter()
+        .filter(|o| *o != END)
+        .map(usize::from)
+        .collect();
+    // O bloco vai ate a proxima entrada do diretorio; o ultimo, ate o fim da
+    // ultima mensagem.
+    let text_len = match bounds.iter().find(|&&v| v > b) {
+        Some(next) => next - b,
+        None => {
+            let far = offsets.iter().max().copied()?;
+            let closes = (far..MAX_TEXT)
+                .step_by(2)
+                .find(|rel| u16_at(data, text + rel) == Some(END))?;
+            (closes + 2).next_multiple_of(4)
+        }
+    };
+    if text_len > MAX_TEXT + 2 || text + text_len > data.len() {
+        return None;
+    }
+    let sound = offsets.iter().all(|&rel| {
+        rel % 2 == 0
+            && rel + 2 <= text_len
+            && (rel == 0 || rel == 4 || u16_at(data, text + rel - 2) == Some(END))
+    });
+    if !sound {
+        return None;
+    }
+    let mut starts: Vec<usize> = std::iter::once(0).chain(offsets).collect();
+    starts.sort_unstable();
+    starts.dedup();
+    Some(Room {
+        entries: Vec::new(),
+        table,
+        slots,
+        text,
+        text_len,
+        starts,
     })
 }
 
@@ -678,63 +792,75 @@ impl Line<'_> {
 pub(crate) fn tag(entries: &mut [TextEntry], banks: &[Bank]) -> usize {
     let mut tagged = 0;
     for bank in banks {
-        let inside: Vec<(usize, usize)> = entries
+        let all: Vec<(usize, usize)> = entries
             .iter()
             .enumerate()
             .filter_map(|(i, entry)| {
                 let at = entry.offset? as usize;
                 let room = bank.room_at(at)?;
                 room.segment_of(at, entry.original_bytes.len())?;
-                Some((i, room.pairs[0]))
+                Some((i, room.entries[0]))
             })
             .collect();
-        let sources: Vec<&str> = inside
-            .iter()
-            .map(|&(i, _)| entries[i].source_text.as_str())
-            .collect();
-        let mut lines: Vec<usize> = sources
-            .iter()
-            .flat_map(|source| pieces(source))
-            .filter_map(|piece| match piece {
-                Piece::Text(text) => Some(text.chars().count()),
-                Piece::Code(_) => None,
-            })
-            .collect();
-        lines.sort_unstable();
-        // ponytail: com menos de mil linhas o corte de 99,9% e a maior linha.
-        let line = lines
-            .get((lines.len() * 999).div_ceil(1000).saturating_sub(1))
-            .copied();
-        let learned = line.and_then(|width| learn(&sources, width));
-        for (i, pair) in inside {
-            let entry = &mut entries[i];
-            entry.metadata["bank"] = serde_json::json!({
-                "at": bank.at,
-                "pair": pair,
-                "line": line,
-            });
-            if let Some(learned) = &learned {
-                let layout = learned.of(&entry.source_text);
-                entry.metadata["bank"]["break"] = serde_json::json!(layout.soft);
-                entry.metadata["bank"]["indent"] = serde_json::json!(layout.indent);
-                entry.metadata["bank"]["wide"] = serde_json::json!(layout.wide);
-            }
-            entry.max_bytes = None;
-            entry.context = Some(match (line, &learned) {
-                (Some(line), Some(_)) => format!(
-                    "realocavel: a mensagem pode crescer (o bloco e remontado) e o app quebra \
-                     as linhas na largura da caixa de texto do jogo ({line} caracteres)"
-                ),
-                (Some(line), None) => format!(
-                    "realocavel: a mensagem pode crescer (o bloco e remontado); cada linha \
-                     cabe {line} caracteres na caixa de texto do jogo"
-                ),
-                (None, _) => {
-                    "realocavel: a mensagem pode crescer (o bloco e remontado)".to_string()
-                }
-            });
-            tagged += 1;
+        // A largura da caixa e aprendida pelo banco; no misto, sala a sala.
+        let mut groups: BTreeMap<usize, Vec<(usize, usize)>> = BTreeMap::new();
+        for (i, entry) in all {
+            let key = if bank.mixed { entry } else { 0 };
+            groups.entry(key).or_default().push((i, entry));
         }
+        tagged += groups
+            .into_values()
+            .map(|inside| tag_group(entries, bank, inside))
+            .sum::<usize>();
+    }
+    tagged
+}
+
+fn tag_group(entries: &mut [TextEntry], bank: &Bank, inside: Vec<(usize, usize)>) -> usize {
+    let tagged = inside.len();
+    let sources: Vec<&str> = inside
+        .iter()
+        .map(|&(i, _)| entries[i].source_text.as_str())
+        .collect();
+    let mut lines: Vec<usize> = sources
+        .iter()
+        .flat_map(|source| pieces(source))
+        .filter_map(|piece| match piece {
+            Piece::Text(text) => Some(text.chars().count()),
+            Piece::Code(_) => None,
+        })
+        .collect();
+    lines.sort_unstable();
+    // ponytail: com menos de mil linhas o corte de 99,9% e a maior linha.
+    let line = lines
+        .get((lines.len() * 999).div_ceil(1000).saturating_sub(1))
+        .copied();
+    let learned = line.and_then(|width| learn(&sources, width));
+    for (i, index) in inside {
+        let entry = &mut entries[i];
+        entry.metadata["bank"] = serde_json::json!({
+            "at": bank.at,
+            "entry": index,
+            "line": line,
+        });
+        if let Some(learned) = &learned {
+            let layout = learned.of(&entry.source_text);
+            entry.metadata["bank"]["break"] = serde_json::json!(layout.soft);
+            entry.metadata["bank"]["indent"] = serde_json::json!(layout.indent);
+            entry.metadata["bank"]["wide"] = serde_json::json!(layout.wide);
+        }
+        entry.max_bytes = None;
+        entry.context = Some(match (line, &learned) {
+            (Some(line), Some(_)) => format!(
+                "realocavel: a mensagem pode crescer (o bloco e remontado) e o app quebra \
+                 as linhas na largura da caixa de texto do jogo ({line} caracteres)"
+            ),
+            (Some(line), None) => format!(
+                "realocavel: a mensagem pode crescer (o bloco e remontado); cada linha \
+                 cabe {line} caracteres na caixa de texto do jogo"
+            ),
+            (None, _) => "realocavel: a mensagem pode crescer (o bloco e remontado)".to_string(),
+        });
     }
     tagged
 }
@@ -842,7 +968,7 @@ fn drifted(what: &str) -> CoreError {
 fn rebuild<'a>(
     data: &[u8],
     room: &'a Room,
-    pair: usize,
+    index: usize,
     group: &[&TextEntry],
     report: &mut ApplyReport,
 ) -> Result<Part<'a>> {
@@ -892,7 +1018,7 @@ fn rebuild<'a>(
     }
     if pending.next().is_some() {
         return Err(drifted(&format!(
-            "uma entry do bloco de mensagens {pair} nao cabe em mensagem nenhuma dele"
+            "uma entry do bloco de mensagens da entrada {index} nao cabe em mensagem nenhuma dele"
         )));
     }
     Ok(Part {
@@ -989,10 +1115,10 @@ fn by_block(data: &[u8], bank: usize, parts: &[Part], free: &mut Vec<(usize, usi
 /// `table`, com o texto logo depois dela.
 fn point(writes: &mut Vec<(usize, Vec<u8>)>, bank: usize, room: &Room, table: usize) {
     let (table, text) = (table - bank, table + 2 * room.slots - bank);
-    for &pair in &room.pairs {
+    for &index in &room.entries {
         let mut entry = (table as u32).to_le_bytes().to_vec();
         entry.extend_from_slice(&(text as u32).to_le_bytes());
-        writes.push((bank + 4 + 8 * pair, entry));
+        writes.push((bank + 4 + 4 * index, entry));
     }
 }
 
@@ -1215,10 +1341,12 @@ pub(crate) fn plan(data: &[u8], entries: &[TextEntry]) -> Result<BankPlan> {
                 .as_u64()
                 .map(|n| n as usize)
         };
-        let (Some(at), Some(pair)) = (number("at"), number("pair")) else {
+        // "pair" e a marca de antes de 16/10/2026: o par p e a entrada 2p.
+        let index = number("entry").or_else(|| number("pair").map(|pair| 2 * pair));
+        let (Some(at), Some(index)) = (number("at"), index) else {
             continue;
         };
-        groups.entry((at, pair)).or_default().push(entry);
+        groups.entry((at, index)).or_default().push(entry);
     }
     if groups.is_empty() {
         return Ok(plan);
@@ -1226,14 +1354,14 @@ pub(crate) fn plan(data: &[u8], entries: &[TextEntry]) -> Result<BankPlan> {
     let banks: HashMap<usize, Bank> = find(data).into_iter().map(|b| (b.at, b)).collect();
 
     let mut parts: BTreeMap<usize, Vec<Part>> = BTreeMap::new();
-    for ((at, pair), mut group) in groups {
+    for ((at, index), mut group) in groups {
         let room = banks
             .get(&at)
-            .and_then(|bank| bank.rooms.iter().find(|room| room.pairs.contains(&pair)))
+            .and_then(|bank| bank.rooms.iter().find(|room| room.entries.contains(&index)))
             .filter(|room| !room.starts.is_empty())
             .ok_or_else(|| {
                 drifted(&format!(
-                    "o bloco de mensagens {pair} do banco em 0x{at:X} nao esta mais la"
+                    "o bloco de mensagens da entrada {index} do banco em 0x{at:X} nao esta mais la"
                 ))
             })?;
         plan.rooms.push((room.text, room.text_len));
@@ -1242,7 +1370,7 @@ pub(crate) fn plan(data: &[u8], entries: &[TextEntry]) -> Result<BankPlan> {
             continue;
         }
         group.sort_by_key(|e| e.offset);
-        let part = rebuild(data, room, pair, &group, &mut plan.report)?;
+        let part = rebuild(data, room, index, &group, &mut plan.report)?;
         parts.entry(at).or_default().push(part);
     }
 

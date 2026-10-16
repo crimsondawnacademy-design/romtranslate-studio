@@ -142,6 +142,8 @@ export interface TranslateSummary {
   shortened: number;
   /** Traduções desta rodada que continuam maiores que o espaço da frase. */
   tooLong: number;
+  /** Itens que a IA disse não serem texto: viraram não-texto. */
+  notText: number;
   /** Tokens que o provider declarou ter cobrado na rodada (0 = não informa). */
   inputTokens: number;
   outputTokens: number;
@@ -227,7 +229,9 @@ export type IssueKind =
   | "empty_translation"
   | "length_anomaly"
   | "unencodable"
-  | "accent_dropped";
+  | "accent_dropped"
+  | "no_letters"
+  | "source_script";
 
 export interface ValidationIssue {
   entryId: string;
