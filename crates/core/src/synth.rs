@@ -981,6 +981,61 @@ pub fn make_gba_rom_jis16() -> Vec<u8> {
     rom
 }
 
+/// A fala com kanji de `make_gba_rom_jis16_font`, como a extracao a le.
+pub const JIS16_FONT_LINE: &str = "ちちの 父は いま 茶を のんでいる。";
+/// As linhas vazias do JIS que a fonte de `make_gba_rom_jis16_font` pula,
+/// como a do jogo medido: todo kanji fica 6 * 94 posicoes antes da tabela
+/// padrao.
+pub const JIS16_FONT_SKIPPED: std::ops::RangeInclusive<usize> = 9..=14;
+
+/// O `make_gba_rom_jis16` em 128 KiB com uma FONTE guardada como a do jogo
+/// medido em 16/10/2026: em 0x10000, um desenho a cada 4 bytes, cada um com
+/// o codigo Shift-JIS dele na frente, na ordem JIS das linhas 1 a 48 sem as
+/// de `JIS16_FONT_SKIPPED`; em 0x18000, `JIS16_FONT_LINE` escrita com o
+/// codigo do texto = posicao do desenho na fonte.
+pub fn make_gba_rom_jis16_font() -> Vec<u8> {
+    let mut rom = make_gba_rom_jis16();
+    rom.resize(128 * 1024, 0);
+    let mut font = Vec::new();
+    for row in (1..=48usize).filter(|row| !JIS16_FONT_SKIPPED.contains(row)) {
+        for col in 1..=94usize {
+            // JIS -> Shift-JIS, pelos bytes JIS (0x20 + linha, 0x20 + coluna).
+            let (j1, j2) = (0x20 + row, 0x20 + col);
+            let lead = ((j1 + 1) >> 1) + 0x70;
+            let lead = if lead > 0x9F { lead + 0x40 } else { lead };
+            let trail = match j1 % 2 {
+                1 if j2 + 0x1F >= 0x7F => j2 + 0x20,
+                1 => j2 + 0x1F,
+                _ => j2 + 0x7E,
+            };
+            font.extend([lead as u8, trail as u8, 0, 0]);
+        }
+    }
+    plant(&mut rom, 0x10000, &font);
+    // Kana pela tabela padrao (e igual na fonte); kanji pela posicao na fonte.
+    let skipped = JIS16_FONT_SKIPPED.clone().count() * 94;
+    let mut line: Vec<u16> = JIS16_FONT_LINE
+        .chars()
+        .map(|c| {
+            if c == ' ' {
+                return JIS16_SPACE;
+            }
+            let standard = crate::kuten::encode(c).expect("caractere existe no JIS") as usize;
+            let row = standard / 94 + 1;
+            let shift = if row > *JIS16_FONT_SKIPPED.end() {
+                skipped
+            } else {
+                0
+            };
+            (standard - shift) as u16
+        })
+        .collect();
+    line.push(0xFFFF);
+    let bytes: Vec<u8> = line.iter().flat_map(|c| c.to_le_bytes()).collect();
+    plant(&mut rom, 0x18000, &bytes);
+    rom
+}
+
 /// Onde comeca o banco de mensagens de `make_gba_rom_jis16_bank`.
 pub const JIS16_BANK_AT: usize = 0x8000;
 /// Os pares do diretorio que tem bloco (os outros ficam vazios, como no

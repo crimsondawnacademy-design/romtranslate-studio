@@ -501,7 +501,9 @@ pub fn ensure_table(project_dir: &Path, id: &str, text: &str) -> Result<()> {
 /// As linhas de `old` que a pessoa escreveu: nem estao na tabela gerada agora
 /// (`generated`), nem tem o valor que o gerador da a uma chave que nao reconhece
 /// (`[` + as unidades de 16 bits da chave + `]`: comando, comando com
-/// parametro, desenho proprio) — essas sao de uma geracao velha.
+/// parametro, desenho proprio), nem o caractere da ordem JIS padrao naquele
+/// codigo (a tabela de antes de a extracao ler a ordem da fonte do jogo,
+/// `kuten::font_order`) — essas sao de uma geracao velha.
 fn hand_lines<'a>(old: &'a str, generated: &str) -> Vec<&'a str> {
     let fresh: std::collections::HashSet<&str> = generated.lines().collect();
     let generator_value = |hex: &str| {
@@ -514,13 +516,19 @@ fn hand_lines<'a>(old: &'a str, generated: &str) -> Vec<&'a str> {
             .collect();
         (bytes.len() % 2 == 0).then(|| format!("[{}]", units.join(":")))
     };
+    let standard = |hex: &str| {
+        let pair: [u8; 2] = decode_hex(hex)?.try_into().ok()?;
+        crate::kuten::decode(u16::from_le_bytes(pair)).map(String::from)
+    };
     old.lines()
         .map(|line| line.trim_end_matches('\r'))
         .filter(|line| !line.is_empty() && !line.starts_with('#') && !line.starts_with(';'))
         .filter(|line| !fresh.contains(line))
         .filter(|line| {
-            line.split_once('=')
-                .is_some_and(|(hex, value)| generator_value(hex).as_deref() != Some(value))
+            line.split_once('=').is_some_and(|(hex, value)| {
+                generator_value(hex).as_deref() != Some(value)
+                    && standard(hex).as_deref() != Some(value)
+            })
         })
         .collect()
 }
@@ -600,6 +608,15 @@ mod tests {
             fs::read_to_string(dir.join(TABLES_DIR).join("jis16.tbl")).unwrap(),
             written
         );
+        // A ordem da fonte do jogo troca o kanji de um codigo: o da ordem
+        // padrao, que estava no arquivo, e geracao velha e sai.
+        let code: u16 = 0x0E3C;
+        let standard = crate::kuten::decode(code).unwrap();
+        let key = format!("{:02X}{:02X}", code & 0xFF, code >> 8);
+        ensure_table(&dir, "jis16", &format!("{new}{key}={standard}\n")).unwrap();
+        ensure_table(&dir, "jis16", &format!("{new}{key}=中\n")).unwrap();
+        let written = fs::read_to_string(dir.join(TABLES_DIR).join("jis16.tbl")).unwrap();
+        assert!(!written.contains(&format!("{key}={standard}")), "{written}");
         fs::remove_dir_all(&dir).unwrap();
     }
 

@@ -2011,3 +2011,26 @@ quatro vezes, porque morava na pasta temporária da sessão. Agora mora em
 de teclas com foto, memória, estado salvo e escrita de memória; roda em
 `sandbox-exec`, sem rede). Faz parte do modelo de processo: fora do app,
 nenhum byte de jogo no repositório.
+
+## 2026-10-16 — Kanji pela ordem da fonte do próprio jogo
+
+**Contexto:** no Mother 3 todo kanji saía trocado (父 → 茶; "中断" → "醇叔",
+"母艦" → "底[04F4]"), e a IA traduzia o kanji errado. O cartucho tem duas
+fontes em que cada desenho vem com o código Shift-JIS dele na frente (7.333
+desenhos de 22 bytes em `0xCE39F8`, 7.332 de 10 em `0xD0B010`), em ordem JIS
+mas sem seis das linhas vazias: o kana coincide com a tabela padrão e todo
+kanji fica 564 posições antes. O código do texto é a posição do desenho na
+fonte.
+
+**Decisão:** `kuten::font_order` procura a maior tabela assim (começa em
+"　、。", códigos crescendo, ao menos 2.000 desenhos) e só a usa se o kana dela
+bate com o da tabela padrão (que é como o texto foi reconhecido); a leitura e
+o `.tbl` gerado passam a usar essa ordem. Linha da tabela antiga com o valor
+da ordem padrão é de geração velha, não "feita à mão" (`tbl::hand_lines`),
+senão o kanji errado voltava por cima. Mother 3: 241 frases com o original
+corrigido (as 220 traduções feitas sobre o kanji errado foram apagadas pra
+refazer, direto no banco do projeto) e 14 frases novas.
+
+**Não feito:** a extração não apaga sozinha a tradução de frase cujo original
+mudou (o caso daqui foi limpo à mão). Jogo cuja fonte não guarda o código de
+cada desenho continua na ordem padrão.

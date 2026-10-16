@@ -18,7 +18,7 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fmt::Write as _;
 use std::sync::OnceLock;
 
-use encoding_rs::EUC_JP;
+use encoding_rs::{EUC_JP, SHIFT_JIS};
 
 use crate::scan::is_sentence;
 use crate::sjis::{is_kana, is_kanji, Script};
@@ -94,6 +94,73 @@ fn chars() -> &'static [u16] {
     })
 }
 
+/// Uma fonte guardada com o codigo Shift-JIS de cada desenho tem pelo menos
+/// isto de desenhos: menos que isso e tabela de outra coisa.
+const MIN_FONT: usize = 2000;
+
+/// A ordem dos caracteres na fonte do proprio jogo, quando o cartucho guarda
+/// cada desenho com o codigo Shift-JIS dele na frente: o codigo do texto e a
+/// posicao do desenho na fonte. Codigo -> caractere, 0 onde nao ha um.
+///
+/// Medido em 16/10/2026 no RPG japones de 32 MiB: duas fontes assim (7.333
+/// desenhos de 22 bytes e 7.332 de 10), em ordem JIS mas SEM seis das
+/// linhas vazias — o kana bate com a tabela padrao, e todo kanji fica 564
+/// posicoes antes dela (父 era lido 茶, "中断" saia "醇叔"). A fonte so vale se o
+/// kana dela bate com o da tabela padrao, que e como o texto foi reconhecido.
+fn font_order(data: &[u8]) -> Option<Vec<u16>> {
+    let lead = |a: u8, b: u8| {
+        matches!(a, 0x81..=0x9F | 0xE0..=0xEF) && (0x40..=0xFC).contains(&b) && b != 0x7F
+    };
+    // (inicio, passo, desenhos) da maior fonte: comeca em "　、。" (81 40, 81
+    // 41, 81 42), um desenho a cada `passo` bytes, codigos sempre crescendo.
+    let mut best: Option<(usize, usize, usize)> = None;
+    for (at, _) in data
+        .windows(2)
+        .enumerate()
+        .filter(|(_, pair)| *pair == [0x81, 0x40])
+    {
+        for stride in 4..=256 {
+            let next = |k: usize| data.get(at + k * stride..at + k * stride + 2);
+            if next(1) != Some(&[0x81, 0x41]) || next(2) != Some(&[0x81, 0x42]) {
+                continue;
+            }
+            let (mut count, mut last) = (0, 0u16);
+            while let Some(&[a, b]) = next(count) {
+                let code = u16::from_be_bytes([a, b]);
+                if !lead(a, b) || (count > 0 && code <= last) {
+                    break;
+                }
+                (count, last) = (count + 1, code);
+            }
+            if count >= MIN_FONT && best.is_none_or(|(_, _, most)| count > most) {
+                best = Some((at, stride, count));
+            }
+        }
+    }
+    let (start, stride, count) = best?;
+    let mut font: Vec<u16> = (0..count)
+        .map(|i| {
+            let at = start + i * stride;
+            let (text, bad) = SHIFT_JIS.decode_without_bom_handling(&data[at..at + 2]);
+            let mut found = text.chars();
+            match (found.next(), found.next(), bad) {
+                (Some(c), None, false) => u16::try_from(c as u32).unwrap_or(0),
+                _ => 0,
+            }
+        })
+        .collect();
+    // O espaco de largura inteira: preenchimento, como na tabela padrao.
+    font[0] = 0;
+    let (mut kana, mut same) = (0, 0);
+    for (code, &unit) in font.iter().enumerate().take(8 * CELLS) {
+        if let Some(c) = decode(code as u16).filter(|c| is_kana(*c)) {
+            kana += 1;
+            same += usize::from(unit == c as u16);
+        }
+    }
+    (kana > 0 && same * 100 >= kana * 95).then_some(font)
+}
+
 /// O caractere do codigo `code`, se a tabela tem um ali.
 pub fn decode(code: u16) -> Option<char> {
     let unit = *chars().get(code as usize)?;
@@ -140,6 +207,30 @@ struct Dialect {
     params: HashMap<u16, usize>,
     /// As figuras com que as falas abrem (`find_bullets`).
     bullets: HashSet<u16>,
+    /// A ordem da fonte do jogo (`font_order`), se o cartucho a guarda; sem
+    /// ela, a tabela padrao.
+    font: Option<Vec<u16>>,
+}
+
+impl Dialect {
+    /// O caractere do codigo `code` neste jogo.
+    fn decode(&self, code: u16) -> Option<char> {
+        match &self.font {
+            Some(font) => font
+                .get(code as usize)
+                .filter(|unit| **unit != 0)
+                .and_then(|unit| char::from_u32(*unit as u32)),
+            None => decode(code),
+        }
+    }
+
+    /// Ate onde vao os desenhos da fonte: abaixo disto, codigo sem caractere
+    /// e desenho proprio do jogo.
+    fn glyphs(&self) -> u16 {
+        self.font
+            .as_ref()
+            .map_or(GLYPHS, |font| u16::try_from(font.len()).unwrap_or(CONTROL))
+    }
 }
 
 /// O `.tbl` desta codificacao: uma linha por caractere (chave = os 2 bytes do
@@ -150,7 +241,26 @@ struct Dialect {
 /// o jogo usa como espaco entre palavras; sem ele o espaco e o codigo 0 (o de
 /// largura inteira do JIS).
 pub fn table_text(space: Option<u16>, commands: &BTreeSet<Vec<u16>>) -> String {
-    let mut out = String::from(
+    table_with(
+        &Dialect {
+            space,
+            ..Dialect::default()
+        },
+        commands,
+    )
+}
+
+/// `table_text` na ordem da fonte do jogo, se o dialeto tem uma.
+fn table_with(dialect: &Dialect, commands: &BTreeSet<Vec<u16>>) -> String {
+    let space = dialect.space;
+    let mut out = String::new();
+    if dialect.font.is_some() {
+        out.push_str(
+            "# Ordem da fonte do proprio jogo, achada no arquivo (cada desenho guardado com o\n\
+             # codigo Shift-JIS dele): o codigo e a posicao do desenho na fonte.\n",
+        );
+    }
+    out.push_str(
         "# Tabela gerada pelo RomTranslate Studio: codigos de 16 bits na ordem do JIS X 0208\n\
          # (codigo = posicao do caractere na tabela, gravado em little-endian).\n\
          # [FFxx] e comando do jogo; [FFxx:pppp], comando com os parametros dele.\n\
@@ -161,11 +271,11 @@ pub fn table_text(space: Option<u16>, commands: &BTreeSet<Vec<u16>>) -> String {
     );
     let space = space.unwrap_or(0);
     let _ = writeln!(out, "{}= ", key(space));
-    for code in 1..GLYPHS {
+    for code in 1..dialect.glyphs() {
         if code == space {
             continue;
         }
-        match decode(code) {
+        match dialect.decode(code) {
             Some(c) => {
                 let _ = writeln!(out, "{}={c}", key(code));
             }
@@ -361,9 +471,9 @@ impl Dialect {
                     .count(),
             };
             (Piece::Control, 1 + params)
-        } else if let Some(c) = decode(code) {
+        } else if let Some(c) = self.decode(code) {
             (Piece::Char(c), 1)
-        } else if code != 0 && code < GLYPHS {
+        } else if code != 0 && code < self.glyphs() {
             (Piece::Glyph, 1)
         } else {
             (Piece::Other, 1)
@@ -501,7 +611,10 @@ fn scan(codes: &[u16], dialect: &Dialect, starts: &HashSet<usize>) -> Vec<Span> 
         // Um valor que nao abre texto logo antes (o numero de um campo
         // vizinho, `opens_text`) nao suja o comeco: vale o que vem antes dele.
         let number = |at: usize| {
-            codes[at] < CONTROL && decode(codes[at]).is_some_and(|c| !opens_text(c) && c != '　')
+            codes[at] < CONTROL
+                && dialect
+                    .decode(codes[at])
+                    .is_some_and(|c| !opens_text(c) && c != '　')
         };
         let before = match before {
             Some(at) if number(at) => at.checked_sub(1),
@@ -653,6 +766,7 @@ pub fn extract(data: &[u8], starts: &HashSet<usize>) -> Option<Kuten16> {
     let codes = units(data);
     let mut dialect = Dialect {
         space: find_space(&codes),
+        font: font_order(data),
         ..Dialect::default()
     };
     let first = scan(&codes, &dialect, starts);
@@ -742,7 +856,7 @@ pub fn extract(data: &[u8], starts: &HashSet<usize>) -> Option<Kuten16> {
     (sentences >= MIN_SENTENCES).then(|| Kuten16 {
         entries,
         spans,
-        table: table_text(dialect.space, &commands),
+        table: table_with(&dialect, &commands),
     })
 }
 

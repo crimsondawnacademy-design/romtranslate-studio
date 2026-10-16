@@ -842,6 +842,24 @@ mod jis16 {
 
 // --- Banco de mensagens em blocos: a traducao pode crescer ---
 
+/// O jogo guarda a fonte com o codigo Shift-JIS de cada desenho e sem as
+/// linhas vazias do JIS: o kanji e lido pela posicao na fonte (pela tabela
+/// padrao, 父 saia 茶).
+#[test]
+fn kanji_follow_the_order_of_the_game_font() {
+    use romtranslate_core::kuten;
+    use romtranslate_core::tbl::TblTable;
+    let rom = synth::make_gba_rom_jis16_font();
+    let out = GbaAdapter.extract(&rom).unwrap();
+    by_text(&out.entries, synth::JIS16_FONT_LINE);
+    let table = TblTable::parse(&out.tables[0].1).unwrap();
+    let father = kuten::encode('父').unwrap() - 6 * 94;
+    assert_eq!(table.lookup(&father.to_le_bytes()), Some((2, "父")));
+    // O kana nao muda.
+    let a = kuten::encode('あ').unwrap();
+    assert_eq!(table.lookup(&a.to_le_bytes()), Some((2, "あ")));
+}
+
 mod bank {
     use super::*;
     use romtranslate_core::kuten;
