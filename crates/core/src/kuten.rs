@@ -213,6 +213,9 @@ struct Dialect {
     /// Alfabetos ensinados pelo projeto, que valem depois de um comando ate o
     /// fim da mensagem (`ExtractHints::alphabets`).
     switches: HashMap<u16, HashMap<u16, char>>,
+    /// Comandos cujo ultimo parametro e uma letra (`find_lettered`): a letra
+    /// e lida como texto, e a traducao pode troca-la.
+    lettered: HashSet<u16>,
     /// Onde cada um vale: (unidade do comando, unidade do fim da mensagem),
     /// em ordem. So dentro de mensagem de banco (`honored`): fora dela o
     /// comando e um numero qualquer, e os numeros pequenos depois dele
@@ -467,6 +470,42 @@ fn find_params(codes: &[u16], dialect: &Dialect, spans: &[Span]) -> HashMap<u16,
         .collect()
 }
 
+/// Os comandos de `params` (2 parametros ou mais) cujo ultimo parametro e
+/// uma letra — kana, kanji, ou letra ou numero de largura inteira — em pelo
+/// menos 95% dos usos dentro de `spans`. Medido em 16/10/2026: `FF05` muda a
+/// cor e desenha a letra do parametro ("Ａボタン" e `[FF05:0003:00DC]`
+/// `[FF05:0000:01B3]タン`) e `FF26` estica um nome e fecha com a letra dele
+/// ("リュカーーーッ"). Com a letra dentro do comando, a traducao copiava o "ボ"
+/// pro jogo em portugues.
+fn find_lettered(codes: &[u16], spans: &[Span], params: &HashMap<u16, usize>) -> HashSet<u16> {
+    let letter = |code: u16| {
+        decode(code).is_some_and(|c| {
+            is_kana(c) || is_kanji(c) || (c.is_alphanumeric() && !c.is_ascii() && c != '〇')
+        })
+    };
+    let mut seen: HashMap<u16, (u32, u32)> = HashMap::new();
+    for span in spans {
+        for i in span.begin.saturating_sub(1)..span.end.min(codes.len()) {
+            let Some(&n) = params
+                .get(&codes[i])
+                .filter(|&&n| (2..=MAX_PARAMS).contains(&n))
+            else {
+                continue;
+            };
+            let Some(&last) = codes.get(i + n) else {
+                continue;
+            };
+            let (uses, letters) = seen.entry(codes[i]).or_default();
+            *uses += 1;
+            *letters += u32::from(letter(last));
+        }
+    }
+    seen.into_iter()
+        .filter(|&(_, (uses, letters))| uses >= 3 && letters * 100 >= uses * 95)
+        .map(|(code, _)| code)
+        .collect()
+}
+
 /// As marcas de fala do jogo: as figuras (`SHAPES`: ☆★○●◎◇◆□■△▲▽▼※ e as
 /// setas) com que pelo menos `MIN_USES` mensagens de `spans` abrem logo
 /// depois do fim de outra. No jogo medido sao duas, "◆" (6.673 falas) e "◇".
@@ -549,6 +588,8 @@ impl Dialect {
             let params = match self.params.get(&code) {
                 // Numero ate onde se mediu: o que vem depois nao e desta tabela.
                 Some(&n) if n > MAX_PARAMS => return (Piece::Other, 1),
+                // A letra do fim fica fora do comando: e texto.
+                Some(&n) if self.lettered.contains(&code) => (n - 1).min(rest.len()),
                 Some(&n) => n.min(rest.len()),
                 None if self.params.is_empty() => 0,
                 // Comando raro demais pra medir: fica com ele o que vem depois
@@ -869,6 +910,7 @@ pub fn extract(
     let first = scan(&codes, &dialect, starts);
     dialect.bullets = find_bullets(&codes, &first);
     dialect.params = find_params(&codes, &dialect, &first);
+    dialect.lettered = find_lettered(&codes, &first, &dialect.params);
     let mut found = scan(&codes, &dialect, starts);
     found.extend(missed_records(&codes, &dialect, starts, &found));
     found.sort_by_key(|span| span.begin);
@@ -902,10 +944,14 @@ pub fn extract(
                 continue;
             }
             let mut at = span.begin;
+            let mut lettered = BTreeSet::new();
             while at < span.end {
                 let (piece, len) = dialect.piece(&codes, at);
                 if matches!(piece, Piece::Control) && len > 1 {
                     commands.insert(codes[at..at + len].to_vec());
+                }
+                if matches!(piece, Piece::Control) && dialect.lettered.contains(&codes[at]) {
+                    lettered.insert(token_of(&codes[at..at + len]));
                 }
                 at += len;
             }
@@ -914,6 +960,24 @@ pub fn extract(
             let units = slot.unwrap_or(span.end - span.begin);
             let (offset, len) = (span.begin * 2, units * 2);
             spans.push((offset, len));
+            let mut metadata = match slot {
+                Some(_) => serde_json::json!({
+                    "scanner": TABLE_ID,
+                    "chars": span.chars,
+                    "terminated": false,
+                    "fill": "FFFF",
+                }),
+                None => serde_json::json!({
+                    "scanner": TABLE_ID,
+                    "chars": span.chars,
+                    "terminated": codes.get(span.end) == Some(&0),
+                }),
+            };
+            // O comando que desenha a letra seguinte: a traducao tem que por uma
+            // letra logo depois dele (`validate`).
+            if !lettered.is_empty() {
+                metadata["lettered"] = serde_json::json!(lettered);
+            }
             entries.push(TextEntry {
                 id: format!("scan-{offset:08x}"),
                 resource_path: None,
@@ -928,19 +992,7 @@ pub fn extract(
                 max_bytes: Some(len),
                 encoding: TextEncoding::Table(TABLE_ID.to_string()),
                 status: TranslationStatus::Untranslated,
-                metadata: match slot {
-                    Some(_) => serde_json::json!({
-                        "scanner": TABLE_ID,
-                        "chars": span.chars,
-                        "terminated": false,
-                        "fill": "FFFF",
-                    }),
-                    None => serde_json::json!({
-                        "scanner": TABLE_ID,
-                        "chars": span.chars,
-                        "terminated": codes.get(span.end) == Some(&0),
-                    }),
-                },
+                metadata,
             });
         }
         group = i + 1;
@@ -1251,6 +1303,10 @@ mod tests {
         // leitura para no comando e nada do que vem depois dele vira frase.
         let text = read_with(0xFF0B, &[0x3E, 5, 9, 7, 2, 8]).unwrap();
         assert!(!text.contains('['), "{text}");
+        // Ultimo parametro sempre letra: ela e texto, e o comando leva so a
+        // cor ("Ａボタン" = cor 3 + Ａ, cor 0 + ボ, タン).
+        let text = read_with(0xFF05, &[3, encode('く').unwrap()]).unwrap();
+        assert!(text.contains("ひとは[FF05:0003]くきょうも"), "{text}");
     }
 
     #[test]

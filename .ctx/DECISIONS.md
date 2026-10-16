@@ -2070,3 +2070,22 @@ frases novas.
   próprio agente da sessão) responde e o resultado volta pelo `apply` em TSV,
   com a validação de sempre. Usado no Mother 3 em 16/10 pra não gastar a cota
   do ChatGPT do mantenedor numa rodada de 740 frases.
+
+## 2026-10-16 — Comando que desenha uma letra: a letra é texto
+
+**Contexto:** no Mother 3, `FF05` muda a cor e desenha a letra que vem como
+parâmetro: "Ａボタン" é `[FF05:0003:00DC][FF05:0000:01B3]タン` (cor 3 + Ａ, cor
+0 + ボ, タン). Com a letra dentro do código, a tradução copiava o código e o
+jogo mostrava "aperte o botão Ａボ" — japonês em 16 tutoriais de botão.
+
+**Decisão:** `kuten::find_lettered`: comando com 2 parâmetros ou mais cujo
+último é letra (kana, kanji, letra ou número de largura inteira) em ≥ 95%
+dos usos tem essa letra lida como texto (`[FF05:0003]Ａ`), e o `.tbl` gerado
+grava o comando sem ela. A frase guarda esses códigos em
+`metadata.lettered`, e a validação exige uma letra (ou espaço) logo depois de
+cada um — sem ela o jogo leria o próximo código como a letra.
+
+**Resto conhecido:** `FF26` (nome esticado: "リュカーーーッ！") ficou com 3
+parâmetros na medição, mas tudo indica que leva 2 e o terceiro é a letra
+seguinte (！, 。, quebra de linha, ッ). Só uma fala termina em "ッ" — a
+primeira do jogo —, e o efeito em si desenha o traço japonês "ー".

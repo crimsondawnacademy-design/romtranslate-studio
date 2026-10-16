@@ -286,6 +286,31 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
             );
         }
     }
+    // Comando que desenha a letra que vem logo depois dele (`kuten`): sem
+    // letra ali, o jogo le o proximo codigo como a letra.
+    let lettered = entry
+        .metadata
+        .get("lettered")
+        .and_then(|list| list.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|token| token.as_str());
+    for token in lettered {
+        let bare = translation.split(token).skip(1);
+        if bare
+            .into_iter()
+            .any(|after| after.is_empty() || after.starts_with('['))
+        {
+            push(
+                Severity::Error,
+                IssueKind::PlaceholderMismatch,
+                format!(
+                    "o codigo {token} desenha a letra que vem logo depois dele: ponha uma \
+                     letra (ou um espaco) depois dele"
+                ),
+            );
+        }
+    }
     // Em texto de tabela, so e codigo inventado o que a tabela grava como
     // codigo: o "<" que a IA escreve no lugar do "＜" do original e letra.
     let is_code = |token: &str| {
@@ -662,6 +687,21 @@ mod tests {
             encoded_len("Olá", &TextEncoding::ShiftJis, None),
             EncodedLen::Unencodable(why) if why.contains("'á'")
         ));
+    }
+
+    #[test]
+    fn a_command_that_draws_the_next_letter_needs_one() {
+        let jis16 = TextEncoding::Table(crate::kuten::TABLE_ID.to_string());
+        let check = |answer: &str| {
+            let mut e = entry("[FF05:0003]Ａ[FF05:0000]ボタン", answer, jis16.clone());
+            e.metadata = serde_json::json!({ "lettered": ["[FF05:0003]", "[FF05:0000]"] });
+            validate_entry(&e, None)
+                .iter()
+                .any(|i| i.message.contains("desenha a letra"))
+        };
+        assert!(!check("botao [FF05:0003]A[FF05:0000] ok"));
+        assert!(check("botao [FF05:0003]A[FF05:0000]"));
+        assert!(check("botao [FF05:0003][FF05:0000] A"));
     }
 
     #[test]
