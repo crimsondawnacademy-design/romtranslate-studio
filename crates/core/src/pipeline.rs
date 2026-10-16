@@ -102,12 +102,13 @@ pub struct TranslationEstimate {
     pub output_chars: usize,
 }
 
-/// Monta os mesmos lotes de `run_translation` e mede. Devolve tambem o
-/// primeiro pedido, pra quem quiser calibrar a conta de tokens por ele.
-pub fn estimate_translation(
+/// Os lotes que `run_translation` mandaria agora ao provider, sem a memoria
+/// de traducao: pra medir (`estimate_translation`) ou pra traduzir fora do
+/// app e voltar pelo `apply` da CLI.
+pub fn translation_requests(
     db: &ProjectDb,
     opts: &TranslateOptions,
-) -> Result<(TranslationEstimate, Option<TranslationRequest>)> {
+) -> Result<Vec<TranslationRequest>> {
     let mut pending: Vec<TextEntry> = db
         .load_entries()?
         .into_iter()
@@ -116,30 +117,41 @@ pub fn estimate_translation(
     let mut tables = ProjectTables::new(db.project_dir());
     let glossary = db.glossary_list()?;
     pending.sort_by(|a, b| charset_group(a).cmp(&charset_group(b)));
-    let mut estimate = TranslationEstimate {
-        entries: pending.len(),
-        batches: 0,
-        input_chars: 0,
-        output_chars: 0,
-    };
-    let mut sample = None;
     let batches = pending
         .chunk_by(|a, b| charset_group(a) == charset_group(b))
         .flat_map(|same_charset| batches_of(same_charset, opts.batch_size));
+    let mut requests = Vec::new();
     for batch in batches {
         let charset = Charset::of(&batch[0], &mut tables)?;
-        let request = batch_request(batch, charset, &glossary, opts);
-        estimate.batches += 1;
-        estimate.input_chars += crate::provider::build_system_prompt(&request).len()
-            + crate::provider::build_user_prompt(&request).len();
-        estimate.output_chars += 20
-            + batch
-                .iter()
-                .map(|e| e.id.len() + e.source_text.len() * 12 / 10 + 40)
-                .sum::<usize>();
-        sample.get_or_insert(request);
+        requests.push(batch_request(batch, charset, &glossary, opts));
     }
-    Ok((estimate, sample))
+    Ok(requests)
+}
+
+/// Monta os mesmos lotes de `run_translation` e mede. Devolve tambem o
+/// primeiro pedido, pra quem quiser calibrar a conta de tokens por ele.
+pub fn estimate_translation(
+    db: &ProjectDb,
+    opts: &TranslateOptions,
+) -> Result<(TranslationEstimate, Option<TranslationRequest>)> {
+    let requests = translation_requests(db, opts)?;
+    let mut estimate = TranslationEstimate {
+        entries: requests.iter().map(|r| r.items.len()).sum(),
+        batches: requests.len(),
+        input_chars: 0,
+        output_chars: 0,
+    };
+    for request in &requests {
+        estimate.input_chars += crate::provider::build_system_prompt(request).len()
+            + crate::provider::build_user_prompt(request).len();
+        estimate.output_chars += 20
+            + request
+                .items
+                .iter()
+                .map(|item| item.id.len() + item.text.len() * 12 / 10 + 40)
+                .sum::<usize>();
+    }
+    Ok((estimate, requests.into_iter().next()))
 }
 
 /// Ate quantos caracteres de texto original vao numa chamada. Com frases

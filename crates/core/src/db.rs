@@ -103,9 +103,15 @@ impl ProjectDb {
                    metadata=excluded.metadata,
                    translated_text=COALESCE(excluded.translated_text, entries.translated_text),
                    status=CASE
+                     WHEN entries.status = ?12 AND entries.source_text = excluded.source_text
+                     THEN entries.status
                      WHEN excluded.translated_text IS NULL AND entries.translated_text IS NOT NULL
                      THEN entries.status ELSE excluded.status END",
             )?;
+            // Nao-texto marcado (pela pessoa, pela IA ou pela extracao de antes)
+            // continua nao-texto enquanto o texto for o mesmo: sem isto, cada
+            // extracao devolvia o lixo pra fila (16/10/2026).
+            let internal = json_str(&TranslationStatus::Internal)?;
             for e in entries {
                 stmt.execute(params![
                     e.id,
@@ -119,6 +125,7 @@ impl ProjectDb {
                     json_str(&e.encoding)?,
                     json_str(&e.status)?,
                     e.metadata.to_string(),
+                    internal,
                 ])?;
             }
         }
@@ -554,6 +561,42 @@ fn json_val<T: serde::de::DeserializeOwned + Default>(s: &str) -> T {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn not_text_survives_a_new_extraction_of_the_same_text() {
+        let dir = std::env::temp_dir().join(format!(
+            "rts-db-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut db = ProjectDb::open(&dir).unwrap();
+        let entry = |text: &str| TextEntry {
+            id: "scan-1".into(),
+            resource_path: None,
+            offset: Some(1),
+            original_bytes: vec![1],
+            source_text: text.into(),
+            translated_text: None,
+            context: None,
+            max_bytes: None,
+            encoding: crate::types::TextEncoding::Ascii,
+            status: TranslationStatus::Untranslated,
+            metadata: serde_json::Value::Null,
+        };
+        db.upsert_entries(&[entry("lixo")]).unwrap();
+        db.mark_stray(&["scan-1".to_string()]).unwrap();
+        db.upsert_entries(&[entry("lixo")]).unwrap();
+        let status = |db: &ProjectDb| db.get_entry("scan-1").unwrap().unwrap().status;
+        assert_eq!(status(&db), TranslationStatus::Internal);
+        // O texto mudou (a leitura agora e outra): a decisao e refeita.
+        db.upsert_entries(&[entry("texto")]).unwrap();
+        assert_eq!(status(&db), TranslationStatus::Untranslated);
+        drop(db);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 
     #[test]
     fn normalize_collapses_whitespace_keeps_case() {

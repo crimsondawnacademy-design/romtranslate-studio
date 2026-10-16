@@ -25,9 +25,11 @@ use romtranslate_core::detect::inspect;
 use romtranslate_core::export::{export_csv, export_json};
 use romtranslate_core::patch::{export_patch, PatchFormat};
 use romtranslate_core::pipeline::{
-    estimate_translation, run_translation, TranslateOptions, DEFAULT_CHARS_PER_TOKEN,
+    estimate_translation, run_translation, translation_requests, TranslateOptions,
+    DEFAULT_CHARS_PER_TOKEN,
 };
 use romtranslate_core::project::{create_project, load_project, CreateProjectArgs};
+use romtranslate_core::provider::build_system_prompt;
 use romtranslate_core::reinsert::{reinsert_project_with, ErrorPolicy};
 use romtranslate_core::scan::{scan_project, ScanConfig, ScanEncoding};
 use romtranslate_core::settings;
@@ -115,6 +117,10 @@ enum Command {
         /// Conta tambem as frases com erro de validacao (como no translate)
         #[arg(long)]
         redo_errors: bool,
+        /// Grava em ARQUIVO os lotes que a rodada mandaria (prompt de sistema e
+        /// frases, em JSON): pra traduzir fora do app e voltar pelo apply
+        #[arg(long = "pedidos", value_name = "ARQUIVO")]
+        requests: Option<PathBuf>,
     },
     /// Traduz as frases pendentes com o provider das configuracoes do app
     Translate {
@@ -528,6 +534,7 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             project,
             batch,
             redo_errors,
+            requests,
         } => {
             let game = load(&project)?;
             let batch = match batch {
@@ -536,6 +543,14 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             };
             let mut opts = options(game, batch);
             opts.redo_errors = redo_errors;
+            if let Some(path) = &requests {
+                let lots: Vec<Value> = translation_requests(&ProjectDb::open(&project)?, &opts)?
+                    .iter()
+                    .map(|r| json!({ "system": build_system_prompt(r), "items": r.items }))
+                    .collect();
+                std::fs::write(path, serde_json::to_string_pretty(&lots)?)
+                    .map_err(|e| CoreError::io(path, e))?;
+            }
             let (estimate, _) = estimate_translation(&ProjectDb::open(&project)?, &opts)?;
             // Media de caracteres por token: a tela calibra pelo Claude quando ha
             // chave; aqui a conta e sempre a media.

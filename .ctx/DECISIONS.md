@@ -2054,3 +2054,19 @@ normal (a do Sr. Saturno não tem letra latina): o português aparece legível,
 sem a letra especial. Os desenhos foram lidos no emulador: numa cópia do
 jogo, a primeira fala trocada por `FF0B` + os códigos 1 a 66. Mother 3: 190
 frases novas.
+
+## 2026-10-16 — Não-texto marcado fica marcado; pedidos da rodada exportáveis
+
+- **Marca que não some:** extrair de novo devolvia à fila tudo que a pessoa
+  (ou a IA, ou uma extração anterior) tinha marcado como não-texto, porque a
+  situação nova da extração sobrescrevia a antiga quando a frase não tinha
+  tradução — e frase marcada não tem. Agora a marca fica enquanto o texto da
+  frase for o mesmo (`ProjectDb::upsert_entries`); se a leitura muda o texto,
+  a decisão é refeita.
+- **Tradução por fora:** `estimate --pedidos ARQUIVO` grava os lotes exatos da
+  rodada (prompt de sistema com charset, glossário e limites, e as frases como
+  o modelo as receberia) — `pipeline::translation_requests`, a mesma montagem
+  do `run_translation`. Qualquer tradutor (outro modelo, uma pessoa, o
+  próprio agente da sessão) responde e o resultado volta pelo `apply` em TSV,
+  com a validação de sempre. Usado no Mother 3 em 16/10 pra não gastar a cota
+  do ChatGPT do mantenedor numa rodada de 740 frases.
