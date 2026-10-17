@@ -12,14 +12,19 @@
 //! `parse_reading`); a traducao segue o caminho de qualquer frase
 //! (`TextEncoding::Image`); e `apply` apaga o japones e escreve a traducao
 //! com a fonte do app (`font`), nas cores do original.
-// ponytail: so quadros 4bpp de 8x8 na ordem da tela (32 por linha), crus ou
-// em LZ77 tipo 0x10. Imagem montada por mapa de quadros fora de ordem,
-// 8bpp ou com outra compressao fica de fora; a imagem comprimida que,
-// regravada, passa do tamanho original nao muda de lugar (fica no original).
+//!
+//! Imagem que so fica legivel montada por um mapa de quadros (a tela junta
+//! pedacos guardados fora de ordem): `tilemap`.
+// ponytail: so quadros 4bpp de 8x8, crus ou em LZ77 tipo 0x10, na ordem da
+// tela (32 por linha), em sprites ou por mapa cru (`tilemap`). 8bpp ou outra
+// compressao fica de fora; a imagem comprimida que, regravada, passa do
+// tamanho original nao muda de lugar (fica no original).
 
 pub mod font;
+pub mod tilemap;
 
 use font::Font;
+use tilemap::TileMap;
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs;
@@ -66,6 +71,10 @@ pub struct Picture {
     /// na ordem da tela, 32 por linha.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sprite: Option<[usize; 2]>,
+    /// O mapa que monta a imagem na tela: os quadros sao os da imagem crua
+    /// ou comprimida de mesmo `offset`, na ordem do mapa.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub map: Option<TileMap>,
 }
 
 /// Formatos de sprite que `arrangement` experimenta (largura, altura, em
@@ -109,9 +118,22 @@ fn unarrange(sheet_tiles: &[u8], sprite: Option<[usize; 2]>, count: usize) -> Ve
         .collect()
 }
 
-/// A folha da imagem, com os quadros arrumados como ela os guarda.
-pub fn sheet_of(tiles: &[u8], picture: &Picture) -> Sheet {
-    Sheet::new(&arrange(tiles, picture.sprite))
+/// Os quadros da imagem e a folha dela como aparece: montada pelo mapa de
+/// quadros, se ela tem um; senao com os quadros arrumados como ela os guarda.
+pub fn open(data: &[u8], picture: &Picture) -> Option<(Vec<u8>, Sheet)> {
+    let tiles = tiles_of(data, picture)?;
+    let sheet = match &picture.map {
+        Some(map) => Sheet {
+            mapped: true,
+            ..Sheet::new(&tilemap::cells(
+                &tiles,
+                &tilemap::entries(data, map)?,
+                map.base,
+            ))
+        },
+        None => Sheet::new(&arrange(&tiles, picture.sprite)),
+    };
+    Some((tiles, sheet))
 }
 
 /// Traco de letra que continua de um quadro pro de baixo, com os quadros
@@ -256,7 +278,8 @@ fn worth(lettered_tiles: usize, drawn: usize) -> bool {
 
 /// As imagens de `data` com quadros que parecem letra: blocos LZ77 de quadros
 /// e trechos de quadros crus (janelas de `RAW_WINDOW` juntadas com as
-/// vizinhas), fora dos blocos comprimidos. Em ordem de posicao.
+/// vizinhas), fora dos blocos comprimidos, e as montadas por mapa de quadros
+/// (`tilemap::find`). Em ordem de posicao dos quadros.
 pub fn find(data: &[u8]) -> Vec<Picture> {
     let mut found = Vec::new();
     let mut packed_spans = Vec::new();
@@ -276,6 +299,7 @@ pub fn find(data: &[u8]) -> Vec<Picture> {
                 bytes: block.data.len(),
                 lettered: lettered_tiles,
                 sprite: arrangement(&block.data),
+                map: None,
             });
         }
     });
@@ -324,9 +348,14 @@ pub fn find(data: &[u8]) -> Vec<Picture> {
             bytes,
             lettered: lettered_in[first..w].iter().sum(),
             sprite: arrangement(&data[at + phase..at + phase + bytes]),
+            map: None,
         });
     }
     found.sort_by_key(|picture| picture.offset);
+    let maps = tilemap::find(data, &found);
+    found.extend(maps);
+    // A imagem e, logo depois, as montadas pelos mapas dela.
+    found.sort_by_key(|picture| (picture.offset, picture.map.map(|m| m.offset)));
     found
 }
 
@@ -349,6 +378,8 @@ pub struct Sheet {
     pub height: usize,
     tiles: usize,
     px: Vec<u8>,
+    /// Montada pelo mapa da imagem: o quadro ao lado de cada um e o da tela.
+    mapped: bool,
 }
 
 impl Sheet {
@@ -369,6 +400,7 @@ impl Sheet {
             height,
             tiles: count,
             px,
+            mapped: false,
         }
     }
 
@@ -673,22 +705,60 @@ fn blocks_of(sheet: &Sheet, mut lines: Vec<(Line, Colors)>) -> Vec<Block> {
     let mut out = Vec::new();
     for group in groups {
         let colors = group[0].1;
-        let bx0 = group.iter().map(|(l, _)| l.x0).min().unwrap_or(0);
-        let bx1 = group.iter().map(|(l, _)| l.x1).max().unwrap_or(0);
-        let wx0 = group.iter().map(|(l, _)| l.wide.0).min().unwrap_or(bx0);
-        let wx1 = group.iter().map(|(l, _)| l.wide.1).max().unwrap_or(bx1);
-        let (by0, by1) = (group[0].0.y0, group[group.len() - 1].0.y1);
+        let painted = |x: usize, y: usize| colors.painted(sheet.get(x, y));
+        let mut bx0 = group.iter().map(|(l, _)| l.x0).min().unwrap_or(0);
+        let mut bx1 = group.iter().map(|(l, _)| l.x1).max().unwrap_or(0);
+        let (mut by0, mut by1) = (group[0].0.y0, group[group.len() - 1].0.y1);
+        // Na folha montada pelo mapa, a letra que passa do retangulo dos
+        // quadros com cara de letra continua o trecho (ate um quadro pra cada
+        // lado): quadro com so a ponta de uma letra nao parece letra, e o
+        // trecho saia cortado (medido: o fim de "バナナ" e o topo da linha).
+        if sheet.mapped {
+            for _ in 0..TILE {
+                let before = (bx0, bx1, by0, by1);
+                if bx0 > 0 && (by0..by1).any(|y| painted(bx0 - 1, y)) {
+                    bx0 -= 1;
+                }
+                if (by0..by1).any(|y| painted(bx1, y)) {
+                    bx1 += 1;
+                }
+                if by0 > 0 && (bx0..bx1).any(|x| painted(x, by0 - 1)) {
+                    by0 -= 1;
+                }
+                if (bx0..bx1).any(|x| painted(x, by1)) {
+                    by1 += 1;
+                }
+                if (bx0, bx1, by0, by1) == before {
+                    break;
+                }
+            }
+        }
+        let wx0 = group
+            .iter()
+            .map(|(l, _)| l.wide.0)
+            .min()
+            .unwrap_or(bx0)
+            .min(bx0);
+        let wx1 = group
+            .iter()
+            .map(|(l, _)| l.wide.1)
+            .max()
+            .unwrap_or(bx1)
+            .max(bx1);
         let (w, h) = (bx1 - bx0, by1 - by0);
         if w < 4 || h < 5 {
             continue;
         }
-        let painted = |x: usize, y: usize| colors.painted(sheet.get(x, y));
         // Fundo livre a direita, na altura do trecho, ate o fim do quadro da
         // ultima letra (no maximo `SLACK` pixels): ate onde a traducao pode
         // ir. O jogo pode montar a tela copiando os quadros de cada item
         // (medido: na lista de cores da tela de ajustes, "Menta" saia cortado
-        // no fim do ultimo quadro de "ミント").
-        let limit = (bx1.div_ceil(TILE) * TILE).min(bx1 + SLACK);
+        // no fim do ultimo quadro de "ミント"). Na folha montada pelo mapa o
+        // quadro ao lado e o da tela: vale o `SLACK` inteiro.
+        let limit = match sheet.mapped {
+            true => bx1 + SLACK,
+            false => (bx1.div_ceil(TILE) * TILE).min(bx1 + SLACK),
+        };
         let mut right = bx1;
         while right < sheet.width
             && right < limit
@@ -697,15 +767,25 @@ fn blocks_of(sheet: &Sheet, mut lines: Vec<(Line, Colors)>) -> Vec<Block> {
             right += 1;
         }
         // O que se apaga: o trecho e, acima dele, as linhas sem a tinta da
-        // letra (furigana, de outra cor), ate 8.
+        // letra (furigana, de outra cor), ate 8 — parando na linha de moldura
+        // (a fileira inteira sem o fundo, na largura do trecho): no painel de
+        // cores do jogo medido, a borda de cima mora nos quadros da primeira
+        // palavra e sumia com o japones.
+        let blank = |y: usize| (wx0..wx1.max(bx1)).all(|x| sheet.get(x, y) == Some(colors.paper));
+        let ruled = |y: usize| {
+            (wx0..wx1.max(bx1)).all(|x| sheet.get(x, y).is_some_and(|p| p != colors.paper))
+        };
         let mut top = by0;
-        while top > 0 && by0 - top < 8 && !(bx0..bx1).any(|x| painted(x, top - 1)) {
+        while top > 0
+            && by0 - top < 8
+            && !(bx0..bx1).any(|x| painted(x, top - 1))
+            && !ruled(top - 1)
+        {
             top -= 1;
         }
         // Furigana da mesma cor da letra: uma faixa baixa (ate 6 linhas) logo
         // acima do trecho, com linha vazia em cima dela. No aviso de saude do
         // jogo medido sobravam pontinhos dele em cima do titulo traduzido.
-        let blank = |y: usize| (wx0..wx1.max(bx1)).all(|x| sheet.get(x, y) == Some(colors.paper));
         let gap = (1..=2).find(|&k| top >= k && !blank(top - k));
         if let Some(gap) = gap {
             let band_end = top - gap;
@@ -713,7 +793,8 @@ fn blocks_of(sheet: &Sheet, mut lines: Vec<(Line, Colors)>) -> Vec<Block> {
             while band_top > 0 && band_end - band_top < 6 && !blank(band_top - 1) {
                 band_top -= 1;
             }
-            if band_end - band_top < 6 && (band_top == 0 || blank(band_top - 1)) {
+            let lined = (band_top..band_end).any(ruled);
+            if !lined && band_end - band_top < 6 && (band_top == 0 || blank(band_top - 1)) {
                 top = band_top;
             }
         }
@@ -1064,6 +1145,22 @@ pub fn place_of(entry: &TextEntry) -> Option<(Picture, Block)> {
     ))
 }
 
+/// Os quadros (na ordem guardada) sob a letra de um trecho de uma imagem sem
+/// mapa.
+fn ink_tiles(picture: &Picture, block: &Block) -> Vec<usize> {
+    let count = picture.bytes / TILE_BYTES;
+    let at: HashMap<usize, usize> = (0..count)
+        .map(|t| (sheet_index(t, picture.sprite), t))
+        .collect();
+    (block.y / TILE..(block.y + block.h).div_ceil(TILE))
+        .flat_map(|ty| {
+            (block.x / TILE..(block.x + block.w).div_ceil(TILE))
+                .map(move |tx| ty * SHEET_TILES + tx)
+        })
+        .filter_map(|slot| at.get(&slot).copied())
+        .collect()
+}
+
 /// Linhas que cabem na altura do trecho, escritas com `with`.
 fn lines_in(block: &Block, with: Font) -> usize {
     ((block.h + 2) / with.line()).max(1)
@@ -1242,9 +1339,13 @@ type Drawing<'a> = (&'a TextEntry, Block, &'a str);
 
 /// Escreve em `out` as frases desenhadas de `entries` que tem traducao: cada
 /// imagem e aberta, cada trecho e redesenhado, e a imagem volta pro lugar
-/// dela — a comprimida, recomprimida, so se couber no espaco que ocupava.
+/// dela — a comprimida, recomprimida, so se couber no espaco que ocupava; a
+/// montada por mapa, nos quadros que `tilemap::store` escolhe, com as
+/// entradas do mapa que mudarem.
 pub fn apply(out: &mut [u8], entries: &[TextEntry]) -> Applied {
-    let mut by_picture: BTreeMap<usize, (Picture, Vec<Drawing>)> = BTreeMap::new();
+    // Por imagem; a crua antes das montadas por mapa sobre os mesmos quadros.
+    type Key = (usize, Option<usize>);
+    let mut by_picture: BTreeMap<Key, (Picture, Vec<Drawing>)> = BTreeMap::new();
     let mut applied = Applied::default();
     for entry in entries.iter().filter(|e| e.encoding == TextEncoding::Image) {
         let Some(text) = entry.translated_text.as_deref() else {
@@ -1257,44 +1358,88 @@ pub fn apply(out: &mut [u8], entries: &[TextEntry]) -> Applied {
             continue;
         };
         by_picture
-            .entry(picture.offset)
+            .entry((picture.offset, picture.map.map(|m| m.offset)))
             .or_insert_with(|| (picture, Vec::new()))
             .1
             .push((entry, block, text));
     }
+    // Os mapas do arquivo: quadro que outro mapa mostra nao muda.
+    let maps: Vec<Picture> = match by_picture.keys().any(|(_, map)| map.is_some()) {
+        true => find(out).into_iter().filter(|p| p.map.is_some()).collect(),
+        false => Vec::new(),
+    };
     for (picture, items) in by_picture.into_values() {
-        let fail = |applied: &mut Applied, why: &str| {
+        let Some((tiles, mut sheet)) = open(out, &picture) else {
             for (entry, _, _) in &items {
-                applied.left_out.push((entry.id.clone(), why.to_string()));
+                applied.left_out.push((
+                    entry.id.clone(),
+                    "a imagem nao esta mais onde estava no arquivo".to_string(),
+                ));
             }
-        };
-        let Some(tiles) = tiles_of(out, &picture) else {
-            fail(
-                &mut applied,
-                "a imagem nao esta mais onde estava no arquivo",
-            );
             continue;
         };
-        let mut sheet = sheet_of(&tiles, &picture);
+        let before = sheet.tiles();
         // A medida de agora do trecho na mesma posicao vale mais que a da
         // leitura: o app melhora a medida de uma versao pra outra e a frase
         // lida antes nao precisa voltar pra IA.
         let fresh = blocks(&sheet);
-        let mut drawn = 0;
+        let mut drawn = Vec::new();
         for (entry, stored, text) in &items {
             let block = fresh
                 .iter()
                 .find(|b| b.x.abs_diff(stored.x) <= 2 && b.y.abs_diff(stored.y) <= 2)
                 .unwrap_or(stored);
             match draw(&mut sheet, block, text) {
-                Ok(()) => drawn += 1,
+                Ok(()) => drawn.push(entry.id.clone()),
                 Err(why) => applied.left_out.push((entry.id.clone(), why)),
             }
         }
-        if drawn == 0 {
+        if drawn.is_empty() {
             continue;
         }
-        let new_tiles = unarrange(&sheet.tiles(), picture.sprite, tiles.len() / TILE_BYTES);
+        let fail = |applied: &mut Applied, why: &str| {
+            for id in &drawn {
+                applied.left_out.push((id.clone(), why.to_string()));
+            }
+        };
+        let (new_tiles, new_map) = match &picture.map {
+            None => (
+                unarrange(&sheet.tiles(), picture.sprite, tiles.len() / TILE_BYTES),
+                None,
+            ),
+            Some(map) => {
+                // Os outros mapas dos mesmos quadros (o achado de novo na
+                // mesma faixa e este).
+                let end = |m: &TileMap| m.offset + m.rows * 64;
+                let shared: HashSet<usize> = maps
+                    .iter()
+                    .filter(|other| other.offset == picture.offset)
+                    .filter_map(|other| other.map)
+                    .filter(|other| end(other) <= map.offset || end(map) <= other.offset)
+                    .flat_map(|other| tilemap::shown(out, &other))
+                    .collect();
+                let mut tiles = tiles.clone();
+                let stored = tilemap::entries(out, map).ok_or_else(|| {
+                    "o mapa da imagem nao esta mais onde estava no arquivo".to_string()
+                });
+                match stored.and_then(|stored| {
+                    tilemap::store(
+                        &mut tiles,
+                        &stored,
+                        map.base,
+                        &before,
+                        &sheet.tiles(),
+                        &shared,
+                    )
+                }) {
+                    Ok(entries) => (tiles, Some((map.offset, entries))),
+                    Err(why) => {
+                        fail(&mut applied, &why);
+                        continue;
+                    }
+                }
+            }
+        };
         match picture.packed {
             None => {
                 out[picture.offset..picture.offset + new_tiles.len()].copy_from_slice(&new_tiles)
@@ -1316,8 +1461,13 @@ pub fn apply(out: &mut [u8], entries: &[TextEntry]) -> Applied {
                 }
             },
         }
+        if let Some((at, entries)) = new_map {
+            for (k, entry) in entries.iter().enumerate() {
+                out[at + 2 * k..at + 2 * k + 2].copy_from_slice(&entry.to_le_bytes());
+            }
+        }
         applied.pictures += 1;
-        applied.drawn += drawn;
+        applied.drawn += drawn.len();
     }
     applied
 }
@@ -1350,9 +1500,8 @@ pub fn list_pictures(project_dir: &Path) -> Result<Vec<Picture>> {
         if path.exists() {
             continue;
         }
-        if let Some(tiles) = tiles_of(&data, picture) {
-            let png = sheet_of(&tiles, picture).png()?;
-            fs::write(&path, png).map_err(|e| CoreError::io(&path, e))?;
+        if let Some((_, sheet)) = open(&data, picture) {
+            fs::write(&path, sheet.png()?).map_err(|e| CoreError::io(&path, e))?;
         }
     }
     Ok(pictures)
@@ -1374,15 +1523,15 @@ pub fn refresh(project_dir: &Path) -> Result<usize> {
     }
     let game = crate::project::load_project(project_dir)?;
     let data = crate::fileio::read_view(&game.source_path)?;
-    let mut fresh: HashMap<usize, Vec<Block>> = HashMap::new();
+    let mut fresh: HashMap<String, Vec<Block>> = HashMap::new();
     let mut changed = Vec::new();
     for entry in entries {
         let Some((picture, stored)) = place_of(&entry) else {
             continue;
         };
-        let found = fresh.entry(picture.offset).or_insert_with(|| {
-            tiles_of(&data, &picture)
-                .map(|tiles| blocks(&sheet_of(&tiles, &picture)))
+        let found = fresh.entry(picture.id.clone()).or_insert_with(|| {
+            open(&data, &picture)
+                .map(|(_, sheet)| blocks(&sheet))
                 .unwrap_or_default()
         });
         let Some(block) = found
@@ -1452,13 +1601,12 @@ pub async fn read_pictures(
             ));
             continue;
         };
-        let Some(tiles) = tiles_of(&data, picture) else {
+        let Some((_, sheet)) = open(&data, picture) else {
             outcome
                 .failed
                 .push((id.clone(), "a imagem nao abriu".to_string()));
             continue;
         };
-        let sheet = sheet_of(&tiles, picture);
         let found = blocks(&sheet);
         if found.is_empty() {
             outcome
@@ -1495,10 +1643,27 @@ pub async fn read_pictures(
         // outro (o banco guarda a traducao de quem tem o mesmo id). A memoria
         // de traducao devolve o que ja foi traduzido.
         let prefix = format!("{}-", picture.id);
+        // E a imagem montada por mapa toma o lugar da leitura dos mesmos
+        // quadros na ordem guardada: a letra que o mapa mostra, redesenhada
+        // na ordem guardada, saia por cima de outro pedaco da tela.
+        let shown = picture.map.map(|map| tilemap::shown(&data, &map));
+        let superseded = |e: &TextEntry| {
+            let Some(shown) = &shown else {
+                return false;
+            };
+            place_of(e).is_some_and(|(other, block)| {
+                let ink = ink_tiles(&other, &block);
+                other.map.is_none()
+                    && other.offset == picture.offset
+                    && !ink.is_empty()
+                    && ink.iter().all(|t| shown.contains(t))
+            })
+        };
         let gone: Vec<String> = db
             .load_entries()?
             .into_iter()
-            .filter(|e| e.encoding == TextEncoding::Image && e.id.starts_with(&prefix))
+            .filter(|e| e.encoding == TextEncoding::Image)
+            .filter(|e| e.id.starts_with(&prefix) || superseded(e))
             .map(|e| e.id)
             .collect();
         db.remove_entries(&gone)?;

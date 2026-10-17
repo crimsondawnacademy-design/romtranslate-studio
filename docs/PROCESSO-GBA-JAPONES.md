@@ -74,6 +74,17 @@ pode ser da IA ou de um arquivo; a tradução segue como frase, e a reinserção
 apaga o japonês (furigana inclusive) e escreve o português. Olhe as folhas
 em `imagens/`: o `audit` cobra cada imagem até ser lida ou marcada.
 
+Imagem que a tela monta por **mapa de quadros** aparece na lista como
+`map-<posição do mapa>` ("mapa" no `pictures`): o app acha o mapa cru (32
+entradas de 16 bits por linha, o fundo de texto do GBA) e de onde ele conta
+os quadros, e a folha já sai montada, legível. Leia essa folha, não a dos
+mesmos quadros na ordem guardada: ao ler a montada, as frases da outra que
+caem nos quadros que o mapa mostra saem do projeto (a memória de tradução
+devolve o que já estava traduzido). Na reinserção, cada célula redesenhada
+ganha um quadro só dela; quadro repetido no desenho ou mostrado por outro
+mapa achado não muda — se faltar quadro, a frase fica no original com o
+motivo.
+
 ## 5. Reinserir, auditar, repetir
 
 ```bash
@@ -100,9 +111,19 @@ estado mostra os desenhos da versão em que ele foi gravado.
 
 ## 7. O que costuma sobrar
 
-- **Imagem montada por mapa de quadros fora de ordem** (painel de cores,
-  caixa eletrônico no jogo medido): o app ainda não acha o mapa; fica em
-  japonês. É o próximo passo do app.
+- **Imagem montada por mapa de quadros** (painel de cores da tela de ajustes
+  no jogo medido): resolvida pelo app desde 17/10 (seção 4). O mapa achado
+  sem texto em japonês (fundo, ilustração, créditos em inglês) é marcado com
+  `--sem-texto`, como qualquer imagem; no jogo medido foram 11 de 13.
+- **Tela montada por código ou por sprites de tamanhos misturados** (o caixa
+  eletrônico no jogo medido, `img-01afc010`): não há mapa cru pra achar; fica
+  em japonês e o `audit` cobra a imagem como "sem conferir".
+- **Mapa que a busca não acha** (sem fila de quadros seguidos, comprimido ou
+  com outro formato) usando os mesmos quadros de um mapa achado: vê o mesmo
+  desenho novo nos quadros escritos no lugar; um quadro que o redesenho
+  tomou pra outra célula aparece trocado nele. Confira no emulador as telas
+  vizinhas (no jogo medido: as telas de nomes, que dividem o bloco de quadros
+  com o painel de ajustes).
 - **Teclado da tela de nomes** (hiragana/katakana): é entrada, não texto.
 - **Campos de espaço fixo** (nomes de inimigo, item, PSI): a tradução cabe no
   espaço do maior nome da tabela; sai abreviada.

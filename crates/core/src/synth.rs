@@ -1446,6 +1446,154 @@ pub fn make_gba_rom_with_names() -> Vec<u8> {
     rom
 }
 
+/// Onde moram as partes de `make_gba_rom_with_tilemap`: o bloco de quadros, o
+/// mapa do painel (fora do multiplo de 64, como no jogo medido) e o de outra
+/// tela.
+pub const TILEMAP_TILES_AT: usize = 0x4000;
+pub const TILEMAP_MAP_AT: usize = 0xA03C;
+pub const TILEMAP_OTHER_MAP_AT: usize = 0xC024;
+/// A celula do painel (linha, coluna) onde a lista comeca, e a distancia em
+/// pixels de uma linha da lista a seguinte.
+pub const TILEMAP_LIST_CELL: (usize, usize) = (2, 3);
+pub const TILEMAP_PITCH: usize = 13;
+/// Celula do painel, fora da lista, que repete o 2o quadro da metade de baixo
+/// da linha 2.
+pub const TILEMAP_REPEAT_CELL: (usize, usize) = (18, 20);
+
+/// GBA com um painel montado por mapa de quadros, como o painel de cores do
+/// RPG japones medido: uma lista de 9 linhas de "letras" (riscos de 5x7, cor 5
+/// no fundo 1) a 13 pixels uma da outra, guardada em tiras de 2 linhas de
+/// quadros lado a lado — na ordem guardada, a linha que cai entre duas tiras
+/// sai partida. Um mapa cru (32 entradas por linha) monta a tela: moldura com
+/// os cantos e a borda de baixo espelhados, fundo, a lista, e uma celula do
+/// painel que repete um quadro da linha 2. Outro mapa (outra tela) mostra
+/// duas tiras e o comeco da linha 2. O bloco de quadros e cru, com zeros em
+/// volta.
+pub fn make_gba_rom_with_tilemap() -> Vec<u8> {
+    const COLS: usize = 32;
+    let mut rom = make_gba_rom("TILEMAP");
+    rom.resize(0x10000, 0);
+    let mut block = vec![[0u8; 64]; COLS * 5];
+    // 0: vazio (cor 0); 1: fundo; 2: borda de cima; 3: borda da esquerda;
+    // 4: canto de cima a esquerda.
+    block[1] = [1; 64];
+    for y in 0..8 {
+        for x in 0..8 {
+            let line = |a: usize, b: usize| match a {
+                0..=2 => 0,
+                3 => 2,
+                _ => match b {
+                    0..=2 => 0,
+                    3 => 2,
+                    _ => 1,
+                },
+            };
+            block[2][y * 8 + x] = match y {
+                0..=2 => 0,
+                3 => 2,
+                _ => 1,
+            };
+            block[3][y * 8 + x] = match x {
+                0..=2 => 0,
+                3 => 2,
+                _ => 1,
+            };
+            block[4][y * 8 + x] = line(y.min(x), y.max(x));
+        }
+    }
+    // A lista: 8 quadros de largura, 16 linhas de quadros.
+    const W: usize = 64;
+    let mut list = vec![1u8; W * 128];
+    for line in 0..9 {
+        let top = TILEMAP_PITCH * line + 3;
+        for letter in 0..6 + line % 3 {
+            let left = 2 + 6 * letter;
+            for dy in 0..7 {
+                for dx in 0..5 {
+                    let ink = match (line + letter) % 4 {
+                        0 => dx == 0 || dx == 4 || dy == 3,
+                        1 => dy == 0 || dy == 6 || dx == 0,
+                        2 => dx == dy.min(4) || dx + dy == 6,
+                        _ => {
+                            ((dy == 0 || dy == 6) && (1..4).contains(&dx))
+                                || ((dx == 0 || dx == 4) && (1..6).contains(&dy))
+                        }
+                    };
+                    if ink {
+                        list[(top + dy) * W + left + dx] = 5;
+                    }
+                }
+            }
+        }
+    }
+    // Tira k = linhas 2k e 2k+1 da lista, guardada nas linhas 1 + 2*(k/4) do
+    // bloco, a partir da coluna 8*(k%4).
+    let stored = |row: usize, col: usize| {
+        let k = row / 2;
+        (1 + 2 * (k / 4) + row % 2) * COLS + 8 * (k % 4) + col
+    };
+    for row in 0..16 {
+        for col in 0..8 {
+            let tile = &mut block[stored(row, col)];
+            for y in 0..8 {
+                for x in 0..8 {
+                    tile[y * 8 + x] = list[(row * 8 + y) * W + col * 8 + x];
+                }
+            }
+        }
+    }
+    for (t, px) in block.iter().enumerate() {
+        for (i, pair) in px.chunks(2).enumerate() {
+            rom[TILEMAP_TILES_AT + t * 32 + i] = pair[0] | pair[1] << 4;
+        }
+    }
+    // Moldura de (r0, c0) a (r1, c1), fundo dentro.
+    let frame = |map: &mut [u16], (r0, c0): (usize, usize), (r1, c1): (usize, usize)| {
+        for r in r0..=r1 {
+            for c in c0..=c1 {
+                let (h, v) = (u16::from(c == c1) << 10, u16::from(r == r1) << 11);
+                map[r * COLS + c] = match (r == r0 || r == r1, c == c0 || c == c1) {
+                    (true, true) => 4 | h | v,
+                    (true, false) => 2 | v,
+                    (false, true) => 3 | h,
+                    (false, false) => 1,
+                };
+            }
+        }
+    };
+    let strip = |map: &mut [u16], k: usize, (r, c): (usize, usize)| {
+        for row in 0..2 {
+            for col in 0..8 {
+                map[(r + row) * COLS + c + col] = stored(2 * k + row, col) as u16;
+            }
+        }
+    };
+    let mut map = vec![0u16; COLS * COLS];
+    frame(&mut map, (0, 1), (19, 28));
+    let (lr, lc) = TILEMAP_LIST_CELL;
+    for k in 0..8 {
+        strip(&mut map, k, (lr + 2 * k, lc));
+    }
+    map[TILEMAP_REPEAT_CELL.0 * COLS + TILEMAP_REPEAT_CELL.1] = stored(4, 1) as u16;
+    // A outra tela: as tiras 0 e 4 (cortes entre linhas da lista) e o comeco
+    // da linha 2 (3 quadros das linhas 3 e 4 da lista).
+    let mut other = vec![0u16; COLS * COLS];
+    frame(&mut other, (0, 4), (9, 25));
+    strip(&mut other, 0, (2, 6));
+    strip(&mut other, 4, (2, 15));
+    for row in 0..2 {
+        for col in 0..3 {
+            other[(5 + row) * COLS + 6 + col] = stored(3 + row, col) as u16;
+        }
+    }
+    for (at, map) in [(TILEMAP_MAP_AT, map), (TILEMAP_OTHER_MAP_AT, other)] {
+        for (i, entry) in map.iter().enumerate() {
+            rom[at + 2 * i..at + 2 * i + 2].copy_from_slice(&entry.to_le_bytes());
+        }
+    }
+    rom
+}
+
 /// Bytes pseudo-aleatorios deterministicos (xorshift), p/ testes negativos.
 pub fn make_random(len: usize, seed: u64) -> Vec<u8> {
     let mut state = seed.max(1);

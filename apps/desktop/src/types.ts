@@ -307,6 +307,8 @@ export interface Picture {
   bytes: number;
   /** Quadros que parecem letra. */
   lettered: number;
+  /** O mapa de quadros que monta a imagem na tela (os quadros fora de ordem). */
+  map?: { offset: number; rows: number; base: number };
 }
 
 export interface ReadPicturesOutcome {

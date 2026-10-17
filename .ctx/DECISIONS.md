@@ -2164,3 +2164,49 @@ desenho — a primeira versão sem esse freio apagou a casa da tela de nomes).
 **Resto conhecido:** imagem montada por mapa de quadros fora de ordem
 (painel de cores: "バナナ", "ナッツ", "グレープ"; tela do caixa eletrônico)
 continua de fora — pede o mapa de quadros, que o app ainda não acha.
+
+## 2026-10-17 — Imagem montada por mapa de quadros: achar pela emenda, escrever sem tocar quadro dividido
+
+**Contexto:** no Mother 3, as cores do painel de ajustes (バナナ, ナッツ, グレープ)
+seguiam em japonês: o painel guarda as palavras em tiras de 2 linhas de
+quadros lado a lado e a tela as empilha a 13 pixels — na ordem guardada, a
+metade de cima e a de baixo de uma palavra ficam em tiras diferentes. A
+memória de vídeo mostrou o mapa cru no cartucho (32 entradas de 16 bits por
+linha, contando do começo do bloco que o jogo carrega: 108 quadros depois do
+começo da imagem achada).
+
+**Decisão:** `images::tilemap`. Achar sem endereço de jogo: janela de 2 KiB
+(passo de 512 bytes) com fundo repetido e filas de quadros seguidos (e o
+quadro 32 adiante embaixo); pra cada imagem e cada começo possível do bloco,
+toda entrada repetida lado a lado tem que emendar nela mesma (bitset por
+quadro), e as emendas entre quadros diferentes (fora de letra com letra e de
+fundo com fundo) têm que ter ≥ 80% dos pixels iguais e ≥ 0,4 acima da média
+dos começos vizinhos (±64). Janelas vizinhas com a mesma imagem e o mesmo
+começo viram um mapa; a linha começa onde não corta fila de quadros e logo
+depois de 2 colunas de sobra (a tela mostra 30 de 32), em posição de 4 bytes.
+A imagem montada é um `Picture` com `map`; a folha sai pelo mapa (`open`).
+Escrever (`tilemap::store`): cada célula redesenhada vai pra um quadro do
+mapa que fica igual e já tem aquele desenho (o fundo), ou pra um quadro
+livre — que só células redesenhadas usavam e que nenhum outro mapa achado
+mostra —, o da própria célula primeiro; quadro livre que ninguém toma recebe
+o desenho novo da célula que saiu dele (uma tela que a busca não achou, com
+os mesmos rótulos, viu "Fimり" antes disso). Faltou quadro: a frase fica no
+original com o motivo. Ler a imagem montada apaga as frases lidas na ordem
+guardada cuja letra cai em quadros que o mapa mostra. Na folha montada, o
+trecho cresce pela tinta que passa do retângulo dos quadros com cara de
+letra, a folga à direita vale inteira, e o apagar para na linha de moldura
+(a borda do painel morava nos quadros da primeira palavra).
+
+**Alternativas consideradas:** igualdade de pixels pura (0,59 no mapa certo:
+moldura em linha de quadro e topo de letra derrubam) e z-score global (com
+a imagem estendida, listras dão z 7 em qualquer começo); escrever sempre no
+lugar (estraga quadro repetido) ou sempre em quadro "vazio" do bloco (pode
+ser o que o jogo escreve na hora).
+
+**Consequências:** no Mother 3, 13 mapas achados em ~0,65 s a mais no `find`
+(2 com japonês: painel e tela de nomes; 11 marcados sem texto). O caixa
+eletrônico não tem mapa cru (tela por código ou sprites misturados) e segue
+de fora. Mapa comprimido, mapa de outro formato e mapa sem fila de quadros
+seguidos não são achados.
+
+**Driver:** claude.

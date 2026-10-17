@@ -128,7 +128,9 @@ export default function PicturesPanel({
                 />
                 <Thumb projectDir={projectDir} id={p.id} />
                 <span className="hint">
-                  {formatOffset(p.offset)} · {p.packed !== null ? "LZ77" : t("pictures.raw")}
+                  {p.map
+                    ? `${formatOffset(p.map.offset)} · ${t("pictures.map")}`
+                    : `${formatOffset(p.offset)} · ${p.packed !== null ? "LZ77" : t("pictures.raw")}`}
                 </span>
               </label>
             ))}

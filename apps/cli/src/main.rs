@@ -607,13 +607,19 @@ fn run(cli: Cli) -> Result<Output, Failure> {
                     .display()
             );
             for p in &pictures {
-                text.push_str(&format!(
-                    "\n{}  {}  {} quadros, {} com letra",
-                    p.id,
-                    if p.packed.is_some() { "lz77" } else { "cru " },
-                    p.bytes / romtranslate_core::images::TILE_BYTES,
-                    p.lettered
-                ));
+                text.push_str(&match p.map {
+                    Some(map) => format!(
+                        "\n{}  mapa  {} linhas, quadros de img-{:08x} a partir do {}, {} com letra",
+                        p.id, map.rows, p.offset, map.base, p.lettered
+                    ),
+                    None => format!(
+                        "\n{}  {}  {} quadros, {} com letra",
+                        p.id,
+                        if p.packed.is_some() { "lz77" } else { "cru " },
+                        p.bytes / romtranslate_core::images::TILE_BYTES,
+                        p.lettered
+                    ),
+                });
             }
             Ok(Output::new(text, serde_json::to_value(&pictures)?))
         }

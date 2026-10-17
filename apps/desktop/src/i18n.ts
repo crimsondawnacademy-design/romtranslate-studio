@@ -154,6 +154,7 @@ const messages = {
     "pictures.found": "{n} imagens com quadros que parecem letra. Marque as que têm texto em japonês.",
     "pictures.none": "Nenhuma imagem com letra neste arquivo.",
     "pictures.raw": "crua",
+    "pictures.map": "montada por mapa",
     "pictures.read": "Ler as marcadas com a IA ({n})",
     "pictures.readHint":
       "Uma chamada por imagem, com o modelo de ler imagem (o padrão do Codex se o campo estiver vazio): letra miúda pede modelo forte. Confira o texto lido na lista antes de traduzir.",
@@ -447,6 +448,7 @@ const messages = {
     "pictures.found": "{n} images with tiles that look like letters. Tick the ones with Japanese text.",
     "pictures.none": "No image with letters in this file.",
     "pictures.raw": "raw",
+    "pictures.map": "built by a tilemap",
     "pictures.read": "Read the ticked ones with the AI ({n})",
     "pictures.readHint":
       "One call per image, with the image-reading model (Codex's default if the field is empty): tiny letters need a strong model. Check the text read in the list before translating.",
