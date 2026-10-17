@@ -1,14 +1,32 @@
 ---
 projeto: romtranslate-studio
-handoff_gerado: 2026-10-13
+handoff_gerado: 2026-10-16
 gerado_por: claude / opus-5.5
-motivo: fim-de-sessao-longa (janela de contexto fechando)
+motivo: fim de feature (Mother 3 a 100% de texto, validado no emulador)
 branch: main
-ultimo_commit: c2cec40 (2026-10-13)
-versao_publicada: v0.1.8
-numero: 4
-adendo: 2026-10-13 à noite (v0.1.6 e japonês; adendo 2 às 20h); adendo 3 em 14/10 (v0.1.8) — ler antes do resto
+ultimo_commit: ver git log (16/10, depois de cf06781)
+versao_publicada: v0.1.8 (o main está bem à frente, sem binário)
+numero: 5
 ---
+
+> ## Handoff 5, de 16/10/2026 (noite) — Mother 3 a 100% de texto
+>
+> - **Onde está:** texto do Mother 3 em português, `audit` 0 de 312.047 caracteres; cópia
+>   `~/Desktop/mother3-teste-jp/Mother 3 - PT-BR (teste 13).gba` com LEIA-ME novo. Visto no
+>   emulador sem janela: aviso de saúde, título, nomes, ajustes, abertura, 1ª fala, uma batalha.
+> - **O processo** pra outro jogo japonês de GBA: `docs/PROCESSO-GBA-JAPONES.md`.
+> - **Emulador sem janela agora mora no repo:** `tools/gba-tela` (`montar.sh` uma vez por máquina;
+>   `rodar.sh` com roteiro de teclas, `poke=`, `dump=`, `save=`). Estados e fotos ficam fora do git.
+> - **Como chegar numa batalha no Mother 3** (notas de bancada, não do app): número da sala em
+>   `0x0200B578` (u16; o quarto é 0x8D, sala de depuração 0x37D, sala 43 tem cobra perto dos
+>   trilhos) — escrever antes de passar pela escada do quarto; posição do jogador em
+>   `0x0200C3C8`/`0x0200C3CA` (x, y × 16). Estado salvo guarda a memória de vídeo: pra ver desenho
+>   novo, partir do título.
+> - **Projeto (fora do repo, só neste Mac):** `~/Desktop/mother3-teste-jp/projeto/`; cópias do banco
+>   de traduções antes de cada mudança de leitura em `projeto/copia-20261016/`.
+> - **Falta:** passo 0e do `STATE.md` (imagem montada por mapa de quadros, teclado de kana, campos
+>   fixos abreviados, volta maior no emulador) e publicar uma versão (só com frase digitada do Rhuan).
+
 
 > ## Adendo 3, de 14/10/2026 (noite) — v0.1.8 publicada
 >

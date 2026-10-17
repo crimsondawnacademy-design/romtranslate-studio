@@ -2,6 +2,8 @@
 
 > O que cada parte faz, a matriz completa de compatibilidade, os limites medidos, a CLI e a arquitetura.
 > A apresentação do projeto está no [README](../README.pt-BR.md) ([English](../README.md)).
+> O passo a passo de um jogo japonês de GBA até 100% em português está em
+> [PROCESSO-GBA-JAPONES.md](PROCESSO-GBA-JAPONES.md).
 
 Ferramenta desktop open source para extrair, traduzir, revisar e reaplicar textos em
 jogos compatíveis, com IA local (Ollama) ou APIs configuráveis, gerando **patches** (IPS/BPS)
