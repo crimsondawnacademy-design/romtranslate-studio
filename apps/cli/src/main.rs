@@ -165,6 +165,11 @@ enum Command {
         /// configuracoes do app; vazio la = o padrao do Codex]
         #[arg(long, value_name = "MODELO")]
         model: Option<String>,
+        /// Usa a leitura deste arquivo em vez de chamar a IA: o JSON que a IA
+        /// devolveria pra folha <id>-leitura.png ({"texts": {"1": "..."}}),
+        /// de quem leu a folha por fora. Uma imagem por vez
+        #[arg(long, value_name = "ARQUIVO", conflicts_with_all = ["preview", "model"])]
+        leitura: Option<PathBuf>,
     },
     /// Grava traducoes de um arquivo (uma por linha: id<TAB>traducao) e valida
     Apply {
@@ -617,14 +622,28 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             ids,
             preview,
             model,
+            leitura,
         } => {
             load(&project)?;
+            let answer = match &leitura {
+                Some(path) if ids.len() != 1 => {
+                    return Err(Failure(format!(
+                        "--leitura {}: uma imagem por vez (vieram {})",
+                        path.display(),
+                        ids.len()
+                    )))
+                }
+                Some(path) => {
+                    Some(std::fs::read_to_string(path).map_err(|e| CoreError::io(path, e))?)
+                }
+                None => None,
+            };
             let cfg_dir = config_dir()?;
             let mut cfg = settings::load_settings(&cfg_dir);
             if let Some(model) = model {
                 cfg.codex_cli.image_model = model;
             }
-            let provider = if preview {
+            let provider = if preview || answer.is_some() {
                 None
             } else {
                 let (provider, model) = settings::build_provider(&cfg, &cfg_dir)?;
@@ -639,10 +658,15 @@ fn run(cli: Cli) -> Result<Output, Failure> {
                 .enable_all()
                 .build()
                 .map_err(|e| format!("nao foi possivel iniciar a leitura: {e}"))?;
+            let reader = match (&answer, &provider) {
+                (Some(answer), _) => romtranslate_core::images::Reader::Answer(answer),
+                (None, Some(provider)) => {
+                    romtranslate_core::images::Reader::Provider(provider.as_ref())
+                }
+                (None, None) => romtranslate_core::images::Reader::Preview,
+            };
             let outcome = runtime.block_on(romtranslate_core::images::read_pictures(
-                &project,
-                provider.as_deref(),
-                &ids,
+                &project, reader, &ids,
             ))?;
             let used = provider.as_ref().map(|p| p.usage()).unwrap_or_default();
             let mut text = format!(

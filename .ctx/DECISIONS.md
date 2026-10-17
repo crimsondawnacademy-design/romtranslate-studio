@@ -2139,3 +2139,28 @@ sozinho continua número (a pausa longa "[FF04]わ" do fim de mensagem); (2) o
 o comando não seja de letra na maioria dos usos — o nome esticado `FF26`
 fecha com ！ ou 。, e com ッ justo na primeira fala do jogo ("Lucas---ッ!").
 Só o comando que sempre desenha só a letra (`letter_only`) vale 0 na linha.
+
+## 2026-10-16 — Imagem: alinhamento real, sprites e leitura por fora
+
+**Contexto:** no Mother 3, o painel de ajustes redesenhado saía com lixo
+("5555…", rótulos quebrados) e a linha "aperte um botão" do aviso de saúde
+nem tinha sido lida. Causas: (1) o conjunto de quadros crus começa 28 bytes
+depois da janela em que o app recortou a imagem — cada quadro saía uma linha
+de pixel torto, e o redesenho atravessava as bordas; (2) a linha do aviso é
+uma fila de sprites de 4×2 quadros, que na ordem da tela aparece com as
+metades das letras lado a lado.
+
+**Decisão:** `images::phase` escolhe o deslocamento (de 4 em 4 até 28) com
+mais quadros de uma cor só (471 contra ~380 no painel); `arrangement` escolhe,
+entre a ordem da tela e sprites 1×2, 2×2, 4×2, 8×2, 2×4 e 4×4, o arranjo com
+mais traço contínuo entre um quadro e o de baixo (só quando bem acima da
+ordem da tela), guardado em `Picture::sprite`; a folha e a regravação passam
+pelo arranjo. A leitura pode vir de um arquivo (`read-pictures --leitura`,
+`images::Reader::Answer`), como a tradução vem por TSV no `apply`. O que se
+apaga ganhou a faixa do furigana da mesma cor da letra e a pontuação final
+colada no trecho (só pixel da cor da letra, até 2 quadros, parando em outro
+desenho — a primeira versão sem esse freio apagou a casa da tela de nomes).
+
+**Resto conhecido:** imagem montada por mapa de quadros fora de ordem
+(painel de cores: "バナナ", "ナッツ", "グレープ"; tela do caixa eletrônico)
+continua de fora — pede o mapa de quadros, que o app ainda não acha.

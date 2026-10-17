@@ -166,7 +166,7 @@ async fn read_pictures(
     let (provider, _) = build_provider(&cfg, &cfg_dir)?;
     romtranslate_core::images::read_pictures(
         &PathBuf::from(project_dir),
-        Some(provider.as_ref()),
+        romtranslate_core::images::Reader::Provider(provider.as_ref()),
         &ids,
     )
     .await

@@ -21,7 +21,7 @@ pub mod font;
 
 use font::Font;
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::path::Path;
 
@@ -61,6 +61,100 @@ pub struct Picture {
     pub bytes: usize,
     /// Quadros que parecem letra (`lettered`).
     pub lettered: usize,
+    /// Os quadros vem em sprites deste tamanho (largura, altura, em quadros),
+    /// um atras do outro: e assim que a folha os poe lado a lado. `None` =
+    /// na ordem da tela, 32 por linha.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sprite: Option<[usize; 2]>,
+}
+
+/// Formatos de sprite que `arrangement` experimenta (largura, altura, em
+/// quadros).
+const SPRITES: [[usize; 2]; 6] = [[1, 2], [2, 2], [4, 2], [8, 2], [2, 4], [4, 4]];
+
+/// Onde o quadro `t` (na ordem guardada) fica na folha, em quadros.
+fn sheet_index(t: usize, sprite: Option<[usize; 2]>) -> usize {
+    let Some([w, h]) = sprite else {
+        return t;
+    };
+    let (s, k) = (t / (w * h), t % (w * h));
+    let per_row = SHEET_TILES / w;
+    let (x, y) = ((s % per_row) * w + k % w, (s / per_row) * h + k / w);
+    y * SHEET_TILES + x
+}
+
+/// Os quadros na ordem da folha (quadro vazio onde o sprite nao tem).
+fn arrange(tiles: &[u8], sprite: Option<[usize; 2]>) -> Vec<u8> {
+    let count = tiles.len() / TILE_BYTES;
+    let slots = (0..count)
+        .map(|t| sheet_index(t, sprite) + 1)
+        .max()
+        .unwrap_or(0);
+    let mut out = vec![0u8; slots * TILE_BYTES];
+    for (t, tile) in tiles.as_chunks::<TILE_BYTES>().0.iter().enumerate() {
+        let at = sheet_index(t, sprite) * TILE_BYTES;
+        out[at..at + TILE_BYTES].copy_from_slice(tile);
+    }
+    out
+}
+
+/// O contrario de `arrange`: os `count` quadros da folha de volta na ordem
+/// guardada.
+fn unarrange(sheet_tiles: &[u8], sprite: Option<[usize; 2]>, count: usize) -> Vec<u8> {
+    (0..count)
+        .flat_map(|t| {
+            let at = sheet_index(t, sprite) * TILE_BYTES;
+            sheet_tiles[at..at + TILE_BYTES].iter().copied()
+        })
+        .collect()
+}
+
+/// A folha da imagem, com os quadros arrumados como ela os guarda.
+pub fn sheet_of(tiles: &[u8], picture: &Picture) -> Sheet {
+    Sheet::new(&arrange(tiles, picture.sprite))
+}
+
+/// Traco de letra que continua de um quadro pro de baixo, com os quadros
+/// arrumados em `sprite`: em cada coluna das emendas entre dois quadros que a
+/// imagem tem, tinta (cor diferente da mais comum) nos dois lados.
+fn seams(tiles: &[u8], sprite: Option<[usize; 2]>) -> usize {
+    let count = tiles.len() / TILE_BYTES;
+    let px = |t: usize| pixels(&tiles[t * TILE_BYTES..(t + 1) * TILE_BYTES]);
+    let mut seen = [0usize; 16];
+    for t in 0..count {
+        for p in px(t) {
+            seen[p as usize] += 1;
+        }
+    }
+    let paper = (0..16).max_by_key(|&c| seen[c]).unwrap_or(0) as u8;
+    let at: HashMap<usize, usize> = (0..count).map(|t| (sheet_index(t, sprite), t)).collect();
+    at.iter()
+        .filter_map(|(&i, &t)| Some((t, *at.get(&(i + SHEET_TILES))?)))
+        .map(|(up, down)| {
+            let (up, down) = (px(up), px(down));
+            (0..TILE)
+                .filter(|&x| up[(TILE - 1) * TILE + x] != paper && down[x] != paper)
+                .count()
+        })
+        .sum()
+}
+
+/// Como os quadros vem guardados: na ordem da tela ou em sprites (`SPRITES`)
+/// — o que deixa mais traco continuo entre um quadro e o de baixo, se deixa
+/// bem mais que a ordem da tela. No jogo medido, o "aperte um botao" do
+/// aviso de saude e uma fila de sprites de 4x2 quadros: na ordem da tela as
+/// metades das letras saiam lado a lado, ilegiveis.
+fn arrangement(tiles: &[u8]) -> Option<[usize; 2]> {
+    let plain = seams(tiles, None);
+    // Empate fica com o sprite menor: o de 4x4 tambem junta cada metade de
+    // cima com a de baixo numa fila de 4x2, mas empilha os sprites.
+    SPRITES
+        .iter()
+        .enumerate()
+        .map(|(i, &sprite)| (seams(tiles, Some(sprite)), i, sprite))
+        .filter(|&(joined, _, _)| joined > plain * 3 / 2 + 8)
+        .max_by_key(|&(joined, i, _)| (joined, std::cmp::Reverse(i)))
+        .map(|(_, _, sprite)| sprite)
 }
 
 /// Um trecho de letra numa imagem, em pixels da folha.
@@ -128,6 +222,34 @@ fn score(bytes: &[u8]) -> (usize, usize) {
     (lettered_tiles, drawn)
 }
 
+/// Quadro de uma cor so (fundo, preenchimento).
+fn uniform(tile: &[u8]) -> bool {
+    let px = pixels(tile);
+    px.iter().all(|&p| p == px[0])
+}
+
+/// Onde os quadros de um trecho cru comecam de verdade: o deslocamento (de 4
+/// em 4 bytes, ate 28) com mais quadros de uma cor so. Com o deslocamento
+/// errado cada quadro sai uma linha de pixel torto — a letra ainda se le, mas
+/// o redesenho atravessa a borda do quadro. No jogo medido, o painel de
+/// ajustes comeca 28 bytes depois da janela: 471 quadros de uma cor la,
+/// contra uns 380 nos outros deslocamentos.
+fn phase(data: &[u8]) -> usize {
+    (0..TILE_BYTES)
+        .step_by(4)
+        .max_by_key(|&phase| {
+            let one_color = data.get(phase..).map_or(0, |rest| {
+                rest.as_chunks::<TILE_BYTES>()
+                    .0
+                    .iter()
+                    .filter(|t| uniform(t.as_slice()))
+                    .count()
+            });
+            (one_color, std::cmp::Reverse(phase))
+        })
+        .unwrap_or(0)
+}
+
 fn worth(lettered_tiles: usize, drawn: usize) -> bool {
     lettered_tiles >= MIN_LETTERED && lettered_tiles * 10 >= drawn * 3
 }
@@ -153,6 +275,7 @@ pub fn find(data: &[u8]) -> Vec<Picture> {
                 packed: Some(block.packed_len),
                 bytes: block.data.len(),
                 lettered: lettered_tiles,
+                sprite: arrangement(&block.data),
             });
         }
     });
@@ -191,12 +314,16 @@ pub fn find(data: &[u8]) -> Vec<Picture> {
         while w < windows && taken(w) {
             w += 1;
         }
+        let (at, len) = (first * RAW_WINDOW, (w - first) * RAW_WINDOW);
+        let phase = phase(&data[at..at + len]);
+        let bytes = if phase == 0 { len } else { len - TILE_BYTES };
         found.push(Picture {
-            id: id_of(first * RAW_WINDOW),
-            offset: first * RAW_WINDOW,
+            id: id_of(at + phase),
+            offset: at + phase,
             packed: None,
-            bytes: (w - first) * RAW_WINDOW,
+            bytes,
             lettered: lettered_in[first..w].iter().sum(),
+            sprite: arrangement(&data[at + phase..at + phase + bytes]),
         });
     }
     found.sort_by_key(|picture| picture.offset);
@@ -575,6 +702,44 @@ fn blocks_of(sheet: &Sheet, mut lines: Vec<(Line, Colors)>) -> Vec<Block> {
         while top > 0 && by0 - top < 8 && !(bx0..bx1).any(|x| painted(x, top - 1)) {
             top -= 1;
         }
+        // Furigana da mesma cor da letra: uma faixa baixa (ate 6 linhas) logo
+        // acima do trecho, com linha vazia em cima dela. No aviso de saude do
+        // jogo medido sobravam pontinhos dele em cima do titulo traduzido.
+        let blank = |y: usize| (wx0..wx1.max(bx1)).all(|x| sheet.get(x, y) == Some(colors.paper));
+        let gap = (1..=2).find(|&k| top >= k && !blank(top - k));
+        if let Some(gap) = gap {
+            let band_end = top - gap;
+            let mut band_top = band_end;
+            while band_top > 0 && band_end - band_top < 6 && !blank(band_top - 1) {
+                band_top -= 1;
+            }
+            if band_end - band_top < 6 && (band_top == 0 || blank(band_top - 1)) {
+                top = band_top;
+            }
+        }
+        // A tinta da letra logo a direita do trecho, na mesma faixa (a
+        // pontuacao do fim, que ficou fora da linha), tambem se apaga: ate 2
+        // quadros, parando num vao de 8 colunas ou em qualquer outro desenho
+        // (o conjunto de quadros pode ter uma ilustracao colada no rotulo).
+        let start = (wx1.max(bx1) + 1).min(sheet.width);
+        let mut erase_right = start;
+        let mut empty = 0;
+        for x in start..(start + 2 * TILE).min(sheet.width) {
+            let column: Vec<Option<u8>> = (top..by1 + 1).map(|y| sheet.get(x, y)).collect();
+            let drawn = |c: &Option<u8>| c.is_some_and(|c| c != colors.paper);
+            if !column.iter().any(drawn) {
+                empty += 1;
+                if empty >= 8 {
+                    break;
+                }
+                continue;
+            }
+            if column.iter().any(|&c| drawn(&c) && !colors.painted(c)) {
+                break;
+            }
+            empty = 0;
+            erase_right = x + 1;
+        }
         out.push(Block {
             x: bx0,
             y: by0,
@@ -584,12 +749,7 @@ fn blocks_of(sheet: &Sheet, mut lines: Vec<(Line, Colors)>) -> Vec<Block> {
             ink: colors.ink,
             shade: colors.shade,
             room: right - bx0,
-            area: [
-                wx0.min(bx0).saturating_sub(1),
-                top,
-                (wx1.max(bx1) + 1).min(sheet.width),
-                by1 + 1,
-            ],
+            area: [wx0.min(bx0).saturating_sub(1), top, erase_right, by1 + 1],
         });
     }
     out
@@ -1014,15 +1174,25 @@ pub fn draw(sheet: &mut Sheet, block: &Block, text: &str) -> std::result::Result
     }
     let boxed =
         |x: usize, y: usize| (x0..x1).contains(&x) && (block.y..block.y + block.h).contains(&y);
+    // Na faixa acima do texto (o furigana), a fileira de quadros que tem
+    // algum quadro de texto vale inteira: o quadro com 2 ou 3 pixels de
+    // furigana nao parece letra, e os pixels dele ficavam (pontinhos em cima
+    // do titulo traduzido do aviso de saude do jogo medido).
+    let band_rows: HashSet<usize> = text_tile
+        .iter()
+        .filter(|&(&(_, ty), &text)| text && ty * TILE < block.y)
+        .map(|(&(_, ty), _)| ty)
+        .collect();
     for y in ey0..ey1 {
         for x in ex0..ex1 {
             let close = near[(y - ey0) * (ex1 - ex0) + x - ex0] || boxed(x, y);
             let furigana = (x0..x1).contains(&x)
                 && (y0..y1).contains(&y)
-                && text_tile
+                && (text_tile
                     .get(&(x / TILE, y / TILE))
                     .copied()
-                    .unwrap_or(false);
+                    .unwrap_or(false)
+                    || (y < block.y && band_rows.contains(&(y / TILE))));
             if (close || furigana) && sheet.get(x, y).is_some_and(|p| p != block.paper) {
                 sheet.set(x, y, block.paper);
             }
@@ -1105,7 +1275,7 @@ pub fn apply(out: &mut [u8], entries: &[TextEntry]) -> Applied {
             );
             continue;
         };
-        let mut sheet = Sheet::new(&tiles);
+        let mut sheet = sheet_of(&tiles, &picture);
         // A medida de agora do trecho na mesma posicao vale mais que a da
         // leitura: o app melhora a medida de uma versao pra outra e a frase
         // lida antes nao precisa voltar pra IA.
@@ -1124,7 +1294,7 @@ pub fn apply(out: &mut [u8], entries: &[TextEntry]) -> Applied {
         if drawn == 0 {
             continue;
         }
-        let new_tiles = sheet.tiles();
+        let new_tiles = unarrange(&sheet.tiles(), picture.sprite, tiles.len() / TILE_BYTES);
         match picture.packed {
             None => {
                 out[picture.offset..picture.offset + new_tiles.len()].copy_from_slice(&new_tiles)
@@ -1181,7 +1351,7 @@ pub fn list_pictures(project_dir: &Path) -> Result<Vec<Picture>> {
             continue;
         }
         if let Some(tiles) = tiles_of(&data, picture) {
-            let png = Sheet::new(&tiles).png()?;
+            let png = sheet_of(&tiles, picture).png()?;
             fs::write(&path, png).map_err(|e| CoreError::io(&path, e))?;
         }
     }
@@ -1212,7 +1382,7 @@ pub fn refresh(project_dir: &Path) -> Result<usize> {
         };
         let found = fresh.entry(picture.offset).or_insert_with(|| {
             tiles_of(&data, &picture)
-                .map(|tiles| blocks(&Sheet::new(&tiles)))
+                .map(|tiles| blocks(&sheet_of(&tiles, &picture)))
                 .unwrap_or_default()
         });
         let Some(block) = found
@@ -1247,14 +1417,24 @@ pub struct ReadOutcome {
     pub failed: Vec<(String, String)>,
 }
 
-/// A IA le o texto das imagens `ids` do arquivo do projeto: uma chamada por
-/// imagem, com a folha dos trechos dela (`reading_sheet`), que tambem fica em
+/// Quem le o texto das imagens.
+pub enum Reader<'a> {
+    /// A IA do provider: uma chamada por imagem.
+    Provider(&'a dyn crate::provider::TranslationProvider),
+    /// Uma leitura pronta, no formato que `READ_PROMPT` pede, de quem leu a
+    /// folha por fora (outro modelo, uma pessoa): nada vai pra IA.
+    Answer(&'a str),
+    /// Ninguem: so grava as folhas, a previa do que iria pra IA.
+    Preview,
+}
+
+/// O texto das imagens `ids` do arquivo do projeto, lido por `reader` na folha
+/// dos trechos de cada uma (`reading_sheet`), que tambem fica em
 /// `<projeto>/imagens/<id>-leitura.png`. Cada trecho com japones vira uma
-/// frase desenhada no banco, pronta pra traduzir. Sem `provider`, so grava as
-/// folhas (a previa do que iria pra IA).
+/// frase desenhada no banco, pronta pra traduzir.
 pub async fn read_pictures(
     project_dir: &Path,
-    provider: Option<&dyn crate::provider::TranslationProvider>,
+    reader: Reader<'_>,
     ids: &[String],
 ) -> Result<ReadOutcome> {
     let game = crate::project::load_project(project_dir)?;
@@ -1278,7 +1458,7 @@ pub async fn read_pictures(
                 .push((id.clone(), "a imagem nao abriu".to_string()));
             continue;
         };
-        let sheet = Sheet::new(&tiles);
+        let sheet = sheet_of(&tiles, picture);
         let found = blocks(&sheet);
         if found.is_empty() {
             outcome
@@ -1290,16 +1470,17 @@ pub async fn read_pictures(
         let path = dir.join(format!("{id}-leitura.png"));
         fs::write(&path, &png).map_err(|e| CoreError::io(&path, e))?;
         outcome.blocks += found.len();
-        // Sem provider e a previa: a folha fica gravada e nada vai pra IA.
-        let Some(provider) = provider else {
-            continue;
-        };
-        let answer = match provider.read_image(&png, READ_PROMPT).await {
-            Ok(answer) => answer,
-            Err(e) => {
-                outcome.failed.push((id.clone(), e.to_string()));
-                continue;
-            }
+        let answer = match reader {
+            // A previa: a folha fica gravada e nada vai pra IA.
+            Reader::Preview => continue,
+            Reader::Answer(answer) => answer.to_string(),
+            Reader::Provider(provider) => match provider.read_image(&png, READ_PROMPT).await {
+                Ok(answer) => answer,
+                Err(e) => {
+                    outcome.failed.push((id.clone(), e.to_string()));
+                    continue;
+                }
+            },
         };
         let texts = match parse_reading(&answer, found.len()) {
             Ok(texts) => texts,
@@ -1467,6 +1648,52 @@ mod tests {
         assert!(!worth_translating("さ し す せ そ"));
         assert!(!worth_translating("がぎぐげご") && !worth_translating("アイウエオ"));
         assert!(worth_translating("もどる") && worth_translating("ふつう"));
+    }
+
+    #[test]
+    fn text_kept_as_sprites_is_put_back_together() {
+        // Uma linha de letras de 16 pixels de altura guardada em 8 sprites de
+        // 4x2 quadros: cada sprite e os 4 quadros de cima e depois os 4 de
+        // baixo, como o "aperte um botao" do aviso de saude do jogo medido.
+        let mut screen = Sheet::new(&vec![0x11; 64 * TILE_BYTES]);
+        for x in 4..252 {
+            for y in 3..13 {
+                if x % 6 == 0 || (y == 8 && x % 6 < 4) {
+                    screen.set(x, y, 15);
+                }
+            }
+        }
+        let screen_tiles = screen.tiles();
+        let mut stored = Vec::new();
+        for sprite in 0..8 {
+            for row in 0..2 {
+                for col in 0..4 {
+                    let t = row * SHEET_TILES + 4 * sprite + col;
+                    stored.extend(&screen_tiles[t * TILE_BYTES..(t + 1) * TILE_BYTES]);
+                }
+            }
+        }
+        assert_eq!(arrangement(&stored), Some([4, 2]));
+        assert_eq!(arrangement(&screen_tiles), None);
+        assert_eq!(arrange(&stored, Some([4, 2])), screen_tiles);
+        assert_eq!(unarrange(&screen_tiles, Some([4, 2]), 64), stored);
+    }
+
+    #[test]
+    fn raw_tiles_start_where_most_tiles_are_one_color() {
+        // Quadros de uma cor alternados com quadros desenhados, 12 bytes
+        // depois do comeco do trecho.
+        let mut data = vec![0x5A; 12];
+        for k in 0..64u8 {
+            if k % 2 == 0 {
+                data.extend([0x11; TILE_BYTES]);
+            } else {
+                data.extend((0..TILE_BYTES as u8).map(|i| i.wrapping_mul(37) ^ k));
+            }
+        }
+        assert_eq!(phase(&data), 12);
+        assert_eq!(phase(&data[12..]), 0);
+        assert_eq!(phase(&[]), 0);
     }
 
     #[test]
