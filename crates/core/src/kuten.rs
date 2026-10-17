@@ -221,6 +221,9 @@ struct Dialect {
     /// comando e um numero qualquer, e os numeros pequenos depois dele
     /// virariam kana.
     shifted: Vec<(usize, usize)>,
+    /// As mensagens que a tabela de um banco aponta: (comeco, fim), em
+    /// unidades e em ordem (`messages`).
+    known: Vec<(usize, usize)>,
 }
 
 impl Dialect {
@@ -244,6 +247,29 @@ impl Dialect {
             .checked_sub(1)?;
         let (at, end) = self.shifted[k];
         (i < end).then(|| self.switches.get(&codes[at])).flatten()
+    }
+
+    /// O comando em `codes[i]` desenha a letra do ultimo parametro: o de
+    /// `lettered` sempre, e o de dois parametros ou mais quando o ultimo e
+    /// kana — o nome esticado (`FF26` no jogo medido) fecha com o caractere
+    /// do ultimo, ！ ou 。 quase sempre, e ッ justo na primeira fala do jogo.
+    fn draws_letter(&self, codes: &[u16], i: usize) -> bool {
+        let Some(&n) = self.params.get(&codes[i]).filter(|&&n| n <= MAX_PARAMS) else {
+            return false;
+        };
+        self.lettered.contains(&codes[i])
+            || (n >= 2
+                && codes
+                    .get(i + n)
+                    .and_then(|&unit| self.decode(unit))
+                    .is_some_and(is_kana))
+    }
+
+    /// A unidade `i` esta dentro de uma mensagem que a tabela de um banco
+    /// aponta.
+    fn in_message(&self, i: usize) -> bool {
+        let k = self.known.partition_point(|&(begin, _)| begin <= i);
+        k > 0 && i < self.known[k - 1].1
     }
 
     /// Ate onde vao os desenhos da fonte: abaixo disto, codigo sem caractere
@@ -346,6 +372,20 @@ fn honored(
         out.push((i, end));
     }
     out
+}
+
+/// As mensagens que comecam em `starts` (unidades): (comeco, fim), o fim no
+/// primeiro 0xFFFF, em ordem.
+fn messages(codes: &[u16], starts: &HashSet<usize>) -> Vec<(usize, usize)> {
+    let mut known: Vec<(usize, usize)> = starts
+        .iter()
+        .filter_map(|&begin| {
+            let end = (begin..codes.len().min(begin + MAX_SPAN)).find(|&k| codes[k] == END)?;
+            Some((begin, end))
+        })
+        .collect();
+    known.sort_unstable();
+    known
 }
 
 /// A letra com o sinal de sonorizacao (゛) ou de semissonorizacao (゜), se
@@ -506,6 +546,53 @@ fn find_lettered(codes: &[u16], spans: &[Span], params: &HashMap<u16, usize>) ->
         .collect()
 }
 
+/// Particulas que vem logo depois de um nome: e nelas que se ve que um
+/// comando escreve um nome ("[FF11]は", "[FF42:0000]の").
+const PARTICLES: &str = "はのがをにともへでや";
+/// Usos pra julgar se um comando escreve nome (`find_names`).
+const MIN_NAME_USES: u32 = 5;
+/// Ate onde se olha pra tras de uma mensagem atras dos comandos que vem antes
+/// dela (em unidades).
+const MAX_PREFIX: usize = 16;
+
+/// Onde comeca o trecho de comandos logo antes de `begin`: depois do fim da
+/// mensagem anterior, a no maximo `MAX_PREFIX` unidades.
+fn prefix_start(codes: &[u16], begin: usize) -> usize {
+    let floor = begin.saturating_sub(MAX_PREFIX);
+    (floor..begin)
+        .rev()
+        .find(|&k| codes[k] == END)
+        .map_or(floor, |k| k + 1)
+}
+
+/// Os comandos que escrevem um nome: seguidos de particula (`PARTICLES`) em
+/// um terco dos usos ou mais, dentro das mensagens de `spans` e logo antes
+/// delas (o nome de item, `FF10` no jogo medido, tambem escreve numero: 58%
+/// no texto de batalha; o marcador de opcao de menu, `FF37`, fica em 30% por
+/// causa do "はい"). No texto de batalha do jogo medido o nome de quem age (`FF11`) abre
+/// 729 mensagens, fora da frase; sem saber que ele ocupa a linha, a quebra do
+/// app deixava a linha passar da caixa ("dano fa/tal!").
+fn find_names(codes: &[u16], dialect: &Dialect, spans: &[Span]) -> HashSet<u16> {
+    let mut seen: HashMap<u16, (u32, u32)> = HashMap::new();
+    for span in spans {
+        let mut i = prefix_start(codes, span.begin);
+        while i < span.end {
+            let (piece, len) = dialect.piece(codes, i);
+            if matches!(piece, Piece::Control) {
+                let next = codes.get(i + len).and_then(|&unit| dialect.decode(unit));
+                let (uses, particle) = seen.entry(codes[i]).or_default();
+                *uses += 1;
+                *particle += u32::from(next.is_some_and(|c| PARTICLES.contains(c)));
+            }
+            i += len;
+        }
+    }
+    seen.into_iter()
+        .filter(|&(_, (uses, particle))| uses >= MIN_NAME_USES && particle * 3 >= uses)
+        .map(|(code, _)| code)
+        .collect()
+}
+
 /// As marcas de fala do jogo: as figuras (`SHAPES`: ☆★○●◎◇◆□■△▲▽▼※ e as
 /// setas) com que pelo menos `MIN_USES` mensagens de `spans` abrem logo
 /// depois do fim de outra. No jogo medido sao duas, "◆" (6.673 falas) e "◇".
@@ -589,8 +676,25 @@ impl Dialect {
                 // Numero ate onde se mediu: o que vem depois nao e desta tabela.
                 Some(&n) if n > MAX_PARAMS => return (Piece::Other, 1),
                 // A letra do fim fica fora do comando: e texto.
-                Some(&n) if self.lettered.contains(&code) => (n - 1).min(rest.len()),
-                Some(&n) => n.min(rest.len()),
+                Some(&n) if self.draws_letter(codes, i) => (n - 1).min(rest.len()),
+                // Kana seguido de mais texto no lugar do parametro e texto:
+                // o comando que leva numero no resto do jogo (o nome de item,
+                // `FF21`) aparece sem ele no texto de batalha do jogo medido
+                // ("[FF21]のこえ"), e o の virava parametro — e ficava no
+                // jogo traduzido. Kana sozinho e numero mesmo: a pausa longa
+                // do fim de mensagem cai na faixa do kana ("[FF04]わ").
+                Some(&n) => {
+                    let text = |at: usize| {
+                        rest.get(at)
+                            .and_then(|&unit| self.decode(unit))
+                            .is_some_and(|c| is_kana(c) || is_kanji(c))
+                    };
+                    (0..n.min(rest.len()))
+                        .take_while(|&at| {
+                            !(self.decode(rest[at]).is_some_and(is_kana) && text(at + 1))
+                        })
+                        .count()
+                }
                 None if self.params.is_empty() => 0,
                 // Comando raro demais pra medir: fica com ele o que vem depois
                 // e nao continua um texto.
@@ -603,6 +707,12 @@ impl Dialect {
             (Piece::Control, 1 + params)
         } else if let Some(c) = self.decode(code) {
             (Piece::Char(c), 1)
+        } else if code == 0 && self.in_message(i) {
+            // O espaco de largura inteira do JIS: fora de mensagem e
+            // preenchimento, dentro e o espaco entre palavras (o do texto de
+            // batalha do jogo medido, que o resto do roteiro escreve com
+            // outro codigo).
+            (Piece::Char(' '), 1)
         } else if code != 0 && code < self.glyphs() {
             (Piece::Glyph, 1)
         } else {
@@ -905,6 +1015,7 @@ pub fn extract(
         font: font_order(data),
         shifted: honored(&codes, starts, &switches),
         switches,
+        known: messages(&codes, starts),
         ..Dialect::default()
     };
     let first = scan(&codes, &dialect, starts);
@@ -914,6 +1025,7 @@ pub fn extract(
     let mut found = scan(&codes, &dialect, starts);
     found.extend(missed_records(&codes, &dialect, starts, &found));
     found.sort_by_key(|span| span.begin);
+    let names = find_names(&codes, &dialect, &found);
 
     // Texto de jogo vem em fila; fora de fila so fica a sequencia longa.
     let text_of = |span: &Span| -> String {
@@ -944,14 +1056,19 @@ pub fn extract(
                 continue;
             }
             let mut at = span.begin;
-            let mut lettered = BTreeSet::new();
+            let (mut lettered, mut letter_only) = (BTreeSet::new(), BTreeSet::new());
             while at < span.end {
                 let (piece, len) = dialect.piece(&codes, at);
                 if matches!(piece, Piece::Control) && len > 1 {
                     commands.insert(codes[at..at + len].to_vec());
                 }
-                if matches!(piece, Piece::Control) && dialect.lettered.contains(&codes[at]) {
+                if matches!(piece, Piece::Control) && dialect.draws_letter(&codes, at) {
                     lettered.insert(token_of(&codes[at..at + len]));
+                    // O que so desenha a letra (o de `lettered`) nao ocupa nada
+                    // na linha; o nome esticado ocupa o nome.
+                    if dialect.lettered.contains(&codes[at]) {
+                        letter_only.insert(format!("[{:04X}", codes[at]));
+                    }
                 }
                 at += len;
             }
@@ -977,6 +1094,21 @@ pub fn extract(
             // letra logo depois dele (`validate`).
             if !lettered.is_empty() {
                 metadata["lettered"] = serde_json::json!(lettered);
+            }
+            if !letter_only.is_empty() {
+                metadata["letter_only"] = serde_json::json!(letter_only);
+            }
+            // Nome que o jogo escreve antes da frase: ocupa a primeira linha.
+            let mut before = 0;
+            let mut at = prefix_start(&codes, span.begin);
+            while at < span.begin {
+                let (piece, len) = dialect.piece(&codes, at);
+                before +=
+                    usize::from(matches!(piece, Piece::Control) && names.contains(&codes[at]));
+                at += len;
+            }
+            if before > 0 {
+                metadata["names_before"] = serde_json::json!(before);
             }
             entries.push(TextEntry {
                 id: format!("scan-{offset:08x}"),
@@ -1307,6 +1439,80 @@ mod tests {
         // cor ("Ａボタン" = cor 3 + Ａ, cor 0 + ボ, タン).
         let text = read_with(0xFF05, &[3, encode('く').unwrap()]).unwrap();
         assert!(text.contains("ひとは[FF05:0003]くきょうも"), "{text}");
+    }
+
+    #[test]
+    fn a_kana_where_a_number_usually_goes_is_text() {
+        // FF23 leva numero em 119 mensagens; na outra vem direto o の do
+        // texto, como "[FF21]のこえ" no texto de batalha do jogo medido.
+        let kana = |text: &str| text.chars().map(|c| encode(c).unwrap()).collect::<Vec<_>>();
+        let mut codes = Vec::new();
+        for i in 0..120u16 {
+            codes.push(encode('◆').unwrap());
+            codes.extend(kana("むらのひとは"));
+            codes.push(0xFF23);
+            if i != 60 {
+                codes.push(2 + i % 3);
+            }
+            codes.extend(kana("のきょうもげんきにはたらいている"));
+            codes.extend([0xFF03, 0xFF00, END]);
+        }
+        let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
+        let found = extract(&data, &HashSet::new(), &[]).unwrap();
+        let text = &found.entries[60].source_text;
+        assert!(text.contains("ひとは[FF23]のきょうも"), "{text}");
+        let text = &found.entries[59].source_text;
+        assert!(text.contains("ひとは[FF23:0004]のきょうも"), "{text}");
+    }
+
+    #[test]
+    fn a_kana_in_the_last_of_many_numbers_is_the_letter_the_command_draws() {
+        // O nome esticado: numero do nome, tamanho e o caractere do fim — ！
+        // em 119 mensagens, ッ na outra ("リュカーーーッ！").
+        let kana = |text: &str| text.chars().map(|c| encode(c).unwrap()).collect::<Vec<_>>();
+        let mut codes = Vec::new();
+        for i in 0..120u16 {
+            codes.push(encode('◆').unwrap());
+            codes.extend(kana("むらのひとは"));
+            let last = if i == 60 { 'ッ' } else { '！' };
+            codes.extend([0xFF26, 3, 1 + i % 2, encode(last).unwrap()]);
+            codes.extend(kana("きょうもげんきにはたらいている"));
+            codes.extend([0xFF03, 0xFF00, END]);
+        }
+        let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
+        let found = extract(&data, &HashSet::new(), &[]).unwrap();
+        let entry = &found.entries[60];
+        assert!(
+            entry
+                .source_text
+                .contains("ひとは[FF26:0003:0001]ッきょうも"),
+            "{}",
+            entry.source_text
+        );
+        assert_eq!(entry.metadata["lettered"][0], "[FF26:0003:0001]");
+        // Ele desenha o nome antes da letra: ocupa a linha (`letter_only` e
+        // so o que desenha a letra e nada mais).
+        assert!(entry.metadata.get("letter_only").is_none());
+        let text = &found.entries[59].source_text;
+        assert!(text.contains("[FF26:0003:0002:0009]きょうも"), "{text}");
+    }
+
+    #[test]
+    fn a_name_the_game_writes_before_the_sentence_is_counted() {
+        // O nome de quem age abre a mensagem, fora da frase ("[FF11]は ..."):
+        // ele ocupa a primeira linha, e a entry diz quantos ha.
+        let kana = |text: &str| text.chars().map(|c| encode(c).unwrap()).collect::<Vec<_>>();
+        let mut codes = Vec::new();
+        for _ in 0..120 {
+            codes.push(0xFF11);
+            codes.extend(kana("はきょうもげんきにはたらいている"));
+            codes.extend([0xFF03, 0xFF00, END]);
+        }
+        let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
+        let found = extract(&data, &HashSet::new(), &[]).unwrap();
+        let entry = &found.entries[60];
+        assert!(entry.source_text.starts_with('は'), "{}", entry.source_text);
+        assert_eq!(entry.metadata["names_before"], 1);
     }
 
     #[test]

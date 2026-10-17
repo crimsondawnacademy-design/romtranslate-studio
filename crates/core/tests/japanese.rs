@@ -1044,6 +1044,99 @@ mod bank {
         }
     }
 
+    /// Sala com a tabela DENTRO do bloco, como o texto de batalha do jogo
+    /// medido (entrada de um arquivo de pares offset/tamanho) e os titulos
+    /// de musica (soltos, achados por ponteiro de ROM): cada mensagem sai
+    /// inteira, com o codigo 0 lido como espaco, pode crescer, e o bloco que
+    /// cresce muda de lugar com quem aponta pra ele reapontado.
+    #[test]
+    fn a_room_with_its_table_inside_grows_and_who_points_to_it_follows() {
+        use romtranslate_core::synth::{
+            JIS16_ARCHIVE_AT, JIS16_ARCHIVE_PADDING, JIS16_ARCHIVE_ROOM, JIS16_LOOSE_AT,
+            JIS16_LOOSE_POINTER, JIS16_TITLES,
+        };
+        let tmp = TempDir::new("bank-inline");
+        let rom = synth::make_gba_rom_jis16_archive();
+        let source = tmp.0.join("game.gba");
+        fs::write(&source, &rom).unwrap();
+        let dir = tmp.0.join("game.rtsproj");
+        create_project(CreateProjectArgs {
+            source_path: source,
+            platform: Platform::Gba,
+            adapter_id: GbaAdapter.id().to_string(),
+            source_language: Some("ja".to_string()),
+            target_language: "pt-BR".to_string(),
+            project_dir: dir.clone(),
+        })
+        .unwrap();
+        extract_project(&dir).unwrap();
+
+        let entries = ProjectDb::open(&dir).unwrap().load_entries().unwrap();
+        let first = by_text(&entries, &synth::jis16_battle_message(0));
+        assert!(first.can_grow());
+        assert_eq!(first.metadata["bank"]["at"], JIS16_ARCHIVE_AT);
+        assert_eq!(first.metadata["bank"]["entry"], JIS16_ARCHIVE_ROOM);
+        let title = by_text(&entries, JIS16_TITLES[1]);
+        assert!(title.can_grow());
+        assert_eq!(title.metadata["bank"]["at"], JIS16_LOOSE_AT);
+        by_text(&entries, JIS16_TITLES[4]);
+
+        // A mensagem de batalha k, lida como o jogo le: o bloco pelo arquivo
+        // (ou o ponteiro), o offset na tabela dentro dele, e dali ate o
+        // 0xFFFF.
+        let read = |rom: &[u8], block: usize, k: usize| -> String {
+            let mut at = block + u16_at(rom, block + 12 + 2 * k);
+            let mut out = String::new();
+            while u16_at(rom, at) != 0xFFFF {
+                let code = u16_at(rom, at) as u16;
+                out.push_str(&match code {
+                    0 => " ".to_string(),
+                    code if code >= 0xFF00 => format!("[{code:04X}]"),
+                    code => kuten::decode(code).map_or(format!("<{code:04X}>"), String::from),
+                });
+                at += 2;
+            }
+            out
+        };
+        let pair = JIS16_ARCHIVE_AT + 8 + 8 * JIS16_ARCHIVE_ROOM;
+        let old_block = JIS16_ARCHIVE_AT + u32_at(&rom, pair);
+
+        set_translations(
+            &dir,
+            &[
+                (
+                    &synth::jis16_battle_message(0),
+                    "O povo da vila trabalha muito",
+                ),
+                (JIS16_TITLES[1], "Pao caseiro"),
+            ],
+        );
+        let outcome = reinsert_project_with(&dir, ErrorPolicy::Block).unwrap();
+        assert_eq!(outcome.apply.applied, 2);
+        assert_eq!(outcome.apply.relocated, 2);
+        let working = fs::read(&outcome.working_path).unwrap();
+
+        let block = JIS16_ARCHIVE_AT + u32_at(&working, pair);
+        assert!(JIS16_ARCHIVE_PADDING.contains(&block), "0x{block:X}");
+        assert!(u32_at(&working, pair + 4) > u32_at(&rom, pair + 4));
+        assert_eq!(
+            read(&working, block, 0),
+            "[FF11]Ｏ ｐｏｖｏ ｄａ ｖｉｌａ ｔｒａｂａｌｈａ ｍｕｉｔｏ"
+        );
+        assert_eq!(read(&working, block, 7), read(&rom, old_block, 7));
+        // O resto do arquivo fica como estava.
+        for i in (0..8).filter(|&i| i != JIS16_ARCHIVE_ROOM) {
+            let at = JIS16_ARCHIVE_AT + 8 + 8 * i;
+            assert_eq!(working[at..at + 8], rom[at..at + 8], "entrada {i}");
+        }
+
+        // A sala solta pode ir pro lugar que a de batalha deixou.
+        let loose = pointer_at(&working, JIS16_LOOSE_POINTER);
+        assert_ne!(loose, JIS16_LOOSE_AT);
+        assert_eq!(read(&working, loose, 1), "Ｐａｏ ｃａｓｅｉｒｏ");
+        assert_eq!(read(&working, loose, 4), read(&rom, JIS16_LOOSE_AT, 4));
+    }
+
     #[test]
     fn a_block_that_grows_moves_to_the_free_space_and_the_game_still_finds_it() {
         let tmp = TempDir::new("bank-grow");

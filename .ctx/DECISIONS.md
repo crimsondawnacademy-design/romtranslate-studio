@@ -2089,3 +2089,53 @@ cada um — sem ela o jogo leria o próximo código como a letra.
 parâmetros na medição, mas tudo indica que leva 2 e o terceiro é a letra
 seguinte (！, 。, quebra de linha, ッ). Só uma fala termina em "ッ" — a
 primeira do jogo —, e o efeito em si desenha o traço japonês "ー".
+
+## 2026-10-16 — Sala com a tabela embutida: o texto de batalha passa a crescer
+
+**Contexto:** o texto de batalha do Mother 3 (1.668 mensagens) e os títulos do
+tocador de música não estavam em nenhum banco reconhecido: cada pedaço ficava
+preso no espaço do original, e a tradução saía "[FF01]cauda", "COME", "Ur".
+Eles moram em blocos "bxt": etiqueta, versão, quantidade e offsets u16
+relativos ao COMEÇO do próprio bloco, depois as mensagens com 0xFFFF. O de
+batalha é a entrada 934 de um arquivo "sar " (etiqueta, quantidade e pares u32
+offset/tamanho relativos ao arquivo); o dos títulos fica solto, achado por
+dois ponteiros de ROM. E as palavras de batalha são separadas pelo código 0
+(o espaço de largura inteira do JIS), que a leitura tratava como fim: cada
+mensagem saía picada em 2 ou 3 frases.
+
+**Decisão:** `bank::inline_room` reconhece a sala pela estrutura (cabeçalho de
+0, 4 ou 8 bytes, quantidade, menor offset logo depois da tabela e todos logo
+depois de um fim de mensagem); `archive_at` reconhece o arquivo de pares
+(offset, tamanho); `loose_inline` aceita sala solta só quando há ponteiro de
+ROM pra ela (sem quem aponte, o bloco não pode sair do lugar). A remontagem
+reescreve a tabela dentro do bloco, guarda mensagem repetida uma vez só e,
+se o bloco cresce, reaponta o par (offset e tamanho) ou cada ponteiro. Dentro
+de mensagem conhecida, o código 0 é lido como espaço (`kuten`, `known`).
+No jogo, o código que monta o par só calcula ponteiro e tamanho (sem cópia
+pra buffer); a batalha foi vista rodando com o bloco realocado (62.920 bytes,
+de 48.780).
+
+## 2026-10-16 — Largura de código na quebra de linha: nome ocupa no mínimo 8
+
+**Decisão:** (1) código que escreve algo na linha vale pelo menos
+`UNMEASURED` (8): o original mede o nome japonês, e o traduzido é maior (nome
+de item: 6 na medida, até 8 na tradução); (2) código raro demais pra medir
+vale o que sobrava pra ele na linha mais cheia que o tem, dividido entre os
+códigos dela, até 8 — o menu da batalha (`FF35`/`FF37`) cabe numa linha como
+no original; (3) a fila de espaços da tradução entre palavras fica, se cabe
+(alinhamento das opções do menu); (4) o nome que o jogo escreve ANTES da frase
+("[FF11]は…", fora da entry) conta na primeira linha: `kuten::find_names`
+marca o código seguido de partícula em ≥ 1/3 dos usos, a entry guarda
+`names_before`, e o layout ganha `lead`. Sem isso o jogo partia a palavra na
+borda ("dano fa/tal!"); visto corrigido no emulador.
+
+## 2026-10-16 — Kana no lugar de parâmetro é texto; letra desenhada por ocorrência
+
+**Decisão:** na leitura, (1) kana seguido de mais texto no lugar de um
+parâmetro é texto — o `FF21` leva número no roteiro, mas no texto de batalha
+aparece sem ele ("[FF21]のこえ"), e o の ficava no jogo traduzido; kana
+sozinho continua número (a pausa longa "[FF04]わ" do fim de mensagem); (2) o
+último de 2+ parâmetros que é kana é a letra que o comando desenha, mesmo que
+o comando não seja de letra na maioria dos usos — o nome esticado `FF26`
+fecha com ！ ou 。, e com ッ justo na primeira fala do jogo ("Lucas---ッ!").
+Só o comando que sempre desenha só a letra (`letter_only`) vale 0 na linha.

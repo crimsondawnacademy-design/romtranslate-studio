@@ -360,9 +360,25 @@ tem (a mesma sala em capítulos diferentes), guardando cada uma uma vez o
 roteiro inteiro cabe, com folga: num teste com o resto preenchido a 1,9 vez,
 7.457 mensagens entraram e nenhuma ficou sem espaço. **O que foi visto
 rodando** (emulador sem janela): o primeiro diálogo do jogo, nos dois
-arranjos, com as linhas quebradas pelo app. Só essa sala. Os outros bancos
-de texto desse jogo (menus, batalha, nomes: 15% do texto) têm outra
-estrutura e continuam com a tradução presa ao espaço da original.
+arranjos, com as linhas quebradas pelo app.
+
+**Sala com a tabela embutida** (mesmo módulo). O texto de batalha do mesmo
+jogo (1.668 mensagens) e os títulos do tocador de música ficam em blocos com
+cabeçalho, quantidade e posições de 16 bits relativas ao começo do **próprio
+bloco**. O de batalha é uma entrada de um arquivo com pares (posição,
+tamanho) de 32 bits; o dos títulos fica solto, e o jogo o acha por ponteiro.
+O app reconhece os dois pela estrutura, remonta o bloco com a tabela
+reescrita dentro dele (mensagem repetida guardada uma vez) e, se ele cresce,
+reaponta o par (posição e tamanho) ou cada ponteiro — bloco solto sem
+ponteiro que o ache não é mexido. Nesses textos as palavras são separadas
+pelo código 0 (o espaço de largura inteira do JIS), que fora de mensagem é
+preenchimento: dentro de mensagem conhecida ele é lido como espaço, e cada
+mensagem sai inteira, em vez de picada em 2 ou 3 frases. Quebra de linha:
+nome escrito por comando conta no mínimo 8 letras (o nome traduzido é maior
+que o japonês medido), o nome que o jogo escreve antes da frase (o de quem
+age, na batalha) conta na primeira linha, e o menu dentro da mensagem cabe
+numa linha só, com o alinhamento das opções. **Visto rodando**: uma batalha
+inteira com o bloco de batalha realocado (62.920 bytes, de 48.780).
 
 **Texto ASCII traduzido para idioma com acento**: num jogo que guarda o
 texto em ASCII (é o que a extração estruturada lê; no DS, também UTF-16),

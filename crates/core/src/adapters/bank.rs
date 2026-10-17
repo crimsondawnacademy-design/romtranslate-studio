@@ -18,6 +18,14 @@
 //! (o tamanho da tabela, ou um a menos), e o primeiro offset e 4, logo depois
 //! desse cabecalho — como nas 481 salas do banco principal.
 //!
+//! E tem sala com a tabela DENTRO do bloco (16/10/2026): o texto de batalha
+//! (1.668 mensagens) e os titulos do tocador de musica abrem com um cabecalho,
+//! a quantidade e os offsets u16 relativos ao comeco do proprio bloco
+//! (`inline_room`). A de batalha e uma entrada de um ARQUIVO — etiqueta,
+//! quantidade e pares u32 (offset, tamanho) relativos ao comeco dele
+//! (`archive_at`); a dos titulos fica solta e o jogo a acha por ponteiro de
+//! ROM. Antes disto cada fala de batalha ficava presa no espaco do original.
+//!
 //! Nada aqui supoe um jogo: o banco e reconhecido pela propria estrutura, com
 //! centenas de offsets que tem que cair no lugar certo. Com ele, mensagem que
 //! cresce nao precisa caber no espaco da original: o bloco e remontado com as
@@ -47,6 +55,21 @@ const MIN_PADDING: usize = 64 * 1024;
 const MIN_RUNS: usize = 15;
 /// Paragrafos mais altos que a caixa pra valer como prova de que ela rola.
 const MIN_TALL: usize = 8;
+/// Onde o cartucho aparece na memoria do GBA (o unico que usa este modulo):
+/// ponteiro de ROM = isto + a posicao no arquivo.
+const ROM_BASE: usize = 0x0800_0000;
+/// Bytes antes da quantidade numa sala com a tabela embutida: etiqueta e
+/// versao (as do jogo medido), so a etiqueta, ou nada.
+const INLINE_HEADERS: [usize; 3] = [8, 4, 0];
+/// Mensagens pra valer como sala embutida.
+const MIN_INLINE: usize = 4;
+/// O minimo que ocupa um codigo do meio da linha que escreve alguma coisa (um
+/// nome), ou que e raro demais pra medir. O original mede o nome no idioma
+/// dele, e o traduzido e maior: no jogo medido o nome de item ia a 6 letras
+/// na medida e vai a 8 na traducao. E numa sala sem codigo medido nenhum (as
+/// dicas) o nome valia 0, e a linha com ele passava da caixa. Quebrar cedo
+/// nao estraga nada.
+const UNMEASURED: usize = 8;
 
 fn u16_at(data: &[u8], at: usize) -> Option<u16> {
     Some(u16::from_le_bytes(data.get(at..at + 2)?.try_into().ok()?))
@@ -71,12 +94,24 @@ pub(crate) struct Room {
     /// tabela, em ordem e sem repetir, com o 0 na frente. Vazio = bloco com
     /// offset fora dele: nao e remontado.
     starts: Vec<usize>,
+    /// Tabela dentro do proprio bloco (`inline_room`): `text` e o comeco do
+    /// bloco, os offsets contam dali, e o trecho 0 e o cabecalho com a tabela.
+    inline: bool,
 }
 
 impl Room {
+    /// Onde o bloco comeca: na tabela, ou no cabecalho da sala embutida.
+    fn start(&self) -> usize {
+        if self.inline {
+            self.text
+        } else {
+            self.table
+        }
+    }
+
     /// Bytes que o bloco ocupa, tabela e texto.
     fn size(&self) -> usize {
-        self.text + self.text_len - self.table
+        self.text + self.text_len - self.start()
     }
 
     /// (inicio, fim) do trecho da mensagem `i` dentro do bloco de texto.
@@ -97,14 +132,28 @@ impl Room {
     }
 }
 
+/// Quem aponta pros blocos de um banco: e o que muda quando um bloco sai do
+/// lugar.
+#[derive(Debug, Clone)]
+enum Refs {
+    /// Diretorio: u32 com a quantidade e um offset u32 por entrada, relativos
+    /// ao comeco dele.
+    Dir,
+    /// Arquivo (`archive_at`): par u32 (offset, tamanho) por entrada.
+    Archive,
+    /// Sala embutida solta: as posicoes dos ponteiros de ROM pra ela.
+    Pointers(Vec<usize>),
+}
+
 #[derive(Debug, Clone)]
 pub(crate) struct Bank {
-    /// Onde o banco comeca (o u32 da quantidade).
+    /// Onde o banco comeca (o diretorio, o arquivo ou a sala solta).
     pub at: usize,
     rooms: Vec<Room>,
     /// Diretorio que tambem aponta pra outros dados: cada sala e um tipo de
     /// texto (itens, dicas, lugares), numa janela propria.
     mixed: bool,
+    refs: Refs,
 }
 
 impl Bank {
@@ -162,7 +211,175 @@ fn bank_at(data: &[u8], at: usize) -> Option<Bank> {
         at,
         rooms,
         mixed: true,
+        refs: Refs::Dir,
     })
+}
+
+/// O arquivo que comeca em `at`, se a estrutura inteira confere e alguma
+/// entrada dele e uma sala embutida: 4 bytes de etiqueta, um u32 com a
+/// quantidade e um par u32 (offset, tamanho) por entrada, relativos ao comeco
+/// do arquivo — o primeiro logo depois dos pares, cada um depois do fim do
+/// anterior. No jogo medido o texto de batalha e uma das 940 entradas de um.
+fn archive_at(data: &[u8], at: usize) -> Option<Bank> {
+    let count = u32_at(data, at + 4)?;
+    if !DIR_ENTRIES.contains(&count) {
+        return None;
+    }
+    let dir_len = 8 + 8 * count;
+    let pair = |i: usize| {
+        Some((
+            u32_at(data, at + 8 + 8 * i)?,
+            u32_at(data, at + 12 + 8 * i)?,
+        ))
+    };
+    let (mut end, mut filled) = (dir_len, 0);
+    for i in 0..count {
+        let (offset, size) = pair(i)?;
+        if size == 0 {
+            continue;
+        }
+        let ceiling = if filled == 0 {
+            dir_len + DIR_SLACK
+        } else {
+            data.len() - at
+        };
+        if offset < end || offset > ceiling || offset + size > data.len() - at {
+            return None;
+        }
+        end = offset + size;
+        filled += 1;
+    }
+    if filled < 8 {
+        return None;
+    }
+    let rooms: Vec<Room> = (0..count)
+        .filter_map(|i| {
+            let (offset, size) = pair(i).filter(|&(_, size)| size > 0)?;
+            let room = inline_room(data, at + offset, Some(size))?;
+            Some(Room {
+                entries: vec![i],
+                ..room
+            })
+        })
+        .collect();
+    (!rooms.is_empty()).then_some(Bank {
+        at,
+        rooms,
+        mixed: true,
+        refs: Refs::Archive,
+    })
+}
+
+/// A sala com a tabela DENTRO do bloco que comeca em `start`: um cabecalho
+/// (`INLINE_HEADERS`), um u32 com a quantidade N e N offsets u16 relativos ao
+/// comeco do bloco — o menor logo depois da tabela (alinhado em 4), e todos
+/// logo depois de um fim de mensagem. `limit` = os bytes do bloco, quando
+/// quem aponta pra ele diz; sem ele, o bloco vai ate o fim da ultima
+/// mensagem e de uma marca de fim que repete a etiqueta ("~" e os tres
+/// primeiros bytes dela, "~bxt" no jogo medido), se tem.
+fn inline_room(data: &[u8], start: usize, limit: Option<usize>) -> Option<Room> {
+    INLINE_HEADERS.iter().find_map(|&header| {
+        let slots = u32_at(data, start + header)?;
+        let table = start + header + 4;
+        let first = (header + 4 + 2 * slots).next_multiple_of(4);
+        if slots < MIN_INLINE || first > MAX_TEXT || limit.is_some_and(|limit| first >= limit) {
+            return None;
+        }
+        // A conta barata primeiro: esta funcao roda em cada posicao alinhada.
+        let mut offsets = Vec::with_capacity(slots);
+        for k in 0..slots {
+            let rel = usize::from(u16_at(data, table + 2 * k)?);
+            if rel % 2 != 0 || rel < first || limit.is_some_and(|l| rel + 2 > l) {
+                return None;
+            }
+            if rel != first && u16_at(data, start + rel - 2) != Some(END) {
+                return None;
+            }
+            offsets.push(rel);
+        }
+        if offsets.iter().min() != Some(&first) {
+            return None;
+        }
+        let far = offsets.iter().max().copied()?;
+        let closes = (far..MAX_TEXT)
+            .step_by(2)
+            .find(|rel| u16_at(data, start + rel) == Some(END))?;
+        let mut text_len = closes + 2;
+        match limit {
+            Some(limit) => text_len = limit,
+            None if header >= 4 => {
+                let mark = [b'~', data[start], data[start + 1], data[start + 2]];
+                if data.get(start + text_len..start + text_len + 4) == Some(&mark[..]) {
+                    text_len += 4;
+                }
+            }
+            None => {}
+        }
+        if start + text_len > data.len() {
+            return None;
+        }
+        let mut starts: Vec<usize> = std::iter::once(0).chain(offsets).collect();
+        starts.sort_unstable();
+        starts.dedup();
+        Some(Room {
+            entries: vec![0],
+            table,
+            slots,
+            text: start,
+            text_len,
+            starts,
+            inline: true,
+        })
+    })
+}
+
+/// As salas embutidas soltas de `data` (fora dos bancos de `banks`) que o
+/// jogo acha por ponteiro de ROM: so assim o bloco pode mudar de lugar.
+fn loose_inline(data: &[u8], banks: &[Bank]) -> Vec<Bank> {
+    let mut taken: Vec<(usize, usize)> = banks
+        .iter()
+        .flat_map(|bank| &bank.rooms)
+        .map(|room| (room.start(), room.text + room.text_len))
+        .collect();
+    taken.sort_unstable();
+    let mut rooms = Vec::new();
+    let mut at = 0;
+    while at + 16 <= data.len() {
+        let i = taken.partition_point(|&(begin, _)| begin <= at);
+        if let Some(&(_, end)) = i.checked_sub(1).map(|i| &taken[i]).filter(|r| at < r.1) {
+            at = end.next_multiple_of(4);
+            continue;
+        }
+        match inline_room(data, at, None) {
+            Some(room) => {
+                at = (room.text + room.text_len).next_multiple_of(4);
+                rooms.push(room);
+            }
+            None => at += 4,
+        }
+    }
+    let targets: HashMap<usize, usize> = rooms
+        .iter()
+        .enumerate()
+        .map(|(i, room)| (ROM_BASE + room.text, i))
+        .collect();
+    let mut pointers: Vec<Vec<usize>> = vec![Vec::new(); rooms.len()];
+    for at in (0..data.len().saturating_sub(3)).step_by(4) {
+        if let Some(&i) = u32_at(data, at).and_then(|value| targets.get(&value)) {
+            pointers[i].push(at);
+        }
+    }
+    rooms
+        .into_iter()
+        .zip(pointers)
+        .filter(|(_, pointers)| !pointers.is_empty())
+        .map(|(room, pointers)| Bank {
+            at: room.text,
+            rooms: vec![room],
+            mixed: true,
+            refs: Refs::Pointers(pointers),
+        })
+        .collect()
 }
 
 /// O banco em que o diretorio inteiro e de pares (tabela, texto), se quase
@@ -233,6 +450,7 @@ fn paired(data: &[u8], at: usize, dir: &[usize]) -> Option<Bank> {
                 text,
                 text_len,
                 starts: if whole { starts } else { Vec::new() },
+                inline: false,
             },
         );
     }
@@ -246,6 +464,7 @@ fn paired(data: &[u8], at: usize, dir: &[usize]) -> Option<Bank> {
         at,
         rooms: by_block.into_values().collect(),
         mixed: false,
+        refs: Refs::Dir,
     })
 }
 
@@ -330,6 +549,7 @@ fn loose_room(data: &[u8], at: usize, a: usize, b: usize, bounds: &[usize]) -> O
         text,
         text_len,
         starts,
+        inline: false,
     })
 }
 
@@ -338,25 +558,37 @@ pub(crate) fn find(data: &[u8]) -> Vec<Bank> {
     let mut banks = Vec::new();
     let mut at = 0;
     while at + 8 <= data.len() {
-        match bank_at(data, at) {
-            Some(bank) => {
-                at += 4 + 4 * u32_at(data, at).unwrap_or(0);
-                banks.push(bank);
-            }
-            None => at += 4,
+        if let Some(bank) = bank_at(data, at) {
+            at += 4 + 4 * u32_at(data, at).unwrap_or(0);
+            banks.push(bank);
+        } else if let Some(bank) = archive_at(data, at) {
+            at += 8 + 8 * u32_at(data, at + 4).unwrap_or(0);
+            banks.push(bank);
+        } else {
+            at += 4;
         }
     }
+    let loose = loose_inline(data, &banks);
+    banks.extend(loose);
+    banks.sort_by_key(|bank| bank.at);
     banks
 }
 
 /// Onde comeca cada mensagem dos bancos (posicao no arquivo): o que a
 /// tabela de cada bloco aponta. E o que impede a leitura de emendar o numero
-/// da sala, ou o fim de uma mensagem, na mensagem seguinte.
+/// da sala, ou o fim de uma mensagem, na mensagem seguinte. O cabecalho da
+/// sala embutida (o trecho 0) nao e mensagem.
 pub(crate) fn message_starts(banks: &[Bank]) -> std::collections::HashSet<usize> {
     banks
         .iter()
         .flat_map(|bank| &bank.rooms)
-        .flat_map(|room| room.starts.iter().map(move |start| room.text + start))
+        .flat_map(|room| {
+            let header = usize::from(room.inline);
+            room.starts
+                .iter()
+                .skip(header)
+                .map(move |start| room.text + start)
+        })
         .collect()
 }
 
@@ -435,16 +667,22 @@ pub(crate) struct Layout {
     /// quanto cada um ocupa na tela (um nome que o jogo escreve ali, ou
     /// nada). Codigo fora daqui fecha a linha.
     wide: HashMap<String, usize>,
+    /// O que o jogo escreve na primeira linha antes da entry: o nome de quem
+    /// age, no texto de batalha (`kuten`, "names_before").
+    lead: usize,
 }
 
 /// O que `learn` mediu num banco: o `Layout` (com a largura dos codigos do
-/// meio da linha que deu pra medir), os codigos que fecham a linha e a maior
-/// largura medida, que e a que leva o codigo raro demais pra medir — quebrar a
-/// linha cedo nao estraga nada, passar da caixa estraga.
+/// meio da linha que deu pra medir), os codigos que fecham a linha e, pros
+/// codigos raros demais pra medir, o que sobrava pra cada um na linha mais
+/// cheia que o tem (`rare`) — ate `UNMEASURED`, o que leva o que nem isso
+/// tem. Quebrar a linha cedo nao estraga nada, passar da caixa estraga; mas o
+/// menu do jogo (`[FF35]`, `[FF37]` no texto de batalha do jogo medido, meia
+/// duzia de usos) tem que caber numa linha so, como no original.
 struct Learned {
     layout: Layout,
     ends: HashSet<String>,
-    widest: usize,
+    rare: HashMap<String, usize>,
 }
 
 impl Learned {
@@ -458,7 +696,11 @@ impl Learned {
                 _ => None,
             })
             .map(|code| {
-                let width = self.layout.inline(code).unwrap_or(self.widest);
+                let width = self.layout.inline(code).unwrap_or_else(|| {
+                    self.rare
+                        .get(head(code))
+                        .map_or(UNMEASURED, |&room| room.min(UNMEASURED))
+                });
                 (head(code).to_string(), width)
             })
             .collect();
@@ -536,6 +778,9 @@ fn learn(sources: &[&str], width: usize) -> Option<Learned> {
     let mut paragraphs: Vec<usize> = Vec::new();
     let (mut softs, mut indented) = (0usize, 0usize);
     let mut room: HashMap<&str, Vec<usize>> = HashMap::new();
+    // Por codigo: o menor pedaco da sobra de uma linha que ele dividiu com os
+    // outros codigos dela.
+    let mut share: HashMap<&str, usize> = HashMap::new();
     for text in &texts {
         let mut lines = 1;
         let mut visible = 0;
@@ -562,6 +807,11 @@ fn learn(sources: &[&str], width: usize) -> Option<Learned> {
                     if let ([only], true) = (&inline[..], visible > 0) {
                         room.entry(head(only)).or_default().push(visible);
                     }
+                    for code in &inline {
+                        let part = width.saturating_sub(visible) / inline.len();
+                        let least = share.entry(head(code)).or_insert(part);
+                        *least = (*least).min(part);
+                    }
                     visible = 0;
                     inline.clear();
                     closed = Some(closed.unwrap_or(false) || code != soft);
@@ -583,17 +833,25 @@ fn learn(sources: &[&str], width: usize) -> Option<Learned> {
         .map(|(head, mut seen)| {
             seen.sort_unstable();
             let full = seen[(seen.len() * 99).div_ceil(100) - 1];
-            (head.to_string(), width.saturating_sub(full))
+            let room = width.saturating_sub(full);
+            (
+                head.to_string(),
+                if room > 0 { room.max(UNMEASURED) } else { 0 },
+            )
         })
         .collect();
     Some(Learned {
-        widest: wide.values().copied().max().unwrap_or(0),
+        rare: share
+            .into_iter()
+            .map(|(head, part)| (head.to_string(), part))
+            .collect(),
         ends: ends.iter().map(|code| code.to_string()).collect(),
         layout: Layout {
             width,
             soft: soft.to_string(),
             indent: indented * 2 >= softs,
             wide,
+            lead: 0,
         },
     })
 }
@@ -612,6 +870,7 @@ impl Layout {
                 .iter()
                 .map(|(head, width)| (head.clone(), width.as_u64().unwrap_or(0) as usize))
                 .collect(),
+            lead: bank.get("lead").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
         })
     }
 
@@ -696,6 +955,7 @@ impl Layout {
             layout: self,
             out: String::with_capacity(text.len() + 16),
             col: 0,
+            before: self.lead,
             widest: 0,
             fresh: true,
             lead: false,
@@ -740,6 +1000,8 @@ struct Line<'a> {
     out: String,
     /// Largura ja usada na linha, e a maior que uma linha chegou a ter.
     col: usize,
+    /// O que o jogo escreve antes da entry, na primeira linha (`Layout::lead`).
+    before: usize,
     widest: usize,
     /// A linha de cima do paragrafo ainda esta vazia.
     fresh: bool,
@@ -760,13 +1022,15 @@ impl Line<'_> {
         }
         if self.fresh {
             // O comeco do paragrafo fica como veio, espacos inclusive.
-            self.col = self.gap;
+            self.col = self.gap + std::mem::take(&mut self.before);
             self.lead = self.gap > 0 || self.word.chars().next().is_some_and(is_mark);
             self.fresh = false;
-            self.out.extend(std::iter::repeat_n(' ', self.col));
-        } else if self.col + 1 + self.word_width <= self.layout.width {
-            self.col += 1;
-            self.out.push(' ');
+            self.out.extend(std::iter::repeat_n(' ', self.gap));
+        } else if self.col + self.gap.max(1) + self.word_width <= self.layout.width {
+            // A fila de espacos da traducao fica: e o alinhamento de um menu.
+            let gap = self.gap.max(1);
+            self.col += gap;
+            self.out.extend(std::iter::repeat_n(' ', gap));
         } else {
             self.col = usize::from(self.layout.indent && self.lead);
             self.out.push_str(&self.layout.soft);
@@ -798,8 +1062,9 @@ pub(crate) fn tag(entries: &mut [TextEntry], banks: &[Bank]) -> usize {
             .filter_map(|(i, entry)| {
                 let at = entry.offset? as usize;
                 let room = bank.room_at(at)?;
-                room.segment_of(at, entry.original_bytes.len())?;
-                Some((i, room.entries[0]))
+                let segment = room.segment_of(at, entry.original_bytes.len())?;
+                // O cabecalho da sala embutida e a tabela, nao mensagem.
+                (!room.inline || segment > 0).then_some((i, room.entries[0]))
             })
             .collect();
         // A largura da caixa e aprendida pelo banco; no misto, sala a sala.
@@ -838,12 +1103,13 @@ fn tag_group(entries: &mut [TextEntry], bank: &Bank, inside: Vec<(usize, usize)>
     let learned = line.and_then(|width| learn(&sources, width));
     // Comando que so desenha a letra seguinte (`kuten::find_lettered`): a
     // letra ja conta como texto, e ele nao ocupa nada. A estimativa pela
-    // estatistica errava com ele (11 letras no jogo medido).
+    // estatistica errava com ele (11 letras no jogo medido). O nome esticado
+    // tambem fecha com uma letra, mas ocupa o nome: fica de fora.
     let lettered: HashSet<String> = inside
         .iter()
-        .filter_map(|&(i, _)| entries[i].metadata.get("lettered")?.as_array().cloned())
+        .filter_map(|&(i, _)| entries[i].metadata.get("letter_only")?.as_array().cloned())
         .flatten()
-        .filter_map(|token| token.as_str().map(|token| head(token).to_string()))
+        .filter_map(|head| head.as_str().map(str::to_string))
         .collect();
     for (i, index) in inside {
         let entry = &mut entries[i];
@@ -859,6 +1125,9 @@ fn tag_group(entries: &mut [TextEntry], bank: &Bank, inside: Vec<(usize, usize)>
                 wide.insert(code.clone(), 0);
             }
             entry.metadata["bank"]["break"] = serde_json::json!(layout.soft);
+            if let Some(names) = entry.metadata.get("names_before").and_then(|v| v.as_u64()) {
+                entry.metadata["bank"]["lead"] = serde_json::json!(names as usize * UNMEASURED);
+            }
             entry.metadata["bank"]["indent"] = serde_json::json!(layout.indent);
             entry.metadata["bank"]["wide"] = serde_json::json!(wide);
         }
@@ -1051,59 +1320,90 @@ struct Placed {
     no_room: usize,
 }
 
+/// O bloco remontado com os trechos novos: a tabela com cada offset levado
+/// pro comeco novo da mensagem dele, e as mensagens em fila. Na sala
+/// embutida o primeiro trecho ja e o cabecalho com a tabela (reescrita ali
+/// dentro), e mensagem repetida e guardada uma vez so. `None` = passou do que
+/// um offset de 16 bits alcanca.
+fn assemble(data: &[u8], room: &Room, segments: &[Vec<u8>]) -> Option<Vec<u8>> {
+    let mut moved: HashMap<usize, usize> = HashMap::new();
+    let mut text: Vec<u8> = Vec::new();
+    let mut seen: HashMap<&[u8], usize> = HashMap::new();
+    for (i, (start, segment)) in room.starts.iter().zip(segments).enumerate() {
+        if room.inline && i > 0 {
+            if let Some(&at) = seen.get(segment.as_slice()) {
+                moved.insert(*start, at);
+                continue;
+            }
+            seen.insert(segment, text.len());
+        }
+        moved.insert(*start, text.len());
+        text.extend_from_slice(segment);
+    }
+    let new_offset = |k: usize| -> Option<u16> {
+        let old = u16_at(data, room.table + 2 * k)?;
+        if old == END {
+            return Some(END);
+        }
+        u16::try_from(*moved.get(&(old as usize))?)
+            .ok()
+            .filter(|new| *new != END)
+    };
+    if room.inline {
+        let at = room.table - room.text;
+        for k in 0..room.slots {
+            text[at + 2 * k..at + 2 * k + 2].copy_from_slice(&new_offset(k)?.to_le_bytes());
+        }
+        return Some(text);
+    }
+    if text.len() > MAX_TEXT {
+        return None;
+    }
+    let mut bytes = Vec::with_capacity(2 * room.slots + text.len() + 2);
+    for k in 0..room.slots {
+        bytes.extend_from_slice(&new_offset(k)?.to_le_bytes());
+    }
+    bytes.extend(text);
+    Some(bytes)
+}
+
 /// Bloco a bloco: cada um vira tabela + mensagens em fila. Quem cabe onde
 /// estava fica; o resto disputa o espaco livre, os maiores primeiro, e o
 /// lugar de quem sai vira espaco livre pros outros.
-fn by_block(data: &[u8], bank: usize, parts: &[Part], free: &mut Vec<(usize, usize)>) -> Placed {
+fn by_block(data: &[u8], bank: &Bank, parts: &[Part], free: &mut Vec<(usize, usize)>) -> Placed {
     let mut placed = Placed::default();
     let mut leave: Vec<(&Part, Vec<u8>)> = Vec::new();
     for part in parts {
         let room = part.room;
-        // Onde cada mensagem comeca no texto novo.
-        let mut moved: HashMap<usize, usize> = HashMap::new();
-        let mut text_len = 0;
-        for (start, segment) in room.starts.iter().zip(&part.segments) {
-            moved.insert(*start, text_len);
-            text_len += segment.len();
-        }
-        // A tabela, com cada offset levado pro comeco novo da mensagem dele.
-        let mut bytes = Vec::with_capacity(2 * room.slots + text_len + 2);
-        let mut fits = text_len <= MAX_TEXT;
-        for k in 0..room.slots {
-            let old = u16_at(data, room.table + 2 * k).unwrap_or(END);
-            let new = match moved.get(&(old as usize)) {
-                _ if old == END => END,
-                Some(&new) if new < END as usize => new as u16,
-                _ => {
-                    fits = false;
-                    END
-                }
-            };
-            bytes.extend_from_slice(&new.to_le_bytes());
-        }
-        if !fits {
+        let Some(mut bytes) = assemble(data, room, &part.segments) else {
             // Passou do que um offset de 16 bits alcanca: o bloco fica como
             // no original.
             placed.no_room += part.applied;
             continue;
-        }
-        bytes.extend(part.segments.iter().flatten());
-        bytes.resize(bytes.len().next_multiple_of(4), 0xFF);
-        if bytes.len() <= room.size() {
+        };
+        let len = bytes.len();
+        bytes.resize(len.next_multiple_of(4), 0xFF);
+        if len <= room.size() {
             bytes.resize(room.size(), 0xFF);
-            placed.writes.push((room.table, bytes));
+            placed.writes.push((room.start(), bytes));
             placed.applied += part.applied;
         } else {
             leave.push((part, bytes));
         }
     }
     leave.sort_by_key(|(_, bytes)| std::cmp::Reverse(bytes.len()));
+    // Offset relativo ao banco nao volta pra tras; ponteiro de ROM vai a
+    // qualquer lugar.
+    let floor = match bank.refs {
+        Refs::Pointers(_) => 0,
+        _ => bank.at,
+    };
     let mut moved = true;
     while moved && !leave.is_empty() {
         moved = false;
         let mut waiting = Vec::new();
         for (part, bytes) in leave {
-            let Some(at) = allocate(free, bytes.len(), bank) else {
+            let Some(at) = allocate(free, bytes.len(), floor) else {
                 waiting.push((part, bytes));
                 continue;
             };
@@ -1111,10 +1411,10 @@ fn by_block(data: &[u8], bank: usize, parts: &[Part], free: &mut Vec<(usize, usi
             let room = part.room;
             // O lugar antigo e limpo agora e pode ser de outro bloco depois:
             // a ordem das escritas garante que o bloco novo fica por cima.
-            placed.writes.push((room.table, vec![0xFF; room.size()]));
-            point(&mut placed.writes, bank, room, at);
+            placed.writes.push((room.start(), vec![0xFF; room.size()]));
+            point(&mut placed.writes, bank, room, at, bytes.len());
             placed.writes.push((at, bytes));
-            release(free, room.table, room.size() & !3);
+            release(free, room.start(), room.size() & !3);
             placed.applied += part.applied;
             placed.relocated += part.applied;
         }
@@ -1124,14 +1424,32 @@ fn by_block(data: &[u8], bank: usize, parts: &[Part], free: &mut Vec<(usize, usi
     placed
 }
 
-/// Reaponta os pares do diretorio de `room` pra tabela que agora esta em
-/// `table`, com o texto logo depois dela.
-fn point(writes: &mut Vec<(usize, Vec<u8>)>, bank: usize, room: &Room, table: usize) {
-    let (table, text) = (table - bank, table + 2 * room.slots - bank);
-    for &index in &room.entries {
-        let mut entry = (table as u32).to_le_bytes().to_vec();
-        entry.extend_from_slice(&(text as u32).to_le_bytes());
-        writes.push((bank + 4 + 4 * index, entry));
+/// Faz quem acha `room` achar o bloco que agora esta em `at`, com `len`
+/// bytes: no diretorio, o par (tabela, texto logo depois dela); no arquivo,
+/// o par (offset, tamanho); na sala solta, cada ponteiro de ROM.
+fn point(writes: &mut Vec<(usize, Vec<u8>)>, bank: &Bank, room: &Room, at: usize, len: usize) {
+    let pair = |a: usize, b: usize| {
+        let mut bytes = (a as u32).to_le_bytes().to_vec();
+        bytes.extend_from_slice(&(b as u32).to_le_bytes());
+        bytes
+    };
+    match &bank.refs {
+        Refs::Dir => {
+            let (table, text) = (at - bank.at, at + 2 * room.slots - bank.at);
+            for &index in &room.entries {
+                writes.push((bank.at + 4 + 4 * index, pair(table, text)));
+            }
+        }
+        Refs::Archive => {
+            for &index in &room.entries {
+                writes.push((bank.at + 8 + 8 * index, pair(at - bank.at, len)));
+            }
+        }
+        Refs::Pointers(pointers) => {
+            for &pointer in pointers {
+                writes.push((pointer, ((ROM_BASE + at) as u32).to_le_bytes().to_vec()));
+            }
+        }
     }
 }
 
@@ -1165,7 +1483,7 @@ fn pooled(
     let rooms: Vec<&Room> = bank
         .rooms
         .iter()
-        .filter(|room| !room.starts.is_empty())
+        .filter(|room| !room.starts.is_empty() && !room.inline)
         .collect();
     let mut placed = Placed::default();
     let segments: Vec<Vec<&[u8]>> = rooms
@@ -1324,7 +1642,7 @@ fn pooled(
         bytes.resize(bytes.len().next_multiple_of(4), 0xFF);
         let place = allocate(free, bytes.len(), bank.at)?;
         for (r, table) in tables {
-            point(&mut placed.writes, bank.at, rooms[r], place + table);
+            point(&mut placed.writes, bank, rooms[r], place + table, 0);
         }
         placed.writes.push((place, bytes));
     }
@@ -1390,8 +1708,9 @@ pub(crate) fn plan(data: &[u8], entries: &[TextEntry]) -> Result<BankPlan> {
     let mut free = padding(data);
     for (at, parts) in parts {
         let mut attempt = free.clone();
-        let mut placed = by_block(data, at, &parts, &mut attempt);
-        if placed.no_room > 0 {
+        let mut placed = by_block(data, &banks[&at], &parts, &mut attempt);
+        // A sala embutida ja guarda a mensagem repetida uma vez so.
+        if placed.no_room > 0 && parts.iter().all(|part| !part.room.inline) {
             let mut again = free.clone();
             let whole = pooled(data, &banks[&at], &parts, &mut again);
             if let Some(whole) = whole.filter(|whole| whole.no_room < placed.no_room) {
@@ -1462,6 +1781,7 @@ mod tests {
             soft: "[FF01]".to_string(),
             indent: true,
             wide: HashMap::from([("[FF23".to_string(), 6), ("[FF04".to_string(), 0)]),
+            lead: 0,
         }
     }
 
@@ -1517,6 +1837,21 @@ mod tests {
         let (text, widest) = layout.wrap("◆paralelepipedos sim");
         assert_eq!((text.as_str(), widest), ("◆paralelepipedos[FF01] sim", 16));
         assert_eq!(layout.wrap("").0, "");
+        // A fila de espacos entre as opcoes de um menu fica, se cabe.
+        assert_eq!(
+            layout.wrap("[FF04]Sim   [FF04]Nao").0,
+            "[FF04]Sim   [FF04]Nao"
+        );
+        // O nome que o jogo escreve antes da entry ocupa a primeira linha.
+        let named = Layout {
+            lead: 6,
+            indent: false,
+            ..layout
+        };
+        assert_eq!(
+            named.wrap(" levou um dano fatal!").0,
+            " levou[FF01]um dano[FF01]fatal!"
+        );
     }
 
     #[test]
@@ -1530,5 +1865,16 @@ mod tests {
         lying[4..8].copy_from_slice(&68u32.to_le_bytes());
         lying[8..12].copy_from_slice(&0x00FF_FFFFu32.to_le_bytes());
         assert!(find(&lying).is_empty());
+        // Sala embutida cujos offsets nao caem depois de um fim de mensagem,
+        // e a mesma cortada no meio da tabela.
+        let mut fake = vec![0u8; 64];
+        fake[..4].copy_from_slice(b"msg ");
+        fake[8..12].copy_from_slice(&8u32.to_le_bytes());
+        for k in 0..8 {
+            fake[12 + 2 * k..14 + 2 * k].copy_from_slice(&(28 + 4 * k as u16).to_le_bytes());
+        }
+        assert!(inline_room(&fake, 0, None).is_none());
+        assert!(inline_room(&fake[..20], 0, None).is_none());
+        assert!(inline_room(&[], 0, None).is_none());
     }
 }

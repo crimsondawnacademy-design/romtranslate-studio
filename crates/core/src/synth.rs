@@ -1232,6 +1232,120 @@ pub fn make_gba_rom_jis16_mixed() -> Vec<u8> {
     rom
 }
 
+/// Onde comeca o arquivo de `make_gba_rom_jis16_archive`.
+pub const JIS16_ARCHIVE_AT: usize = 0x8000;
+/// A entrada do arquivo que e a sala com a tabela embutida (as outras sao
+/// dado).
+pub const JIS16_ARCHIVE_ROOM: usize = 2;
+/// O preenchimento (0xFF) de `make_gba_rom_jis16_archive`: o espaco livre.
+pub const JIS16_ARCHIVE_PADDING: std::ops::Range<usize> = 0x20000..0x38000;
+/// A sala embutida solta de `make_gba_rom_jis16_archive` e o ponteiro de ROM
+/// que leva a ela.
+pub const JIS16_LOOSE_AT: usize = 0x3C000;
+pub const JIS16_LOOSE_POINTER: usize = 0x7000;
+/// Os titulos da sala solta.
+pub const JIS16_TITLES: [&str; 5] = [
+    "リンゴ",
+    "パン",
+    "くすり",
+    "ランプ",
+    "ふしぎな まほうの ランプ",
+];
+
+/// A mensagem `i` (0 a 119) da sala embutida do arquivo, como a extracao a
+/// le: sujeito e predicado, sem o comando do nome que abre a mensagem no
+/// cartucho.
+pub fn jis16_battle_message(i: usize) -> String {
+    format!(
+        "{} {}",
+        JIS16_SUBJECTS[i / JIS16_PREDICATES.len()],
+        JIS16_PREDICATES[i % JIS16_PREDICATES.len()]
+    )
+}
+
+/// Uma sala com a tabela embutida, como as do jogo medido: etiqueta, versao
+/// 1, quantidade, um offset u16 por mensagem relativo ao comeco do bloco, as
+/// mensagens (o espaco entre palavras e o codigo 0, o espaco de largura
+/// inteira do JIS) e a marca de fim, "~" e a etiqueta.
+fn inline_block(tag: &[u8; 4], messages: &[Vec<u16>]) -> Vec<u8> {
+    let first = (12 + 2 * messages.len()).next_multiple_of(4);
+    let mut table = Vec::new();
+    let mut text: Vec<u8> = Vec::new();
+    for message in messages {
+        table.extend(((first + text.len()) as u16).to_le_bytes());
+        text.extend(message.iter().flat_map(|c| c.to_le_bytes()));
+        text.extend(0xFFFFu16.to_le_bytes());
+    }
+    let mut block = tag.to_vec();
+    block.extend(1u32.to_le_bytes());
+    block.extend((messages.len() as u32).to_le_bytes());
+    block.extend(table);
+    block.resize(first, 0);
+    block.extend(text);
+    block.extend([b'~', tag[0], tag[1], tag[2]]);
+    block.resize(block.len().next_multiple_of(4), 0);
+    block
+}
+
+/// GBA de 256 KiB com as duas formas de sala com a tabela embutida do jogo
+/// medido em 16/10/2026: em `JIS16_ARCHIVE_AT`, um ARQUIVO (etiqueta, u32 com
+/// 8 e 8 pares u32 (offset, tamanho) relativos a ele) cuja entrada
+/// `JIS16_ARCHIVE_ROOM` e a sala das 120 mensagens de `jis16_battle_message`,
+/// cada uma aberta pelo comando `FF11` (o nome de quem age); as outras
+/// entradas sao ruido. Em `JIS16_LOOSE_AT`, uma sala solta com os
+/// `JIS16_TITLES`, achada pelo ponteiro de ROM em `JIS16_LOOSE_POINTER`. 96
+/// KiB de 0xFF em `JIS16_ARCHIVE_PADDING`.
+pub fn make_gba_rom_jis16_archive() -> Vec<u8> {
+    let mut rom = make_gba_rom("JISARCH");
+    rom.resize(256 * 1024, 0);
+    let units = |text: &str| -> Vec<u16> {
+        text.chars()
+            .map(|c| match c {
+                ' ' => 0,
+                c => crate::kuten::encode(c).expect("caractere da fixture existe no JIS"),
+            })
+            .collect()
+    };
+    let messages: Vec<Vec<u16>> = (0..JIS16_SUBJECTS.len() * JIS16_PREDICATES.len())
+        .map(|i| {
+            let mut message = vec![0xFF11];
+            message.extend(units(&jis16_battle_message(i)));
+            message
+        })
+        .collect();
+    let entries = 8usize;
+    let mut blocks: Vec<u8> = Vec::new();
+    let mut pairs = Vec::new();
+    for i in 0..entries {
+        let block = if i == JIS16_ARCHIVE_ROOM {
+            inline_block(b"msg ", &messages)
+        } else {
+            make_random(0x100, 0x61 + i as u64)
+        };
+        pairs.push(((8 + 8 * entries + blocks.len()) as u32, block.len() as u32));
+        blocks.extend(block);
+    }
+    let mut archive = b"pak ".to_vec();
+    archive.extend((entries as u32).to_le_bytes());
+    for (offset, size) in pairs {
+        archive.extend(offset.to_le_bytes());
+        archive.extend(size.to_le_bytes());
+    }
+    archive.extend(blocks);
+    plant(&mut rom, JIS16_ARCHIVE_AT, &archive);
+    rom[JIS16_ARCHIVE_PADDING].fill(0xFF);
+    let tail = make_random(rom.len() - JIS16_ARCHIVE_PADDING.end, 31);
+    plant(&mut rom, JIS16_ARCHIVE_PADDING.end, &tail);
+    let titles: Vec<Vec<u16>> = JIS16_TITLES.iter().map(|title| units(title)).collect();
+    plant(&mut rom, JIS16_LOOSE_AT, &inline_block(b"ttl ", &titles));
+    plant(
+        &mut rom,
+        JIS16_LOOSE_POINTER,
+        &(0x0800_0000 + JIS16_LOOSE_AT as u32).to_le_bytes(),
+    );
+    rom
+}
+
 /// Texto de verdade do `make_gba_rom_with_junk`, na ordem em que aparece.
 pub const JUNK_ROM_PHRASES: [&str; 3] = [
     "The old bridge is out. Take the forest road.",
