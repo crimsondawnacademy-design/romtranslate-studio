@@ -836,6 +836,15 @@ fn tag_group(entries: &mut [TextEntry], bank: &Bank, inside: Vec<(usize, usize)>
         .get((lines.len() * 999).div_ceil(1000).saturating_sub(1))
         .copied();
     let learned = line.and_then(|width| learn(&sources, width));
+    // Comando que so desenha a letra seguinte (`kuten::find_lettered`): a
+    // letra ja conta como texto, e ele nao ocupa nada. A estimativa pela
+    // estatistica errava com ele (11 letras no jogo medido).
+    let lettered: HashSet<String> = inside
+        .iter()
+        .filter_map(|&(i, _)| entries[i].metadata.get("lettered")?.as_array().cloned())
+        .flatten()
+        .filter_map(|token| token.as_str().map(|token| head(token).to_string()))
+        .collect();
     for (i, index) in inside {
         let entry = &mut entries[i];
         entry.metadata["bank"] = serde_json::json!({
@@ -845,9 +854,13 @@ fn tag_group(entries: &mut [TextEntry], bank: &Bank, inside: Vec<(usize, usize)>
         });
         if let Some(learned) = &learned {
             let layout = learned.of(&entry.source_text);
+            let mut wide = layout.wide.clone();
+            for code in &lettered {
+                wide.insert(code.clone(), 0);
+            }
             entry.metadata["bank"]["break"] = serde_json::json!(layout.soft);
             entry.metadata["bank"]["indent"] = serde_json::json!(layout.indent);
-            entry.metadata["bank"]["wide"] = serde_json::json!(layout.wide);
+            entry.metadata["bank"]["wide"] = serde_json::json!(wide);
         }
         entry.max_bytes = None;
         entry.context = Some(match (line, &learned) {
