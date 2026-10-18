@@ -170,6 +170,8 @@ const COMPOSED: &[(char, char, &str)] = &[
 
 /// Letras com cedilha (a base ganha a cedilha na descendente).
 const CEDILLA: &[(char, char)] = &[('ç', 'c'), ('Ç', 'C')];
+/// A cedilha, nas 2 linhas logo abaixo da letra.
+const CEDILLA_ART: &str = "..#../.##..";
 
 // ---- Fonte estreita ----
 
@@ -310,7 +312,7 @@ fn cell(c: char) -> Option<Cell> {
     }
     if let Some((_, base)) = CEDILLA.iter().find(|(ch, _)| *ch == c) {
         let mut rows = base_cell(*base)?;
-        paint("..#../.##..", CAP_TOP + CAP, &mut rows);
+        paint(CEDILLA_ART, CAP_TOP + CAP, &mut rows);
         return Some(rows);
     }
     let (_, base, accent) = COMPOSED.iter().find(|(ch, _, _)| *ch == c)?;
@@ -463,6 +465,26 @@ pub fn charset() -> String {
     let mut chars: Vec<char> = glyphs().keys().copied().collect();
     chars.sort_unstable();
     chars.into_iter().collect()
+}
+
+/// O sinal de uma letra que a fonte compoe (acento ou cedilha): a letra base,
+/// o desenho do sinal (2 linhas de `WIDTH` colunas, separadas por `/`) e se
+/// ele vai embaixo da letra.
+pub fn mark(c: char) -> Option<(char, &'static str, bool)> {
+    if let Some((_, base)) = CEDILLA.iter().find(|(ch, _)| *ch == c) {
+        return Some((*base, CEDILLA_ART, true));
+    }
+    let (_, base, accent) = COMPOSED.iter().find(|(ch, _, _)| *ch == c)?;
+    let (_, art) = ACCENTS.iter().find(|(name, _)| name == accent)?;
+    Some((*base, art, false))
+}
+
+/// As letras que a fonte compoe com um sinal (`mark`), sempre na mesma ordem.
+pub fn marked() -> impl Iterator<Item = char> {
+    COMPOSED
+        .iter()
+        .map(|(c, _, _)| *c)
+        .chain(CEDILLA.iter().map(|(c, _)| *c))
 }
 
 /// O primeiro caractere de `text` que a fonte nao escreve.

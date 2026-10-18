@@ -32,6 +32,14 @@ A extração reconhece sozinha, pela estrutura do arquivo (sem saber que jogo
   frase (conta na largura da linha) e o espaço do JIS dentro de mensagem;
 - a **largura da caixa de texto** e a quebra de linha do jogo: nos bancos com
   caixa que rola, o app quebra as linhas da tradução sozinho.
+- a **fonte do texto**, quando o cartucho guarda cada desenho com o código
+  Shift-JIS na frente: o formato do desenho (1 bit por ponto, a largura da
+  linha pelo desenho de "｜" e a ordem dos bits pela haste de "Ｌ", "Ｆ", "Ｐ")
+  e os códigos de desenho vazio que nenhum texto usa e que não passam do
+  maior código que o texto do jogo mostra. Neles a tabela ganha as letras
+  acentuadas (á é í ó ú â ê ô ã õ ç à, maiúsculas e outras que a fonte do
+  app compõe), e a reinserção as desenha em todas as fontes nessa ordem:
+  a letra base da própria fonte, o sinal da fonte do app.
 
 Alfabeto próprio depois de um comando (o do "Sr. Saturno" no jogo medido):
 ensine numa tabela `tables/jis16@<COMANDO>.tbl` e extraia de novo. Na
@@ -76,9 +84,11 @@ das que não cabem ficam no painel "Provedor de IA" (configuração do app,
 que a CLI também lê).
 
 Regras que a validação cobra: os códigos do jogo (`[FFxx]`, `[FFxx:pppp]`)
-ficam todos; letra acentuada não existe na fonte do texto (o app troca na
-resposta da IA; no TSV, escreva sem acento); frase de espaço fixo cabe no
-espaço; linha que passa da caixa é erro onde o app não quebra sozinho.
+ficam todos; letra acentuada só onde a tabela a tem — com a fonte entendida
+(seção 1), o pedido à IA lista as letras e o TSV pode ter acento; a letra
+que a fonte não ganhou o app troca pela sem acento na resposta da IA (no
+TSV, é erro); frase de espaço fixo cabe no espaço; linha que passa da caixa
+é erro onde o app não quebra sozinho.
 
 Lixo lido como texto: `not-text <ids>` (ou a IA responde `<NOT_TEXT>`). Fica
 marcado mesmo extraindo de novo. Na janela: "Não é texto (é dado)" no editor
@@ -156,6 +166,13 @@ estado mostra os desenhos da versão em que ele foi gravado.
   vizinhas (no jogo medido: as telas de nomes, que dividem o bloco de quadros
   com o painel de ajustes).
 - **Teclado da tela de nomes** (hiragana/katakana): é entrada, não texto.
+- **Acento no texto traduzido antes da fonte ganhar as letras**: a tabela
+  passa a escrever acento, mas a tradução que já está no projeto foi gravada
+  sem; só uma nova rodada (ou uma correção) põe o acento. No jogo medido, a
+  fala alcança só os 4.096 primeiros desenhos da fonte (o código acima disso
+  dá a volta): é por isso que as letras ficam abaixo do maior código que o
+  texto do jogo mostra. Fonte de largura variável, de 2 ou 4 bits por ponto,
+  ou sem o código Shift-JIS na frente de cada desenho, fica sem acento.
 - **Campos de espaço fixo** (nomes de inimigo, item, PSI): a tradução cabe no
   espaço do maior nome da tabela; sai abreviada.
 - **Tradução em inglês ou abreviada** de rodadas antigas: procure no banco do

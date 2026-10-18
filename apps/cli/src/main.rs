@@ -720,6 +720,13 @@ fn run(cli: Cli) -> Result<Output, Failure> {
                 outcome.apply.no_room,
                 if outcome.verification.ok { "ok" } else { "FALHOU" }
             );
+            if outcome.letters > 0 {
+                let _ = write!(
+                    text,
+                    "\nletras acentuadas desenhadas na fonte do jogo: {}",
+                    outcome.letters
+                );
+            }
             if outcome.pictures.pictures > 0 || !outcome.pictures.left_out.is_empty() {
                 let _ = write!(
                     text,

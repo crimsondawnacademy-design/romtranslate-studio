@@ -33,6 +33,8 @@ pub struct ReinsertOutcome {
     /// Texto desenhado em imagem (`images::apply`): imagens regravadas e
     /// frases que ficaram no original.
     pub pictures: crate::images::Applied,
+    /// Letras acentuadas desenhadas na fonte do jogo (`images::letters`).
+    pub letters: usize,
 }
 
 /// O que fazer com a traducao que a validacao reprovou.
@@ -164,6 +166,7 @@ fn reinsert(
         .into_iter()
         .partition(|e| e.encoding == TextEncoding::Image);
     let mut drawn = crate::images::Applied::default();
+    let mut letters = 0;
 
     encode_table_entries(project_dir, &mut entries)?;
 
@@ -201,6 +204,17 @@ fn reinsert(
                  desses blocos (ou reinsira pulando as frases com erro)",
                 applied.report.packed_left_out
             )));
+        }
+        // A letra acentuada que a tabela do japones de 16 bits poe num codigo
+        // vazio da fonte e desenhada nela.
+        if project_dir
+            .join(crate::tbl::TABLES_DIR)
+            .join(format!("{}.tbl", crate::kuten::TABLE_ID))
+            .is_file()
+        {
+            let mut tables = ProjectTables::new(project_dir);
+            let table = tables.get(crate::kuten::TABLE_ID)?;
+            letters = crate::images::letters::draw(&original, &mut applied.bytes, table);
         }
         drawn = crate::images::apply(&mut applied.bytes, &pictures);
         if policy == ErrorPolicy::Block && !drawn.left_out.is_empty() {
@@ -252,6 +266,7 @@ fn reinsert(
         },
         skipped_errors,
         pictures: drawn,
+        letters,
     })
 }
 

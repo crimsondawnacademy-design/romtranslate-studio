@@ -2241,3 +2241,39 @@ patch continuam no disco). Ponytail: guardar o último resultado de cada passo
 no projeto quando isso confundir alguém.
 
 **Driver:** claude.
+
+## 2026-10-18 — Letra acentuada desenhada na fonte do jogo, em código vazio que o texto alcança
+
+**Contexto:** o Mother 3 chegou a 100% de texto em português sem acento: a
+fonte do texto tem o alfabeto latino em largura inteira e não tem á, ç. A
+tabela `jis16` é o que valida, monta o pedido à IA e grava; a troca pela letra
+sem acento acontecia porque a tabela não tinha a letra.
+
+**Decisão:** a extração acha a fonte pela estrutura (desenhos com o código
+Shift-JIS na frente, todas as fontes na mesma ordem da maior), entende o
+desenho (1 bit por ponto; largura da linha pelo "｜", ordem dos bits pela
+haste de Ｌ/Ｆ/Ｐ…) e escolhe, pra cada letra que a fonte do app compõe, um
+código com desenho vazio em todas essas fontes, que nenhum texto usa e que não
+passa do maior código de caractere que o texto guardado mostra. A tabela
+ganha `código=á`; tudo o mais (validação, lista do pedido, troca só do que
+falta, gravação) segue pela tabela. A reinserção desenha, na cópia de
+trabalho, cada letra acentuada que a tabela põe num código de desenho vazio
+do original: a letra base vem da própria fonte (mesmo tamanho e traço), o
+sinal da fonte do app, nas 2 linhas livres acima (cedilha abaixo); sem linha
+livre, a letra é achatada tirando linha repetida. O patch sai da cópia e leva
+os desenhos.
+
+**Alternativas consideradas:** desenhar a letra inteira com a fonte do app
+(5x7, menor e de outro traço que o latino do jogo); códigos do fim da fonte
+(depois do último kanji — o primeiro teste: a fala do Mother 3 só alcança os
+4.096 primeiros desenhos e mostrou kanji no lugar); procurar tabela de
+larguras (não há no jogo medido; sem exemplo pra testar, ficou de fora).
+
+**Consequências:** no Mother 3, 40 letras em 0x0EE6–0x0F0D, visto no
+emulador na fala. A tradução que já está no projeto continua sem acento até
+ser refeita. Fonte sem o código Shift-JIS na frente, de largura variável ou
+de 2/4 bits por ponto não ganha letra (a troca pela sem acento continua).
+`hand_lines` passou a tirar linha de acento de geração velha (a mesma letra
+que a extração de agora põe em outro código).
+
+**Driver:** claude.

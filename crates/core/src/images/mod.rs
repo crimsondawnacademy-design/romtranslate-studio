@@ -21,6 +21,7 @@
 // tamanho original nao muda de lugar (fica no original).
 
 pub mod font;
+pub mod letters;
 pub mod tilemap;
 
 use font::Font;

@@ -862,6 +862,94 @@ fn kanji_follow_the_order_of_the_game_font() {
     assert_eq!(table.lookup(&a.to_le_bytes()), Some((2, "あ")));
 }
 
+/// A fonte do jogo ganha as letras acentuadas: a extracao poe cada uma num
+/// codigo de desenho vazio que o texto nao usa, a lista do pedido a IA passa
+/// a te-las, e a reinsercao desenha a letra nas duas fontes da copia de
+/// trabalho (a base da propria fonte, o sinal da fonte do app) e grava o
+/// texto com ela. O original nao muda.
+#[test]
+fn accented_letters_are_drawn_in_the_game_font_and_written_with_it() {
+    use romtranslate_core::kuten;
+    use romtranslate_core::reinsert::{reinsert_project_with, ErrorPolicy};
+    use romtranslate_core::synth::JIS16_DRAWN_FONTS;
+    use romtranslate_core::tbl::TblTable;
+    let tmp = TempDir::new("letters");
+    let rom = synth::make_gba_rom_jis16_drawn_font();
+    let source = tmp.0.join("game.gba");
+    fs::write(&source, &rom).unwrap();
+    let dir = tmp.0.join("game.rtsproj");
+    create_project(CreateProjectArgs {
+        source_path: source.clone(),
+        platform: Platform::Gba,
+        adapter_id: GbaAdapter.id().to_string(),
+        source_language: Some("ja".to_string()),
+        target_language: "pt-BR".to_string(),
+        project_dir: dir.clone(),
+    })
+    .unwrap();
+    extract_project(&dir).unwrap();
+
+    let table = TblTable::load(&dir.join("tables").join("jis16.tbl")).unwrap();
+    let code = |c: char| -> usize {
+        let bytes: [u8; 2] = table.encode(&c.to_string()).unwrap().try_into().unwrap();
+        u16::from_le_bytes(bytes) as usize
+    };
+    let glyph = |rom: &[u8], font: usize, k: usize| -> Vec<u8> {
+        let (at, stride) = JIS16_DRAWN_FONTS[font];
+        rom[at + k * stride + 2..at + (k + 1) * stride].to_vec()
+    };
+    let blank = |g: &[u8]| g.iter().all(|&b| b == 0);
+    let accented = "áéíóúâêôãõçÁÉÍÓÚÂÊÔÃÕÇ";
+    let mut codes: Vec<usize> = accented.chars().map(code).collect();
+    for (c, &k) in accented.chars().zip(&codes) {
+        assert!(
+            kuten::decode(k as u16).is_none(),
+            "{c}: codigo vazio do JIS"
+        );
+        assert!(
+            blank(&glyph(&rom, 0, k)) && blank(&glyph(&rom, 1, k)),
+            "{c}"
+        );
+        assert!(
+            k as u16 != synth::JIS16_SPACE && k as u16 <= synth::JIS16_GLYPH,
+            "{c}: nem o espaco, nem acima do que o texto mostra"
+        );
+    }
+    codes.sort_unstable();
+    codes.dedup();
+    assert_eq!(codes.len(), accented.chars().count(), "um codigo por letra");
+    // O pedido a IA lista as letras; a que a fonte do app nao compoe ainda
+    // sai sem acento.
+    assert!(accented.chars().all(|c| table.charset().contains(c)));
+    assert_eq!(
+        table.drop_missing_accents("ação ő").as_deref(),
+        Some("ação o")
+    );
+
+    let text = "◆Até você![FF01]É ação, já.";
+    set_translations(&dir, &[(&synth::jis16_message(0), text)]);
+    let outcome = reinsert_project_with(&dir, ErrorPolicy::Block).unwrap();
+    assert_eq!(outcome.apply.applied, 1);
+    assert!(outcome.letters >= accented.chars().count());
+    assert_eq!(fs::read(&source).unwrap(), rom, "o original nao muda");
+    let working = fs::read(&outcome.working_path).unwrap();
+    let written = table.encode(text).unwrap();
+    assert!(working.windows(written.len()).any(|w| w == written));
+    for c in "éêçãÉáíó".chars() {
+        assert!(!blank(&glyph(&working, 0, code(c))), "{c} na fonte 16x10");
+        assert!(!blank(&glyph(&working, 1, code(c))), "{c} na fonte 8x8");
+    }
+    // "á" = o "ａ" da propria fonte, com o acento nas 2 linhas de cima (2
+    // bytes por linha na de 16x10).
+    let a = kuten::encode('ａ').unwrap() as usize;
+    let acute = glyph(&working, 0, code('á'));
+    assert_eq!(acute[4..], glyph(&rom, 0, a)[4..]);
+    assert!(!blank(&acute[..4]));
+    // O desenho vazio do espaco do jogo continua vazio.
+    let space = synth::JIS16_SPACE as usize;
+    assert!(blank(&glyph(&rom, 0, space)) && blank(&glyph(&working, 0, space)));
+}
+
 mod bank {
     use super::*;
     use romtranslate_core::kuten;

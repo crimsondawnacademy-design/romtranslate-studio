@@ -234,8 +234,17 @@ impl TblTable {
             // fala e enfeitar texto, se a tabela os tem: fora da lista, o
             // modelo os tira da traducao (no piloto de 13/10/2026 sumiu o
             // losango que abre cada fala).
+            // E as letras acentuadas que a tabela ganhou (desenhadas na fonte
+            // do jogo, `images::letters`).
+            let mut accented: Vec<char> = chars
+                .iter()
+                .copied()
+                .filter(|c| base_letter(*c).is_some())
+                .collect();
+            accented.sort_unstable();
             return (' '..='~')
                 .filter(|c| self.writes(*c))
+                .chain(accented)
                 .chain(KEPT_SIGNS.chars().filter(|c| chars.contains(c)))
                 .collect();
         }
@@ -378,6 +387,13 @@ impl TblTable {
         }
     }
 
+    /// Cada entrada da tabela: a chave e o texto.
+    pub fn entries(&self) -> impl Iterator<Item = (&[u8], &str)> {
+        self.entries
+            .iter()
+            .map(|(key, text)| (key.as_slice(), text.as_str()))
+    }
+
     pub fn len(&self) -> usize {
         self.entries.len()
     }
@@ -503,9 +519,18 @@ pub fn ensure_table(project_dir: &Path, id: &str, text: &str) -> Result<()> {
 /// (`[` + as unidades de 16 bits da chave + `]`: comando, comando com
 /// parametro, desenho proprio), nem o caractere da ordem JIS padrao naquele
 /// codigo (a tabela de antes de a extracao ler a ordem da fonte do jogo,
-/// `kuten::font_order`) — essas sao de uma geracao velha.
+/// `kuten::font_order`), nem uma letra acentuada que a gerada de agora poe em
+/// outro codigo (`images::letters::choose`) — essas sao de uma geracao velha.
 fn hand_lines<'a>(old: &'a str, generated: &str) -> Vec<&'a str> {
     let fresh: std::collections::HashSet<&str> = generated.lines().collect();
+    let drawn: std::collections::HashSet<&str> = generated
+        .lines()
+        .filter_map(|line| line.split_once('=').map(|(_, value)| value))
+        .filter(|value| {
+            let mut chars = value.chars();
+            chars.next().and_then(base_letter).is_some() && chars.next().is_none()
+        })
+        .collect();
     let generator_value = |hex: &str| {
         let bytes = decode_hex(hex)?;
         let units: Vec<String> = bytes
@@ -528,6 +553,7 @@ fn hand_lines<'a>(old: &'a str, generated: &str) -> Vec<&'a str> {
             line.split_once('=').is_some_and(|(hex, value)| {
                 generator_value(hex).as_deref() != Some(value)
                     && standard(hex).as_deref() != Some(value)
+                    && !drawn.contains(value)
             })
         })
         .collect()
@@ -617,7 +643,33 @@ mod tests {
         ensure_table(&dir, "jis16", &format!("{new}{key}=中\n")).unwrap();
         let written = fs::read_to_string(dir.join(TABLES_DIR).join("jis16.tbl")).unwrap();
         assert!(!written.contains(&format!("{key}={standard}")), "{written}");
+        // A letra acentuada que a extracao de agora poe em outro codigo: a do
+        // codigo velho e geracao velha e sai. Letra que a de agora nao poe em
+        // lugar nenhum fica (pode ser da pessoa).
+        ensure_table(&dir, "jis16", &format!("{new}0E0F=á\n")).unwrap();
+        ensure_table(&dir, "jis16", &format!("{new}0D0F=á\n9900=ñ\n")).unwrap();
+        ensure_table(&dir, "jis16", &format!("{new}0C0F=á\n")).unwrap();
+        let written = fs::read_to_string(dir.join(TABLES_DIR).join("jis16.tbl")).unwrap();
+        assert!(!written.contains("0D0F=á") && !written.contains("0E0F=á"));
+        assert!(written.contains("\n9900=ñ\n"), "{written}");
         fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_big_table_lists_the_accented_letters_it_gained() {
+        let mut text: String = (0..500u16)
+            .map(|k| {
+                format!(
+                    "{:04X}={}\n",
+                    0x1000 + k,
+                    char::from_u32(0x4E00 + k as u32).unwrap()
+                )
+            })
+            .collect();
+        text.push_str("2100=ａ\n2200=á\n2300=Ç\n");
+        let charset = TblTable::parse(&text).unwrap().charset();
+        assert!(charset.contains("aÇá"), "{charset}");
+        assert!(!charset.contains('一'), "o kanji nao vai pro pedido");
     }
 
     #[test]

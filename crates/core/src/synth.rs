@@ -997,19 +997,9 @@ pub fn make_gba_rom_jis16_font() -> Vec<u8> {
     let mut rom = make_gba_rom_jis16();
     rom.resize(128 * 1024, 0);
     let mut font = Vec::new();
-    for row in (1..=48usize).filter(|row| !JIS16_FONT_SKIPPED.contains(row)) {
-        for col in 1..=94usize {
-            // JIS -> Shift-JIS, pelos bytes JIS (0x20 + linha, 0x20 + coluna).
-            let (j1, j2) = (0x20 + row, 0x20 + col);
-            let lead = ((j1 + 1) >> 1) + 0x70;
-            let lead = if lead > 0x9F { lead + 0x40 } else { lead };
-            let trail = match j1 % 2 {
-                1 if j2 + 0x1F >= 0x7F => j2 + 0x20,
-                1 => j2 + 0x1F,
-                _ => j2 + 0x7E,
-            };
-            font.extend([lead as u8, trail as u8, 0, 0]);
-        }
+    for (row, col) in jis16_font_cells() {
+        font.extend(sjis_of(row, col));
+        font.extend([0, 0]);
     }
     plant(&mut rom, 0x10000, &font);
     // Kana pela tabela padrao (e igual na fonte); kanji pela posicao na fonte.
@@ -1033,6 +1023,81 @@ pub fn make_gba_rom_jis16_font() -> Vec<u8> {
     line.push(0xFFFF);
     let bytes: Vec<u8> = line.iter().flat_map(|c| c.to_le_bytes()).collect();
     plant(&mut rom, 0x18000, &bytes);
+    rom
+}
+
+/// As celulas do JIS (linha, coluna) na ordem das fontes de
+/// `make_gba_rom_jis16_font` e `make_gba_rom_jis16_drawn_font`: as linhas 1 a
+/// 48 sem as de `JIS16_FONT_SKIPPED`.
+fn jis16_font_cells() -> impl Iterator<Item = (usize, usize)> {
+    (1..=48usize)
+        .filter(|row| !JIS16_FONT_SKIPPED.contains(row))
+        .flat_map(|row| (1..=94usize).map(move |col| (row, col)))
+}
+
+/// O codigo Shift-JIS da celula (linha, coluna) do JIS, pelos bytes JIS (0x20
+/// + linha, 0x20 + coluna).
+fn sjis_of(row: usize, col: usize) -> [u8; 2] {
+    let (j1, j2) = (0x20 + row, 0x20 + col);
+    let lead = ((j1 + 1) >> 1) + 0x70;
+    let lead = if lead > 0x9F { lead + 0x40 } else { lead };
+    let trail = match j1 % 2 {
+        1 if j2 + 0x1F >= 0x7F => j2 + 0x20,
+        1 => j2 + 0x1F,
+        _ => j2 + 0x7E,
+    };
+    [lead as u8, trail as u8]
+}
+
+/// Onde comecam as duas fontes de `make_gba_rom_jis16_drawn_font` e quantos
+/// bytes tem cada desenho dela (o codigo Shift-JIS e os pontos).
+pub const JIS16_DRAWN_FONTS: [(usize, usize); 2] = [(0x20000, 22), (0x40000, 10)];
+
+/// O `make_gba_rom_jis16` em 512 KiB com DUAS fontes inventadas, desenhadas,
+/// na ordem da fonte do jogo medido (`jis16_font_cells`, cada desenho com o
+/// codigo Shift-JIS dele na frente), como as que o jogo medido em 18/10/2026
+/// guarda: em `JIS16_DRAWN_FONTS[0]`, desenhos de 16x10 pontos, 2 bytes por
+/// linha e o bit mais alto a esquerda; em `[1]`, de 8x8, 1 byte por linha e
+/// o bit mais BAIXO a esquerda. As letras e sinais de largura inteira sao os
+/// da fonte do app (`images::font`), a partir da coluna 1; o resto do que a
+/// tabela padrao tem e um quadrado; codigo vazio na tabela tem desenho vazio.
+pub fn make_gba_rom_jis16_drawn_font() -> Vec<u8> {
+    let mut rom = make_gba_rom_jis16();
+    rom.resize(512 * 1024, 0);
+    for (n, (at, stride)) in JIS16_DRAWN_FONTS.into_iter().enumerate() {
+        let (row_bytes, msb) = if n == 0 { (2, true) } else { (1, false) };
+        let rows = (stride - 2) / row_bytes;
+        let mut font = Vec::new();
+        for (row, col) in jis16_font_cells() {
+            let standard = ((row - 1) * 94 + col - 1) as u16;
+            let ink: Vec<u32> = match crate::kuten::decode(standard) {
+                None => Vec::new(),
+                Some(c) => {
+                    let ascii = char::from_u32((c as u32).wrapping_sub(0xFEE0))
+                        .filter(|_| ('\u{FF01}'..='\u{FF5E}').contains(&c));
+                    match ascii.and_then(crate::images::font::glyph) {
+                        // A partir da linha da maiuscula, uma coluna pra dentro.
+                        Some(glyph) => (0..rows)
+                            .map(|y| u32::from(glyph.rows.get(y + 2).copied().unwrap_or(0)) << 1)
+                            .collect(),
+                        None => (0..rows - 1)
+                            .map(|y| if y == 0 || y == rows - 2 { 0x7E } else { 0x42 })
+                            .collect(),
+                    }
+                }
+            };
+            let mut glyph = vec![0u8; rows * row_bytes];
+            for (y, bits) in ink.iter().enumerate() {
+                for x in (0..row_bytes * 8).filter(|x| bits >> x & 1 == 1) {
+                    glyph[y * row_bytes + x / 8] |=
+                        if msb { 0x80 >> (x % 8) } else { 1 << (x % 8) };
+                }
+            }
+            font.extend(sjis_of(row, col));
+            font.extend(glyph);
+        }
+        plant(&mut rom, at, &font);
+    }
     rom
 }
 

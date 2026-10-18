@@ -292,6 +292,8 @@ export interface ReinsertOutcome {
   skippedErrors: number;
   /** Texto desenhado em imagem: imagens regravadas e frases que ficaram no original. */
   pictures: PicturesApplied;
+  /** Letras acentuadas desenhadas na fonte do jogo. */
+  letters: number;
 }
 
 export interface PicturesApplied {

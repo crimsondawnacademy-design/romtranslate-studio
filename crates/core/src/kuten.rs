@@ -98,22 +98,41 @@ fn chars() -> &'static [u16] {
 /// isto de desenhos: menos que isso e tabela de outra coisa.
 const MIN_FONT: usize = 2000;
 
-/// A ordem dos caracteres na fonte do proprio jogo, quando o cartucho guarda
-/// cada desenho com o codigo Shift-JIS dele na frente: o codigo do texto e a
-/// posicao do desenho na fonte. Codigo -> caractere, 0 onde nao ha um.
-///
-/// Medido em 16/10/2026 no RPG japones de 32 MiB: duas fontes assim (7.333
-/// desenhos de 22 bytes e 7.332 de 10), em ordem JIS mas SEM seis das
-/// linhas vazias — o kana bate com a tabela padrao, e todo kanji fica 564
-/// posicoes antes dela (父 era lido 茶, "中断" saia "醇叔"). A fonte so vale se o
-/// kana dela bate com o da tabela padrao, que e como o texto foi reconhecido.
-fn font_order(data: &[u8]) -> Option<Vec<u16>> {
+/// Uma fonte guardada com o codigo Shift-JIS de cada desenho na frente: o
+/// desenho `k` mora em `start + k * stride`, os 2 bytes do codigo e depois
+/// `stride - 2` bytes de desenho.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct FontTable {
+    pub start: usize,
+    pub stride: usize,
+    pub count: usize,
+}
+
+impl FontTable {
+    /// Os 2 bytes do codigo Shift-JIS do desenho `k`.
+    pub fn code<'a>(&self, data: &'a [u8], k: usize) -> Option<&'a [u8]> {
+        let at = self.start + k * self.stride;
+        (k < self.count).then(|| data.get(at..at + 2)).flatten()
+    }
+
+    /// Os bytes do desenho `k`, sem o codigo.
+    pub fn glyph<'a>(&self, data: &'a [u8], k: usize) -> Option<&'a [u8]> {
+        let at = self.start + k * self.stride + 2;
+        (k < self.count)
+            .then(|| data.get(at..at + self.stride - 2))
+            .flatten()
+    }
+}
+
+/// As fontes que o arquivo guarda com o codigo Shift-JIS de cada desenho na
+/// frente, a maior primeiro (no empate, a que vem antes no arquivo). Cada uma
+/// comeca em "　、。" (81 40, 81 41, 81 42), um desenho a cada `stride`
+/// bytes, codigos sempre crescendo.
+pub(crate) fn fonts(data: &[u8]) -> Vec<FontTable> {
     let lead = |a: u8, b: u8| {
         matches!(a, 0x81..=0x9F | 0xE0..=0xEF) && (0x40..=0xFC).contains(&b) && b != 0x7F
     };
-    // (inicio, passo, desenhos) da maior fonte: comeca em "　、。" (81 40, 81
-    // 41, 81 42), um desenho a cada `passo` bytes, codigos sempre crescendo.
-    let mut best: Option<(usize, usize, usize)> = None;
+    let mut found = Vec::new();
     for (at, _) in data
         .windows(2)
         .enumerate()
@@ -132,12 +151,36 @@ fn font_order(data: &[u8]) -> Option<Vec<u16>> {
                 }
                 (count, last) = (count + 1, code);
             }
-            if count >= MIN_FONT && best.is_none_or(|(_, _, most)| count > most) {
-                best = Some((at, stride, count));
+            if count >= MIN_FONT {
+                found.push(FontTable {
+                    start: at,
+                    stride,
+                    count,
+                });
             }
         }
     }
-    let (start, stride, count) = best?;
+    // Estavel: no empate fica a ordem do arquivo.
+    found.sort_by_key(|font| std::cmp::Reverse(font.count));
+    found
+}
+
+/// A ordem dos caracteres na fonte do proprio jogo, quando o cartucho guarda
+/// cada desenho com o codigo Shift-JIS dele na frente (`fonts`, a maior): o
+/// codigo do texto e a posicao do desenho na fonte. Codigo -> caractere, 0
+/// onde nao ha um.
+///
+/// Medido em 16/10/2026 no RPG japones de 32 MiB: duas fontes assim (7.332
+/// desenhos de 22 bytes e 7.332 de 10), em ordem JIS mas SEM seis das
+/// linhas vazias — o kana bate com a tabela padrao, e todo kanji fica 564
+/// posicoes antes dela (父 era lido 茶, "中断" saia "醇叔"). A fonte so vale se o
+/// kana dela bate com o da tabela padrao, que e como o texto foi reconhecido.
+pub(crate) fn font_order(data: &[u8], fonts: &[FontTable]) -> Option<Vec<u16>> {
+    let FontTable {
+        start,
+        stride,
+        count,
+    } = *fonts.first()?;
     let mut font: Vec<u16> = (0..count)
         .map(|i| {
             let at = start + i * stride;
@@ -216,6 +259,10 @@ struct Dialect {
     /// Comandos cujo ultimo parametro e uma letra (`find_lettered`): a letra
     /// e lida como texto, e a traducao pode troca-la.
     lettered: HashSet<u16>,
+    /// Letras acentuadas que a reinsercao desenha em codigos livres da fonte
+    /// do jogo (`images::letters::choose`): entram na tabela no lugar do
+    /// `[xxxx]` do codigo.
+    letters: HashMap<u16, char>,
     /// Onde cada um vale: (unidade do comando, unidade do fim da mensagem),
     /// em ordem. So dentro de mensagem de banco (`honored`): fora dela o
     /// comando e um numero qualquer, e os numeros pequenos depois dele
@@ -323,7 +370,7 @@ fn table_with(dialect: &Dialect, commands: &BTreeSet<Vec<u16>>) -> String {
         if code == space {
             continue;
         }
-        match dialect.decode(code) {
+        match dialect.letters.get(&code).copied().or(dialect.decode(code)) {
             Some(c) => {
                 let _ = writeln!(out, "{}={c}", key(code));
             }
@@ -1010,9 +1057,10 @@ pub fn extract(
     let starts = &starts;
     let codes = units(data);
     let switches: HashMap<u16, HashMap<u16, char>> = alphabets.iter().cloned().collect();
+    let fonts = fonts(data);
     let mut dialect = Dialect {
         space: find_space(&codes),
-        font: font_order(data),
+        font: font_order(data, &fonts),
         shifted: honored(&codes, starts, &switches),
         switches,
         known: messages(&codes, starts),
@@ -1042,6 +1090,9 @@ pub fn extract(
     let mut spans = Vec::new();
     let mut commands = BTreeSet::new();
     let mut group = 0;
+    // O maior codigo de caractere que o texto guardado mostra: e ate onde o
+    // jogo desenha com certeza.
+    let mut shown = 0;
     for i in 0..found.len() {
         let last = found
             .get(i + 1)
@@ -1059,6 +1110,14 @@ pub fn extract(
             let (mut lettered, mut letter_only) = (BTreeSet::new(), BTreeSet::new());
             while at < span.end {
                 let (piece, len) = dialect.piece(&codes, at);
+                let drawn = match piece {
+                    Piece::Char(c) => c != ' ' && dialect.alphabet_at(&codes, at).is_none(),
+                    Piece::Glyph => true,
+                    _ => false,
+                };
+                if drawn {
+                    shown = shown.max(codes[at]);
+                }
                 if matches!(piece, Piece::Control) && len > 1 {
                     commands.insert(codes[at..at + len].to_vec());
                 }
@@ -1133,6 +1192,17 @@ pub fn extract(
         .iter()
         .filter(|e| is_sentence(&e.source_text))
         .count();
+    if let Some(order) = &dialect.font {
+        // Codigo que algum texto usa (ou o espaco) nao vira letra nova.
+        let used: HashSet<u16> = found
+            .iter()
+            .flat_map(|span| codes[span.begin..span.end].iter().copied())
+            .chain(dialect.space)
+            .collect();
+        dialect.letters = crate::images::letters::choose(data, &fonts, order, &used, shown)
+            .into_iter()
+            .collect();
+    }
 
     (sentences >= MIN_SENTENCES).then(|| Kuten16 {
         entries,
