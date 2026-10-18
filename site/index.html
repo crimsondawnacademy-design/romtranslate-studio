@@ -239,7 +239,8 @@
               <p>
                 O app confere o tamanho, os códigos escondidos no texto (por exemplo, o lugar onde
                 entra o nome do jogador) e as letras que o jogo sabe escrever. O que não cabe volta
-                sozinho para a IA. Você também pode corrigir qualquer fala à mão.
+                sozinho para a IA. A fala que continua com erro não é gravada: fica como no original,
+                e o resto entra. Você também pode corrigir qualquer fala à mão.
               </p>
             </li>
             <li class="card" style="--i: 4">
@@ -515,7 +516,7 @@
               <h2>O que foi medido até agora</h2>
               <p class="lead">
                 O app está em fase de testes (alpha). Estes números vêm de um único jogo comercial
-                de Game Boy Advance, do cartucho do próprio mantenedor. Nenhum dado desse jogo está
+                de Game Boy Advance, em inglês, do cartucho do próprio mantenedor. Nenhum dado desse jogo está
                 neste site ou no repositório.
               </p>
             </div>
@@ -539,12 +540,6 @@
                 <dd><b>Sim</b></dd>
               </div>
               <div class="stat">
-                <dt>
-                  falas da IA aprovadas na conferência (ChatGPT, com nova tentativa automática)
-                </dt>
-                <dd><b data-count="199">199</b> de 200</dd>
-              </div>
-              <div class="stat">
                 <dt>velocidade, com 4 pedidos à IA ao mesmo tempo</dt>
                 <dd><b data-count="200">200</b> falas em <span><b data-count="86">86</b> s</span></dd>
               </div>
@@ -555,29 +550,44 @@
             <h2>O que ainda não faz</h2>
             <ul class="marks no">
               <li>
-                <strong>Texto comprimido.</strong> Alguns jogos guardam o texto compactado. No Game
-                Boy Advance o app já lê e regrava o formato mais comum, mas isso ainda não passou
+                <strong>Texto comprimido.</strong> Alguns jogos guardam o texto compactado. Só no
+                Game Boy Advance o app lê e regrava o formato mais comum, e isso ainda não passou
                 por um jogo real. Nos outros consoles, ele só conta esses blocos.
               </li>
               <li>
-                <strong>Jogos em japonês.</strong> O app lê o japonês dos jogos de disco (Shift-JIS)
-                e o de 16 bits do primeiro jogo japonês real testado, de Game Boy Advance. Nele, as
-                falas do roteiro podem crescer e o app quebra as linhas na caixa de texto: o roteiro
-                e os menus foram traduzidos, e o jogo foi visto rodando num emulador da tela de nomes
-                até o primeiro diálogo. Sai sem acento, porque a fonte do jogo não tem. Nomes e itens
-                ganham o espaço do maior nome que o jogo usa ali; menus ainda saem abreviados quando a
-                palavra não cabe, e o teclado de nomes, que é desenho, continua em japonês.
+                <strong>Jogos em japonês.</strong> No RPG japonês de Game Boy Advance que foi
+                medido, 100% do texto saiu em português: a contagem do que sobrou em japonês deu
+                zero, e o jogo foi visto rodando num emulador na abertura, nas telas de nomes e de
+                ajustes, num diálogo e numa batalha. Foi um jogo só. O japonês de jogos de disco e
+                de Nintendo DS ainda não passou por um jogo real.
               </li>
               <li>
-                <strong>Fonte e texto desenhado.</strong> Ele não edita as letras do jogo nem texto
-                que é imagem, como a tela de título e alguns menus.
+                <strong>Texto desenhado em imagem.</strong> O app já lê e redesenha: ele acha as
+                imagens que têm letra, a IA lê os trechos e o japonês é apagado e escrito de novo em
+                português. Quem usa escolhe quais imagens têm japonês. Só foi medido nesse mesmo
+                jogo de Game Boy Advance. Seguem em japonês o teclado da tela de nomes, que é um
+                quadro de letras para escolher, e as telas que o jogo monta com sprites de tamanhos
+                misturados.
+              </li>
+              <li>
+                <strong>Fonte e acento.</strong> O app não edita a fonte do jogo: escreve só com as
+                letras que ela tem. A do RPG japonês medido não tem acento, então o texto sai sem
+                acento. Nas imagens redesenhadas, que usam a fonte do app, tem.
               </li>
               <li>
                 <strong>Tamanho.</strong> A maior parte do texto só pode ter o tamanho do original.
+                No RPG japonês medido, as falas do roteiro podem crescer e o app quebra as linhas na
+                caixa de texto, mas nomes de campo fixo (inimigos, itens) só ganham o espaço do
+                maior nome da tabela e saem abreviados.
               </li>
               <li>
                 <strong>Jogos de cartucho.</strong> Escolher a região do texto e a tabela de letras
                 do jogo ainda é trabalho manual.
+              </li>
+              <li>
+                <strong>Jogar até o fim.</strong> Nenhum jogo traduzido foi jogado do começo ao fim.
+                Todos foram vistos rodando em trechos, num emulador, então um erro que só aparece
+                mais adiante pode existir.
               </li>
             </ul>
           </div>
@@ -775,8 +785,9 @@
               <summary>Funciona com qualquer jogo?</summary>
               <p>
                 Não. Todo suporte é experimental. Cada jogo guarda os textos de um jeito, e há casos
-                que o app ainda não lê: boa parte do texto comprimido, parte dos jogos em japonês e texto desenhado como
-                imagem. Até agora, só um jogo real passou pelo processo inteiro.
+                que o app ainda não lê: boa parte do texto comprimido, parte dos jogos em japonês e
+                parte do texto desenhado como imagem. Até agora, só dois jogos reais, ambos de Game
+                Boy Advance, passaram pelo processo inteiro, e nenhum foi jogado até o fim.
               </p>
             </details>
             <details>

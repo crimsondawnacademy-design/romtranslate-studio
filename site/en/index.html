@@ -247,7 +247,8 @@
               <p>
                 The app checks the size, the codes hidden in the text (for example, the spot where
                 the player's name goes) and the letters the game can write. Lines that do not fit go
-                back to the AI on their own. You can also fix any line by hand.
+                back to the AI on their own. A line that still has an error is not written: it stays as in
+                the original, and the rest goes in. You can also fix any line by hand.
               </p>
             </li>
             <li class="card" style="--i: 4">
@@ -530,7 +531,7 @@
               <h2>What has been measured so far</h2>
               <p class="lead">
                 The app is in its testing phase (alpha). These numbers come from a single commercial
-                Game Boy Advance game, from the maintainer's own cartridge. No data from that game
+                Game Boy Advance game, in English, from the maintainer's own cartridge. No data from that game
                 is on this site or in the repository.
               </p>
             </div>
@@ -555,10 +556,6 @@
                 <dd><b>Yes</b></dd>
               </div>
               <div class="stat">
-                <dt>AI lines that passed the check (ChatGPT, with automatic re-ask)</dt>
-                <dd><b data-count="199">199</b> of 200</dd>
-              </div>
-              <div class="stat">
                 <dt>speed, with 4 requests to the AI at the same time</dt>
                 <dd><b data-count="200">200</b> lines in <span><b data-count="86">86</b> s</span></dd>
               </div>
@@ -569,30 +566,45 @@
             <h2>What it cannot do yet</h2>
             <ul class="marks no">
               <li>
-                <strong>Compressed text.</strong> Some games store their text compressed. On Game
-                Boy Advance the app now reads and rewrites the most common format, but no real game
-                has been through it yet. On other consoles it only counts those blocks.
+                <strong>Compressed text.</strong> Some games store their text compressed. Only on
+                Game Boy Advance does the app read and rewrite the most common format, and no real
+                game has been through it yet. On other consoles it only counts those blocks.
               </li>
               <li>
-                <strong>Japanese games.</strong> The app reads the Japanese of disc games (Shift-JIS)
-                and the 16-bit kind used by the first real Japanese game tested, for Game Boy
-                Advance. In that game the script lines can grow and the app breaks the lines to fit
-                the text box: the script and the menus were translated, and the game was seen running
-                in an emulator from the naming screen to the first dialogue. There are no accents,
-                because the game's font has none. Names and items get the room of the longest name the
-                game uses there; menus are still abbreviated when the word does not fit, and the naming
-                keyboard, which is a picture, stays in Japanese.
+                <strong>Japanese games.</strong> In the Japanese Game Boy Advance RPG that was
+                measured, 100% of the text came out in Portuguese: the count of what was left in
+                Japanese was zero, and the game was seen running in an emulator at the intro, on the
+                naming and settings screens, in a dialogue and in a battle. That is one game. The
+                Japanese of disc games and Nintendo DS games has not been through a real game yet.
               </li>
               <li>
-                <strong>Fonts and drawn text.</strong> It does not edit the game's letters or text
-                that is an image, such as title screens and some menus.
+                <strong>Text drawn as an image.</strong> The app already reads and redraws it: it
+                finds the images that have letters, the AI reads the pieces, and the Japanese is
+                erased and written again in Portuguese. The person using the app chooses which
+                images have Japanese. It was only measured on that same Game Boy Advance game. Still
+                in Japanese: the naming screen's keyboard, which is a board of letters to pick from,
+                and the screens the game builds from sprites of mixed sizes.
               </li>
               <li>
-                <strong>Size.</strong> Most of the text can only be as long as the original.
+                <strong>Font and accents.</strong> The app does not edit the game's font: it writes
+                only with the letters the font has. The measured Japanese RPG's font has no accents,
+                so its text comes out without them. The redrawn images use the app's own font, which
+                does have them.
+              </li>
+              <li>
+                <strong>Size.</strong> Most of the text can only be as long as the original. In the
+                measured Japanese RPG the script lines can grow and the app breaks the lines to fit
+                the text box, but fixed-width fields (enemy and item names) only get the room of the
+                longest name in the table and come out abbreviated.
               </li>
               <li>
                 <strong>Cartridge games.</strong> Choosing the text region and the game's letter
                 table is still manual work.
+              </li>
+              <li>
+                <strong>Playing to the end.</strong> No translated game has been played from start to
+                finish. All of them were seen running in an emulator, in parts, so an error that only
+                shows up later may exist.
               </li>
             </ul>
           </div>
@@ -790,8 +802,9 @@
               <summary>Does it work with any game?</summary>
               <p>
                 No. All support is experimental. Each game stores its text in its own way, and there
-                are cases the app cannot read yet: most compressed text, some Japanese games and text drawn as
-                an image. So far, only one real game has been through the whole process.
+                are cases the app cannot read yet: most compressed text, some Japanese games and part of the
+                text drawn as an image. So far, only two real games, both for Game Boy Advance, have
+                been through the whole process, and neither was played to the end.
               </p>
             </details>
             <details>
