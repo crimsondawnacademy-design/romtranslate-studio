@@ -56,3 +56,34 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
     fs::rename(&tmp, path).map_err(|e| CoreError::io(path, e))?;
     Ok(())
 }
+
+/// Grava as traducoes de um arquivo TSV (`id<TAB>traducao`, uma por linha),
+/// como traducao de maquina — o caminho de quem traduziu fora do app. O
+/// arquivo inteiro e conferido antes de gravar a primeira linha: TSV quebrado
+/// nao deixa o projeto traduzido pela metade. Devolve quantas gravou.
+pub fn import_tsv(db: &mut crate::db::ProjectDb, path: &Path) -> Result<usize> {
+    let content = fs::read_to_string(path).map_err(|e| CoreError::io(path, e))?;
+    let mut rows = Vec::new();
+    for (index, line) in content.trim_start_matches('\u{feff}').lines().enumerate() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let at = format!("{}, linha {}", path.display(), index + 1);
+        // ponytail: uma linha, uma frase, sem escape — traducao com quebra de
+        // linha de verdade nao cabe neste formato. Se um jogo pedir, o caminho
+        // e importar o JSON do export.
+        let (id, translation) = line
+            .split_once('\t')
+            .ok_or_else(|| CoreError::Project(format!("{at}: esperado id<TAB>traducao")))?;
+        if db.get_entry(id)?.is_none() {
+            return Err(CoreError::Project(format!(
+                "{at}: o projeto nao tem a frase {id}"
+            )));
+        }
+        rows.push((id, translation));
+    }
+    for (id, translation) in &rows {
+        db.update_translation(id, translation, crate::types::TranslationStatus::Machine)?;
+    }
+    Ok(rows.len())
+}

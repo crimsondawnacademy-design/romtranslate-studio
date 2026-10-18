@@ -164,6 +164,29 @@ fn full_cycle_on_a_synthetic_gba() {
     let ips = fs::read(patch["patchPath"].as_str().unwrap()).unwrap();
     assert_eq!(apply_ips(&rom, &ips).unwrap(), working);
 
+    // Dado lido como texto: a traducao sem letra e erro `no_letters`, e o
+    // `not-text --kind` tira da traducao todas as frases com esse erro.
+    fs::write(&tsv, format!("{}\t?????\n", id_of(&all, "OPTIONS"))).unwrap();
+    ok(&["apply", &project, &tsv]);
+    let marked = ok_json(&["not-text", &project, "--kind", "no_letters"]);
+    assert_eq!(
+        (&marked["marked"], &marked["asked"]),
+        (&json!(1), &json!(1))
+    );
+    let options = entries(&tmp, &project);
+    let options = options
+        .iter()
+        .find(|e| e["sourceText"] == "OPTIONS")
+        .unwrap();
+    assert_eq!(options["status"], "internal");
+    assert!(options["translatedText"].is_null());
+    assert_eq!(
+        run(&["not-text", &project, "--kind", "klingon"])
+            .status
+            .code(),
+        Some(2)
+    );
+
     // O arquivo de origem nunca e tocado.
     assert_eq!(fs::read(tmp.0.join("game.gba")).unwrap(), rom);
 }

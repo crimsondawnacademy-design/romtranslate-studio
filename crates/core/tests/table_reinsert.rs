@@ -283,6 +283,10 @@ fn table_from_outside_is_copied_into_the_project() {
     scan_into_db(&dir, &outside);
     let copy = dir.join("tables").join("minha.tbl");
     assert_eq!(fs::read_to_string(&copy).unwrap(), text);
+    // O projeto guarda o scan com a copia, nao com o arquivo de fora: e com
+    // ela que a tela reabre.
+    let last = romtranslate_core::scan::last_scan(&dir).unwrap();
+    assert_eq!(last.tbl_path.as_deref(), Some(copy.as_path()));
     let entries = ProjectDb::open(&dir).unwrap().load_entries().unwrap();
     assert_eq!(entries[0].encoding, TextEncoding::Table("minha".into()));
 

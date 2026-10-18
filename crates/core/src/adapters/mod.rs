@@ -124,6 +124,57 @@ pub fn hints(project_dir: &Path) -> Result<crate::adapter::ExtractHints> {
     Ok(hints)
 }
 
+/// Codigo sem letra conhecida num alfabeto ensinado (`alphabets`,
+/// `save_alphabet`): ocupa o lugar do codigo e nao e gravado.
+pub const UNKNOWN_LETTER: char = '〓';
+
+/// Grava o alfabeto que vale depois de `command`
+/// (`tables/jis16@<COMANDO>.tbl`, lido por `hints`): `letters` sao as letras
+/// dos codigos 1, 2, 3... na ordem; espaco e quebra de linha nao contam e
+/// `UNKNOWN_LETTER` pula o codigo. Sem letra nenhuma, o alfabeto sai do
+/// projeto. A extracao seguinte le as falas com ele.
+pub fn save_alphabet(project_dir: &Path, command: u16, letters: &str) -> Result<PathBuf> {
+    let dir = project_dir.join(crate::tbl::TABLES_DIR);
+    let path = dir.join(format!("{}@{command:04X}.tbl", crate::kuten::TABLE_ID));
+    let mut text = String::new();
+    let letters = letters.chars().filter(|c| !c.is_whitespace());
+    for (code, c) in (1..=u16::MAX).zip(letters) {
+        if c != UNKNOWN_LETTER {
+            // A chave e a da tabela principal: os 2 bytes do codigo, o menos
+            // significativo primeiro.
+            text.push_str(&format!("{:04X}={c}\n", code.swap_bytes()));
+        }
+    }
+    if text.is_empty() {
+        match std::fs::remove_file(&path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(CoreError::io(&path, e))
+            }
+            _ => return Ok(path),
+        }
+    }
+    std::fs::create_dir_all(&dir).map_err(|e| CoreError::io(&dir, e))?;
+    std::fs::write(&path, text).map_err(|e| CoreError::io(&path, e))?;
+    Ok(path)
+}
+
+/// Os alfabetos ensinados no projeto: (comando, letras dos codigos 1, 2,
+/// 3... na ordem, com `UNKNOWN_LETTER` no codigo sem letra), na forma que
+/// `save_alphabet` recebe.
+pub fn alphabets(project_dir: &Path) -> Result<Vec<(u16, String)>> {
+    Ok(hints(project_dir)?
+        .alphabets
+        .into_iter()
+        .map(|(command, alphabet)| {
+            let last = alphabet.keys().copied().max().unwrap_or(0);
+            let letters = (1..=last)
+                .map(|code| alphabet.get(&code).copied().unwrap_or(UNKNOWN_LETTER))
+                .collect();
+            (command, letters)
+        })
+        .collect())
+}
+
 /// Extracao estruturada do arquivo de origem de um projeto, gravada no banco.
 /// O upsert e por id (`scan-<offset>` nos adapters que varrem), entao extrair
 /// de novo atualiza limites e ponteiros e mantem as traducoes ja feitas.
@@ -210,4 +261,33 @@ pub fn extract_project(project_dir: &Path) -> Result<ExtractOutcome> {
             .count(),
         reread,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_taught_alphabet_goes_back_and_forth_through_the_table_file() {
+        let dir = std::env::temp_dir().join(format!("rts-alphabet-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = save_alphabet(&dir, 0xFF0B, "あい 〓\nう").unwrap();
+        assert!(path.ends_with("tables/jis16@FF0B.tbl"), "{path:?}");
+        // Codigo 1 = あ, com o byte menos significativo primeiro; o 3 pulado.
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "0100=あ\n0200=い\n0400=う\n"
+        );
+        let hint = &hints(&dir).unwrap().alphabets[0];
+        assert_eq!((hint.0, hint.1.get(&4)), (0xFF0B, Some(&'う')));
+        assert_eq!(
+            alphabets(&dir).unwrap(),
+            vec![(0xFF0B, "あい〓う".to_string())]
+        );
+        // Sem letra, o alfabeto sai.
+        save_alphabet(&dir, 0xFF0B, " ").unwrap();
+        assert!(!path.exists());
+        assert!(alphabets(&dir).unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

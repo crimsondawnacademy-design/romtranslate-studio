@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import { makeT } from "./i18n";
 import { formatOffset } from "./util";
 import { Picture, ReadPicturesOutcome } from "./types";
@@ -17,12 +18,18 @@ export default function PicturesPanel({
   projectDir,
   t,
   onRead,
+  onChecked,
+  onError,
   disabled,
 }: {
   projectDir: string;
   t: ReturnType<typeof makeT>;
   /** Depois da leitura: as frases novas entram na lista. */
   onRead: () => Promise<void> | void;
+  /** Imagens lidas ou marcadas sem texto: a auditoria para de cobrar por elas. */
+  onChecked: (ids: string[]) => void;
+  /** O painel mostra um erro (o passo a passo aponta pra ca). */
+  onError: (failed: boolean) => void;
   disabled: boolean;
 }) {
   const [pictures, setPictures] = useState<Picture[] | null>(null);
@@ -31,12 +38,21 @@ export default function PicturesPanel({
   const [busy, setBusy] = useState(false);
   const [reading, setReading] = useState(false);
   const [outcome, setOutcome] = useState<ReadPicturesOutcome | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [marked, setMarked] = useState<number | null>(null);
+  // Folhas de trechos gravadas agora; a versao recarrega a miniatura.
+  const [sheets, setSheets] = useState<{ ids: string[]; version: number } | null>(null);
+  const [error, setErrorText] = useState<string | null>(null);
+  const setError = (message: string | null) => {
+    setErrorText(message);
+    onError(message !== null);
+  };
 
   async function find() {
     setBusy(true);
     setError(null);
     setOutcome(null);
+    setMarked(null);
+    setSheets(null);
     try {
       setPictures(await invoke<Picture[]>("list_pictures", { projectDir }));
       setPage(0);
@@ -47,20 +63,56 @@ export default function PicturesPanel({
     }
   }
 
-  async function read() {
+  /**
+   * Le as marcadas: pela IA, de um arquivo (`answerPath`, uma imagem) ou so a
+   * folha de trechos que iria pra IA (`preview`), sem chamar ninguem.
+   */
+  async function read(mode: { preview?: boolean; answerPath?: string } = {}) {
+    const ids = [...selected];
     setReading(true);
     setError(null);
+    setMarked(null);
     try {
       const result = await invoke<ReadPicturesOutcome>("read_pictures", {
         projectDir,
-        ids: [...selected],
+        ids,
+        preview: mode.preview ?? false,
+        answerPath: mode.answerPath ?? null,
       });
+      if (mode.preview) {
+        setSheets({ ids, version: (sheets?.version ?? 0) + 1 });
+        return;
+      }
       setOutcome(result);
+      const failed = new Set(result.failed.map(([id]) => id));
+      onChecked(ids.filter((id) => !failed.has(id)));
       await onRead();
     } catch (e) {
       setError(String(e));
     } finally {
       setReading(false);
+    }
+  }
+
+  async function readFromFile() {
+    const path = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+    if (typeof path === "string") await read({ answerPath: path });
+  }
+
+  async function markWithoutText() {
+    const ids = [...selected];
+    setError(null);
+    setOutcome(null);
+    try {
+      await invoke<number>("mark_pictures_without_text", { projectDir, ids });
+      setMarked(ids.length);
+      onChecked(ids);
+    } catch (e) {
+      setError(String(e));
     }
   }
 
@@ -77,24 +129,50 @@ export default function PicturesPanel({
   const pages = pictures ? Math.ceil(pictures.length / PAGE) : 0;
 
   return (
-    <div className="panel">
-      <h3>{t("pictures.title")}</h3>
+    <div className="panel" id="step-pictures">
+      <h3 data-step="4">{t("pictures.title")}</h3>
       <p className="hint left">{t("pictures.hint")}</p>
       <div className="actions">
         <button onClick={find} disabled={busy || disabled}>
           {busy ? t("pictures.finding") : t("pictures.find")}
         </button>
         {pictures && (
-          <button
-            className="primary"
-            onClick={read}
-            disabled={reading || disabled || selected.size === 0}
-            title={t("pictures.readHint")}
-          >
-            {reading ? t("pictures.reading") : t("pictures.read", { n: selected.size })}
-          </button>
+          <>
+            <button
+              onClick={markWithoutText}
+              disabled={reading || disabled || selected.size === 0}
+              title={t("pictures.withoutTextHint")}
+            >
+              {t("pictures.withoutText", { n: selected.size })}
+            </button>
+            <button
+              onClick={() => read({ preview: true })}
+              disabled={reading || disabled || selected.size === 0}
+              title={t("pictures.previewHint")}
+            >
+              {t("pictures.preview")}
+            </button>
+            <button
+              onClick={readFromFile}
+              disabled={reading || disabled || selected.size !== 1}
+              title={t("pictures.fromFileHint")}
+            >
+              {t("pictures.fromFile")}
+            </button>
+            <button
+              className="primary"
+              onClick={() => read()}
+              disabled={reading || disabled || selected.size === 0}
+              title={t("pictures.readHint")}
+            >
+              {reading ? t("pictures.reading") : t("pictures.read", { n: selected.size })}
+            </button>
+          </>
         )}
       </div>
+      {pictures && pictures.length > 0 && (
+        <p className="hint left">{t("pictures.outsideHint")}</p>
+      )}
       {error && (
         <div className="error" role="alert">
           <strong>{t("common.error")}:</strong> {error}
@@ -111,6 +189,17 @@ export default function PicturesPanel({
             <div key={id}>
               {id}: {why}
             </div>
+          ))}
+        </div>
+      )}
+      {marked !== null && <div className="ok">{t("pictures.withoutTextDone", { n: marked })}</div>}
+      {sheets && (
+        <div className="pictures">
+          {sheets.ids.map((id) => (
+            <figure key={`${id}-${sheets.version}`} className="picture">
+              <Thumb projectDir={projectDir} id={id} reading />
+              <figcaption className="hint">{t("pictures.sheet", { id })}</figcaption>
+            </figure>
           ))}
         </div>
       )}
@@ -154,13 +243,21 @@ export default function PicturesPanel({
   );
 }
 
-/** A folha da imagem, carregada do projeto quando aparece. */
-function Thumb({ projectDir, id }: { projectDir: string; id: string }) {
+/** A folha da imagem (ou a de trechos, `reading`), carregada do projeto quando aparece. */
+function Thumb({
+  projectDir,
+  id,
+  reading = false,
+}: {
+  projectDir: string;
+  id: string;
+  reading?: boolean;
+}) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     let alive = true;
     let made: string | null = null;
-    invoke<number[]>("picture_png", { projectDir, id, reading: false })
+    invoke<number[]>("picture_png", { projectDir, id, reading })
       .then((bytes) => {
         if (!alive) return;
         made = URL.createObjectURL(new Blob([new Uint8Array(bytes)], { type: "image/png" }));
@@ -171,6 +268,6 @@ function Thumb({ projectDir, id }: { projectDir: string; id: string }) {
       alive = false;
       if (made) URL.revokeObjectURL(made);
     };
-  }, [projectDir, id]);
+  }, [projectDir, id, reading]);
   return url ? <img src={url} alt={id} /> : <div className="picture-empty" />;
 }

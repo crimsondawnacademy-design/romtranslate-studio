@@ -192,6 +192,10 @@ export interface AppSettings {
   priceOutput: number;
   allowRemoteTranslation: boolean;
   batchSize: number;
+  /** Chamadas à IA ao mesmo tempo. */
+  parallel: number;
+  /** Vezes que a tradução que não coube volta à IA (0 = não volta). */
+  shortenRounds: number;
   timeoutSecs: number;
 }
 
@@ -362,4 +366,33 @@ export interface XrayReport {
   lz77: Lz77Summary;
   entries: number;
   relocatable: number;
+}
+
+/** Por que um trecho ainda está no idioma de origem (auditoria). */
+export type LeftoverWhy = "untranslated" | "error" | "not_written" | "not_in_project";
+
+export interface Leftover {
+  /** A frase do projeto (ou o id da releitura, se o projeto não a tem). */
+  id: string;
+  offset: number | null;
+  chars: number;
+  text: string;
+  why: LeftoverWhy;
+}
+
+/** Releitura da cópia traduzida: o que segue no idioma de origem. */
+export interface AuditReport {
+  workingPath: string;
+  sourceChars: number;
+  remainingChars: number;
+  remaining: Leftover[];
+  /** Marcadas como não-texto com escrita do idioma de origem (fora da conta). */
+  notText: number;
+  pictures: { found: number; read: number; withoutText: number; unchecked: string[] };
+}
+
+/** Alfabeto ensinado depois de um comando do jogo: letras dos códigos 1, 2, 3... */
+export interface Alphabet {
+  command: number;
+  letters: string;
 }

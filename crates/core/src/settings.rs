@@ -71,6 +71,11 @@ pub struct AppSettings {
     pub price_output: f64,
     pub allow_remote_translation: bool,
     pub batch_size: usize,
+    /// Chamadas ao provider ao mesmo tempo (`TranslateOptions::parallel`).
+    pub parallel: usize,
+    /// Vezes que a traducao que nao coube volta ao provider
+    /// (`TranslateOptions::shorten_rounds`).
+    pub shorten_rounds: u32,
     pub timeout_secs: u64,
 }
 
@@ -98,6 +103,8 @@ impl Default for AppSettings {
             // frases por chamada passam na validacao 93% e 92,5% das respostas, e
             // a rodada usa 2,5 a 5 vezes menos chamadas que com 10.
             batch_size: 25,
+            parallel: crate::pipeline::TranslateOptions::new("").parallel,
+            shorten_rounds: crate::pipeline::TranslateOptions::new("").shorten_rounds,
             timeout_secs: 120,
         }
     }

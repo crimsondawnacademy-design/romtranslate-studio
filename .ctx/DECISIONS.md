@@ -2210,3 +2210,34 @@ de fora. Mapa comprimido, mapa de outro formato e mapa sem fila de quadros
 seguidos não são achados.
 
 **Driver:** claude.
+
+## 2026-10-18 — A janela faz o processo inteiro: lógica no core, CLI e Tauri como cascas
+
+**Contexto:** o Mother 3 chegou a 100% de texto em português pelo CLI. Auditoria,
+não-texto, lotes por fora e TSV, região e tabela no Escanear, alfabeto depois
+de comando e chamadas em paralelo só existiam no `apps/cli/src/main.rs` — e
+três deles com a lógica escrita lá dentro (ler o TSV, gravar os lotes, juntar
+as frases de um tipo de erro).
+
+**Decisão:** o que a CLI fazia por conta foi pro core e as duas cascas chamam o
+mesmo: `export::import_tsv`, `pipeline::write_requests`,
+`validate::mark_not_text` (tipo de erro tipado, `IssueKind`: `--kind` errado
+agora é argumento inválido), `adapters::{save_alphabet, alphabets}` (letras
+dos códigos 1, 2, 3... na ordem; `〓` pula o código; vazio tira o alfabeto) e
+`scan::last_scan` (o `scan_project` grava `scan.json` no projeto, com a cópia
+da tabela). `AppSettings` ganhou `parallel` e `shortenRounds` (padrão 4 e 2,
+os de antes): a janela edita, a CLI usa quando não vem `--parallel` /
+`--shorten-rounds`. Na tela, o passo a passo (extrair → custo → traduzir →
+imagens → reinserir → auditoria → patch) e o erro de cada ação no painel
+dela: provedor, custo, tradução, editor, patch e auditoria têm erro próprio.
+
+**Alternativas consideradas:** região e tabela no `project.json` (mexe no
+`GameProject` e em todo lugar que o cria, por um dado que é só do Escanear);
+TSV lido no front (duas regras de importação).
+
+**Consequências:** o estado dos passos 2, 5, 6 e 7 vale pra sessão aberta:
+reabrir o projeto mostra "falta" até rodar de novo (a cópia traduzida e o
+patch continuam no disco). Ponytail: guardar o último resultado de cada passo
+no projeto quando isso confundir alguém.
+
+**Driver:** claude.

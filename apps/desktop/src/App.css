@@ -1259,3 +1259,124 @@ table.strings tr.selected td:first-child {
   image-rendering: pixelated;
   background: #fff;
 }
+
+/* Passo a passo do projeto: os sete passos na ordem, com o que falta em cada. */
+.steps {
+  margin: 18px 0 8px;
+}
+.steps h3 {
+  font-size: 16.5px;
+  font-weight: 800;
+  margin: 0 0 10px;
+}
+.steps ol {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.step {
+  padding: 10px 12px;
+  background: var(--well);
+  border: 2px solid var(--soft-line);
+  border-radius: var(--r-ctl);
+  font-size: 12.5px;
+  color: var(--ink-soft);
+}
+.step.done {
+  background: var(--mint-soft);
+}
+.step.error {
+  background: var(--coral-soft);
+  border-color: var(--line);
+}
+.step.running {
+  background: var(--sky-soft);
+}
+.step p {
+  margin: 6px 0 0;
+}
+.step .step-where {
+  font-size: 11.5px;
+  opacity: 0.85;
+}
+.step.error .step-where {
+  color: var(--danger-text);
+  font-weight: 700;
+  opacity: 1;
+}
+.step-go {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: none;
+  box-shadow: none;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 800;
+  text-align: left;
+}
+.step-go:hover:enabled {
+  background: none;
+  box-shadow: none;
+  transform: none;
+  text-decoration: underline;
+}
+.step-n {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 1.6em;
+  height: 1.6em;
+  background: var(--star);
+  color: var(--on-candy);
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  font-size: 12px;
+}
+.step-state {
+  margin-left: auto;
+  padding: 0 8px;
+  border: 1.5px solid var(--field-line);
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  background: var(--paper);
+}
+.step-state.done {
+  background: var(--mint);
+  color: var(--on-candy);
+}
+.step-state.error {
+  background: var(--coral);
+  color: var(--on-candy);
+}
+.step-state.running {
+  background: var(--sky);
+  color: var(--on-candy);
+}
+
+/* Campo com o rotulo em cima (letras do alfabeto ensinado). */
+label.stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+/* Traducao por fora: fica fechada ate quem precisa abrir. */
+details.outside {
+  margin-top: 14px;
+}
+details.outside > summary {
+  cursor: pointer;
+  font-weight: 700;
+  font-size: 14px;
+}

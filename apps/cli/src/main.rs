@@ -22,19 +22,20 @@ use serde_json::{json, Value};
 use romtranslate_core::adapters::extract_project;
 use romtranslate_core::db::ProjectDb;
 use romtranslate_core::detect::inspect;
-use romtranslate_core::export::{export_csv, export_json};
+use romtranslate_core::export::{export_csv, export_json, import_tsv};
 use romtranslate_core::patch::{export_patch, PatchFormat};
 use romtranslate_core::pipeline::{
-    estimate_translation, run_translation, translation_requests, TranslateOptions,
+    estimate_translation, run_translation, write_requests, TranslateOptions,
     DEFAULT_CHARS_PER_TOKEN,
 };
 use romtranslate_core::project::{create_project, load_project, CreateProjectArgs};
-use romtranslate_core::provider::build_system_prompt;
 use romtranslate_core::reinsert::{reinsert_project_with, ErrorPolicy};
 use romtranslate_core::scan::{scan_project, ScanConfig, ScanEncoding};
 use romtranslate_core::settings;
-use romtranslate_core::types::{GameProject, TranslationStatus};
-use romtranslate_core::validate::{validate_project_db, Severity, ValidationReport};
+use romtranslate_core::types::GameProject;
+use romtranslate_core::validate::{
+    mark_not_text, validate_project_db, IssueKind, Severity, ValidationReport,
+};
 use romtranslate_core::CoreError;
 
 /// O `identifier` de `tauri.conf.json`: a pasta de configuracao da CLI e a
@@ -129,12 +130,13 @@ enum Command {
         /// Frases por chamada, de 1 a 50 [padrao: o das configuracoes do app]
         #[arg(long, value_name = "N")]
         batch: Option<usize>,
-        /// Chamadas ao provider ao mesmo tempo
-        #[arg(long, value_name = "N", default_value_t = TranslateOptions::new("").parallel)]
-        parallel: usize,
-        /// Vezes que a traducao que nao coube na frase volta ao provider (0 = nao volta)
-        #[arg(long, value_name = "N", default_value_t = TranslateOptions::new("").shorten_rounds)]
-        shorten_rounds: u32,
+        /// Chamadas ao provider ao mesmo tempo [padrao: o das configuracoes do app]
+        #[arg(long, value_name = "N")]
+        parallel: Option<usize>,
+        /// Vezes que a traducao que nao coube na frase volta ao provider (0 = nao
+        /// volta) [padrao: o das configuracoes do app]
+        #[arg(long, value_name = "N")]
+        shorten_rounds: Option<u32>,
         /// Manda de novo ao provider as frases com erro de validacao (codigo do jogo
         /// faltando, maior que o espaco), sem a memoria de traducao
         #[arg(long)]
@@ -191,8 +193,8 @@ enum Command {
         #[arg(value_name = "ID")]
         ids: Vec<String>,
         /// Todas as frases com este erro de validacao (ex.: no_letters)
-        #[arg(long, value_name = "TIPO")]
-        kind: Option<String>,
+        #[arg(long, value_name = "TIPO", value_parser = named::<IssueKind>)]
+        kind: Option<IssueKind>,
     },
     /// Le a copia traduzida de novo e conta o que segue no idioma de origem,
     /// com o motivo de cada trecho (rode depois do reinsert)
@@ -549,12 +551,7 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             let mut opts = options(game, batch);
             opts.redo_errors = redo_errors;
             if let Some(path) = &requests {
-                let lots: Vec<Value> = translation_requests(&ProjectDb::open(&project)?, &opts)?
-                    .iter()
-                    .map(|r| json!({ "system": build_system_prompt(r), "items": r.items }))
-                    .collect();
-                std::fs::write(path, serde_json::to_string_pretty(&lots)?)
-                    .map_err(|e| CoreError::io(path, e))?;
+                write_requests(&ProjectDb::open(&project)?, &opts, path)?;
             }
             let (estimate, _) = estimate_translation(&ProjectDb::open(&project)?, &opts)?;
             // Media de caracteres por token: a tela calibra pelo Claude quando ha
@@ -580,8 +577,8 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             let cfg_dir = config_dir()?;
             let cfg = settings::load_settings(&cfg_dir);
             let mut opts = options(load(&project)?, batch.unwrap_or(cfg.batch_size));
-            opts.parallel = parallel;
-            opts.shorten_rounds = shorten_rounds;
+            opts.parallel = parallel.unwrap_or(cfg.parallel);
+            opts.shorten_rounds = shorten_rounds.unwrap_or(cfg.shorten_rounds);
             opts.redo_errors = redo_errors;
             translate(&project, &opts, &cfg, &cfg_dir)
         }
@@ -691,32 +688,12 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             let (text, json) = validation(&report)?;
             Ok(Output::new(text, json))
         }
-        Command::NotText {
-            project,
-            mut ids,
-            kind,
-        } => {
+        Command::NotText { project, ids, kind } => {
             load(&project)?;
-            let mut db = ProjectDb::open(&project)?;
-            if let Some(kind) = kind {
-                let report = validate_project_db(&mut db)?;
-                ids.extend(
-                    report
-                        .issues
-                        .into_iter()
-                        .filter(|i| serde_json::to_value(i.kind).ok() == Some(json!(kind)))
-                        .map(|i| i.entry_id),
-                );
-            }
-            ids.sort();
-            ids.dedup();
-            let marked = db.mark_stray(&ids)?;
+            let (marked, asked) = mark_not_text(&mut ProjectDb::open(&project)?, &ids, kind)?;
             Ok(Output::new(
-                format!(
-                    "marcadas como nao-texto: {marked} (de {} pedidas)",
-                    ids.len()
-                ),
-                json!({ "marked": marked, "asked": ids.len() }),
+                format!("marcadas como nao-texto: {marked} (de {asked} pedidas)"),
+                json!({ "marked": marked, "asked": asked }),
             ))
         }
         Command::Audit { project } => {
@@ -848,34 +825,12 @@ fn validation(report: &ValidationReport) -> Result<(String, Value), Failure> {
 
 fn apply(project: &Path, tsv: &Path) -> Result<Output, Failure> {
     load(project)?;
-    let content = std::fs::read_to_string(tsv).map_err(|e| CoreError::io(tsv, e))?;
     let mut db = ProjectDb::open(project)?;
-    // O arquivo inteiro e conferido antes de gravar a primeira linha: TSV
-    // quebrado nao deixa o projeto traduzido pela metade.
-    let mut rows = Vec::new();
-    for (index, line) in content.trim_start_matches('\u{feff}').lines().enumerate() {
-        if line.trim().is_empty() {
-            continue;
-        }
-        let at = format!("{}, linha {}", tsv.display(), index + 1);
-        // ponytail: uma linha, uma frase, sem escape — traducao com quebra de
-        // linha de verdade nao cabe neste formato. Se um jogo pedir, o caminho
-        // e importar o JSON do `export`.
-        let (id, translation) = line
-            .split_once('\t')
-            .ok_or_else(|| format!("{at}: esperado id<TAB>traducao"))?;
-        if db.get_entry(id)?.is_none() {
-            return Err(Failure(format!("{at}: o projeto nao tem a frase {id}")));
-        }
-        rows.push((id, translation));
-    }
-    for (id, translation) in &rows {
-        db.update_translation(id, translation, TranslationStatus::Machine)?;
-    }
+    let applied = import_tsv(&mut db, tsv)?;
     let (text, report) = validation(&validate_project_db(&mut db)?)?;
     Ok(Output::new(
-        format!("gravadas: {}\n{text}", rows.len()),
-        json!({ "applied": rows.len(), "validation": report }),
+        format!("gravadas: {applied}\n{text}"),
+        json!({ "applied": applied, "validation": report }),
     ))
 }
 

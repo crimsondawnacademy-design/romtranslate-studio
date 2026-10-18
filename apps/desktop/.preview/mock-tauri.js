@@ -6,7 +6,9 @@
 //   abrir http://localhost:1437/.preview/index.html
 //
 // Parametros da URL (todos opcionais):
-//   auto=1        abre o projeto, valida, seleciona uma fala, traduz e reinsere sozinho.
+//   auto=1        abre o projeto e passa pelo passo a passo: valida, seleciona uma fala,
+//                 calcula o custo, traduz, marca uma imagem sem texto, reinsere, audita
+//                 e exporta o patch.
 //                 Outros valores param antes: home, drop (com tauri=1), inspecting
 //                 (com slow=60000), report, created (com fresh=1), project, tools
 //                 (busca relativa + Raio-X + glossario abertos).
@@ -15,6 +17,9 @@
 //   entries=0     projeto sem nenhum texto extraido (estado vazio)
 //   res=1         mostra a coluna "Arquivo" da tabela
 //   provider=anthropic | openai_compatible | codex_cli   (padrao: ollama)
+//   jis16=1       falas em japones de 16 bits (mostra o painel do alfabeto depois de um comando)
+//   scanned=1     o projeto ja tem um scan guardado (regiao e tabela voltam pros campos)
+//   auditfail=1   a auditoria falha (o passo 6 aponta o erro no painel dele)
 //   nomatch=1     a deteccao nao reconhece o arquivo
 //   support=experimental | partial | extract_only | unsupported
 //   missing=1 / changed=1   projeto com a origem sumida / alterada
@@ -52,7 +57,7 @@
     ["A sleepy gull blocks the way.", null, "untranslated"],
     ["SCR_INTRO_A", null, "internal"],
     ["Nothing happens.", "Nada acontece.", "machine"],
-    ["The kite string snapped.", null, "error"],
+    ["The kite string snapped.", "?????", "error"],
     ["The lighthouse sleeps until dawn.", null, "untranslated"],
   ];
   const entries = (q.get("entries") === "0" ? [] : lines).map(([src, tr, status], i) => ({
@@ -64,7 +69,7 @@
     translatedText: tr,
     context: null,
     maxBytes: null,
-    encoding: "utf8",
+    encoding: q.get("jis16") ? { table: "jis16" } : "utf8",
     status,
     metadata: i % 6 === 0 ? { pointers: [0x200 + i * 4] } : null,
   }));
@@ -75,6 +80,7 @@
         { entryId: "e6", severity: "error", kind: "placeholder_mismatch", message: "Falta o placeholder {n} na tradução." },
         { entryId: "e3", severity: "warning", kind: "length_anomaly", message: "A tradução é bem mais longa que o original." },
         { entryId: "e12", severity: "warning", kind: "length_anomaly", message: "A tradução é mais curta que o esperado para esta fala." },
+        { entryId: "e18", severity: "error", kind: "no_letters", message: "O original tem letras e a tradução nenhuma: quase sempre é dado lido como texto." },
       ]
     : [];
 
@@ -88,6 +94,8 @@
     priceOutput: 0,
     allowRemoteTranslation: false,
     batchSize: 20,
+    parallel: 4,
+    shortenRounds: 2,
     timeoutSecs: 120,
   };
   const project = {
@@ -131,6 +139,13 @@
   };
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const count = (status) => entries.filter((e) => e.status === status).length;
+  // Imagens ficticias e o que ja foi conferido nelas (a auditoria cobra o resto).
+  const pictures = [
+    { id: "img-01ba0000", offset: 0x1ba0000, packed: null, bytes: 49152, lettered: 315 },
+    { id: "img-01c8deb4", offset: 0x1c8deb4, packed: 3441, bytes: 17408, lettered: 248 },
+    { id: "img-00fe53e4", offset: 0xfe53e4, packed: 2210, bytes: 8192, lettered: 96 },
+  ];
+  const checked = new Set();
 
   const handlers = {
     "plugin:event|listen": ({ event, handler }) => {
@@ -182,6 +197,32 @@
       checked: entries.filter((e) => e.translatedText).length,
     }),
     estimate_translation: () => ({ entries: count("untranslated"), batches: 1, inputTokens: 1840, outputTokens: 420, calibrated: false }),
+    last_scan: () =>
+      q.get("scanned")
+        ? { encoding: "table", tblPath: `${DIR}/tables/farol.tbl`, minChars: 4, regionStart: 0x1a40, regionEnd: 0x2000, onlyText: true }
+        : null,
+    list_alphabets: () => (q.get("jis16") ? [{ command: 0xff0b, letters: "あいうえおかきくけこさしすせそ〓たちつてと" }] : []),
+    save_alphabet: ({ command }) => `${DIR}/tables/jis16@${command.toString(16).toUpperCase()}.tbl`,
+    mark_not_text: ({ ids, kind }) => {
+      const marked = kind ? issues.filter((i) => i.kind === kind).map((i) => i.entryId) : ids;
+      for (const e of entries) if (marked.includes(e.id)) Object.assign(e, { status: "internal", translatedText: null });
+      return marked.length;
+    },
+    export_requests: () => 2,
+    import_translations: () => 5,
+    mark_pictures_without_text: ({ ids }) => (ids.forEach((id) => checked.add(id)), ids.length),
+    audit_project: () => {
+      if (q.get("auditfail")) throw "a copia traduzida nao existe: reinsira antes de auditar";
+      const left = entries.filter((e) => !e.translatedText && e.status !== "internal");
+      return {
+        workingPath: `${DIR}/working/brisa-e-o-farol-de-papel.rtsf`,
+        sourceChars: 640,
+        remainingChars: left.reduce((n, e) => n + e.sourceText.length, 0),
+        remaining: left.map((e) => ({ id: e.id, offset: e.offset, chars: e.sourceText.length, text: e.sourceText, why: e.status === "error" ? "error" : "untranslated" })),
+        notText: 1,
+        pictures: { found: pictures.length, read: 1, withoutText: checked.size, unchecked: pictures.map((p) => p.id).filter((id) => !checked.has(id) && id !== "img-01c8deb4") },
+      };
+    },
     test_provider: () => {
       if (q.get("testfail")) throw "conexão recusada em http://localhost:11434";
       return "llama3.2:3b";
@@ -192,6 +233,10 @@
         emit("translation-progress", { done, total, phase: done < 4 ? "tm" : "translate" });
         await sleep(Number(q.get("tick") ?? 250));
       }
+      // As pendentes voltam traduzidas; as com erro continuam com erro.
+      for (const e of entries.filter((e) => e.status === "untranslated")) {
+        Object.assign(e, { status: "machine", translatedText: `(pt) ${e.sourceText}` });
+      }
       return { translated: count("machine"), tmHits: 3, failed: count("error"), cancelled: false, stopped: null, shortened: 0, tooLong: 0, notText: 0, inputTokens: 0, outputTokens: 0 };
     },
     cancel_translation: () => null,
@@ -199,12 +244,8 @@
     set_entry_reviewed: () => "reviewed",
     unmark_internal: () => null,
     // Texto em imagem: tres imagens ficticias com "letras" desenhadas na hora.
-    list_pictures: () => [
-      { id: "img-01ba0000", offset: 0x1ba0000, packed: null, bytes: 49152, lettered: 315 },
-      { id: "img-01c8deb4", offset: 0x1c8deb4, packed: 3441, bytes: 17408, lettered: 248 },
-      { id: "img-00fe53e4", offset: 0xfe53e4, packed: 2210, bytes: 8192, lettered: 96 },
-    ],
-    picture_png: async ({ id }) => {
+    list_pictures: () => pictures,
+    picture_png: async ({ id, reading }) => {
       const canvas = document.createElement("canvas");
       canvas.width = 256;
       canvas.height = 128;
@@ -214,12 +255,15 @@
       g.fillStyle = "#222";
       g.font = "14px sans-serif";
       g.fillText(id.endsWith("deb4") ? "警告－健康と安全のために" : "おまかせ  もどる  おわり", 12, 40);
+      if (reading) ["1", "2", "3"].forEach((n, i) => g.fillText(n, 4, 40 + i * 30));
       const blob = await new Promise((done) => canvas.toBlob(done, "image/png"));
       return [...new Uint8Array(await blob.arrayBuffer())];
     },
-    read_pictures: async ({ ids }) => (
+    read_pictures: async ({ ids, preview }) => (
       await sleep(Number(q.get("slow") ?? 600)),
-      { pictures: ids.length, blocks: 9 * ids.length, entries: 3 * ids.length, failed: [] }
+      preview
+        ? { pictures: ids.length, blocks: 0, entries: 0, failed: [] }
+        : (ids.forEach((id) => checked.add(id)), { pictures: ids.length, blocks: 9 * ids.length, entries: 3 * ids.length, failed: [] })
     ),
     reinsert_project: () => ({
       workingPath: `${DIR}/working/brisa-e-o-farol-de-papel.rtsf`,
@@ -314,14 +358,28 @@
       return ready();
     }
     await wait(() => $(".strings-wrap tr.row"));
+    const panel = (n) => $(`[data-step="${n}"]`).parentElement;
     $(".results-bar button").click(); // Validar
     await wait(() => $(".strings-wrap tr.row.error"));
     document.querySelectorAll(".strings-wrap tr.row")[4].click(); // fala com erro
-    $('h3[data-step="2"]').parentElement.querySelector(".actions .primary").click(); // Traduzir
-    await wait(() => !$(".progress-row") && $('h3[data-step="2"]').parentElement.querySelector(".ok"));
-    $('h3[data-step="3"]').parentElement.querySelector(".actions .primary").click(); // Reinserir
-    await wait(() => $('h3[data-step="3"]').parentElement.querySelector(".ok"));
+    panel(2).querySelector(".actions .primary").click(); // Calcular gasto
+    await wait(() => panel(2).querySelector(".warn"));
+    panel(3).querySelector(".actions .primary").click(); // Traduzir
+    await wait(() => !$(".progress-row") && panel(3).querySelector(".ok"));
+    panel(4).querySelector(".actions button").click(); // Procurar imagens
+    await wait(() => panel(4).querySelector(".picture input"));
+    panel(4).querySelectorAll(".picture input")[2].click(); // a terceira, sem japones
+    await sleep(100);
+    panel(4).querySelectorAll(".actions button")[1].click(); // Marcar sem texto
+    await wait(() => panel(4).querySelector(".ok"));
+    panel(5).querySelector(".actions .primary").click(); // Reinserir
+    await wait(() => panel(5).querySelector(".ok"));
+    panel(6).querySelector(".actions .primary").click(); // Auditar
+    await wait(() => panel(6).querySelector(".warn, .ok, .error"));
+    panel(7).querySelector(".actions .primary").click(); // Exportar patch
+    await wait(() => panel(7).querySelector(".ok"));
     await sleep(400);
+    window.scrollTo(0, 0);
     ready();
   }
   window.__mock = { emit, auto };

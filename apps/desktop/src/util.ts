@@ -63,3 +63,18 @@ export function defaultProjectDir(sourcePath: string): string {
   const stem = dot > 0 ? name.slice(0, dot) : name;
   return `${dir}${stem}.rtsproj`;
 }
+
+/**
+ * Offset digitado em hexadecimal ("1A40", "0x1a40"): vazio = sem limite
+ * (null); o que não é hexadecimal = undefined.
+ */
+export function parseHex(text: string): number | null | undefined {
+  const digits = text.trim().replace(/^0x/i, "");
+  if (!digits) return null;
+  return /^[0-9a-f]{1,12}$/i.test(digits) ? parseInt(digits, 16) : undefined;
+}
+
+/** Offset em hexadecimal sem os zeros da frente, como se digita ("1A40"). */
+export function hexInput(offset: number | null | undefined): string {
+  return offset === null || offset === undefined ? "" : offset.toString(16).toUpperCase();
+}

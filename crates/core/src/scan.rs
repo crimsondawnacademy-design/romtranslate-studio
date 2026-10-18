@@ -135,10 +135,26 @@ pub fn scan_project(project_dir: &Path, config: &ScanConfig) -> Result<ScanOutco
             config.tbl_path = Some(crate::tbl::adopt_table(project_dir, &tbl_path)?);
         }
     }
-    scan_file(
+    let outcome = scan_file(
         &crate::project::load_project(project_dir)?.source_path,
         &config,
-    )
+    )?;
+    // A regiao e a tabela do ultimo scan ficam no projeto: a tela reabre com
+    // elas, e a tabela guardada e a copia do projeto.
+    let path = project_dir.join(SCAN_FILE);
+    fs::write(&path, serde_json::to_string_pretty(&config)?)
+        .map_err(|e| CoreError::io(&path, e))?;
+    Ok(outcome)
+}
+
+/// A configuracao do ultimo `scan_project`, guardada no projeto.
+pub const SCAN_FILE: &str = "scan.json";
+
+/// A configuracao do ultimo scan do projeto; `None` se nunca escaneou (ou o
+/// arquivo nao se le).
+pub fn last_scan(project_dir: &Path) -> Option<ScanConfig> {
+    let text = fs::read_to_string(project_dir.join(SCAN_FILE)).ok()?;
+    serde_json::from_str(&text).ok()
 }
 
 pub fn scan_bytes(data: &[u8], config: &ScanConfig) -> Result<ScanOutcome> {

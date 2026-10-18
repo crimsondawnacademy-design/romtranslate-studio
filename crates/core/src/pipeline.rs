@@ -128,6 +128,28 @@ pub fn translation_requests(
     Ok(requests)
 }
 
+/// Grava em `path` os lotes de `translation_requests` (prompt de sistema e
+/// frases, em JSON): pra traduzir fora do app e voltar pelo
+/// `export::import_tsv`. Devolve quantos lotes gravou.
+pub fn write_requests(
+    db: &ProjectDb,
+    opts: &TranslateOptions,
+    path: &std::path::Path,
+) -> Result<usize> {
+    let lots: Vec<serde_json::Value> = translation_requests(db, opts)?
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "system": crate::provider::build_system_prompt(r),
+                "items": r.items,
+            })
+        })
+        .collect();
+    std::fs::write(path, serde_json::to_string_pretty(&lots)?)
+        .map_err(|e| crate::error::CoreError::io(path, e))?;
+    Ok(lots.len())
+}
+
 /// Monta os mesmos lotes de `run_translation` e mede. Devolve tambem o
 /// primeiro pedido, pra quem quiser calibrar a conta de tokens por ele.
 pub fn estimate_translation(

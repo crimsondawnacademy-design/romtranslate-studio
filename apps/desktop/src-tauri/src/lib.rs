@@ -155,22 +155,106 @@ async fn picture_png(project_dir: String, id: String, reading: bool) -> Result<V
 }
 
 /// A IA le o texto das imagens marcadas; cada trecho com japones vira frase.
+/// `preview`: so grava a folha de trechos que iria pra IA (`<id>-leitura.png`),
+/// sem chamar ninguem. `answer_path`: a leitura vem desse arquivo (o JSON que
+/// a IA devolveria pra folha de trechos), de uma imagem por vez.
 #[tauri::command]
 async fn read_pictures(
     app: AppHandle,
     project_dir: String,
     ids: Vec<String>,
+    preview: Option<bool>,
+    answer_path: Option<String>,
 ) -> Result<romtranslate_core::images::ReadOutcome, String> {
+    use romtranslate_core::images::{read_pictures, Reader};
+    let dir = PathBuf::from(project_dir);
+    if let Some(path) = answer_path {
+        if ids.len() != 1 {
+            return Err(format!(
+                "a leitura de um arquivo vale pra uma imagem por vez (vieram {})",
+                ids.len()
+            ));
+        }
+        let answer = std::fs::read_to_string(&path).map_err(|e| format!("{path}: {e}"))?;
+        return read_pictures(&dir, Reader::Answer(&answer), &ids)
+            .await
+            .map_err(|e| e.to_string());
+    }
+    if preview.unwrap_or(false) {
+        return read_pictures(&dir, Reader::Preview, &ids)
+            .await
+            .map_err(|e| e.to_string());
+    }
     let cfg_dir = config_dir(&app)?;
     let cfg = settings::load_settings(&cfg_dir);
     let (provider, _) = build_provider(&cfg, &cfg_dir)?;
-    romtranslate_core::images::read_pictures(
-        &PathBuf::from(project_dir),
-        romtranslate_core::images::Reader::Provider(provider.as_ref()),
-        &ids,
-    )
+    read_pictures(&dir, Reader::Provider(provider.as_ref()), &ids)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// Marca imagens como conferidas, sem texto pra traduzir: a auditoria para
+/// de cobrar por elas. Devolve quantas sao novas.
+#[tauri::command]
+async fn mark_pictures_without_text(
+    project_dir: String,
+    ids: Vec<String>,
+) -> Result<usize, String> {
+    blocking(move || romtranslate_core::audit::mark_without_text(&PathBuf::from(project_dir), &ids))
+        .await
+}
+
+/// Le a copia traduzida de novo e conta o que segue no idioma de origem.
+#[tauri::command]
+async fn audit_project(
+    project_dir: String,
+) -> Result<romtranslate_core::audit::AuditReport, String> {
+    blocking(move || romtranslate_core::audit::audit_project(&PathBuf::from(project_dir))).await
+}
+
+/// A regiao e a tabela do ultimo scan, guardadas no projeto.
+#[tauri::command]
+async fn last_scan(project_dir: String) -> Result<Option<ScanConfig>, String> {
+    blocking(move || Ok(scan::last_scan(&PathBuf::from(project_dir)))).await
+}
+
+/// Alfabeto ensinado depois de um comando do jogo.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Alphabet {
+    command: u16,
+    letters: String,
+}
+
+#[tauri::command]
+async fn list_alphabets(project_dir: String) -> Result<Vec<Alphabet>, String> {
+    blocking(move || {
+        Ok(
+            romtranslate_core::adapters::alphabets(&PathBuf::from(project_dir))?
+                .into_iter()
+                .map(|(command, letters)| Alphabet { command, letters })
+                .collect(),
+        )
+    })
     .await
-    .map_err(|e| e.to_string())
+}
+
+/// Grava o alfabeto (letras dos codigos 1, 2, 3...); vazio tira do projeto.
+#[tauri::command]
+async fn save_alphabet(
+    project_dir: String,
+    command: u16,
+    letters: String,
+) -> Result<String, String> {
+    blocking(move || {
+        let path = romtranslate_core::adapters::save_alphabet(
+            &PathBuf::from(project_dir),
+            command,
+            &letters,
+        )?;
+        Ok(path.display().to_string())
+    })
+    .await
 }
 
 #[tauri::command]
@@ -249,6 +333,21 @@ async fn unmark_internal(project_dir: String, id: String) -> Result<(), String> 
     blocking(move || {
         let mut db = ProjectDb::open(&PathBuf::from(project_dir))?;
         validate::unmark_internal(&mut db, &id)
+    })
+    .await
+}
+
+/// Marca frases como nao-texto: as `ids` e, com `kind`, todas com esse erro
+/// de validacao. Devolve quantas mudaram.
+#[tauri::command]
+async fn mark_not_text(
+    project_dir: String,
+    ids: Vec<String>,
+    kind: Option<validate::IssueKind>,
+) -> Result<usize, String> {
+    blocking(move || {
+        let mut db = ProjectDb::open(&PathBuf::from(project_dir))?;
+        Ok(validate::mark_not_text(&mut db, &ids, kind)?.0)
     })
     .await
 }
@@ -351,13 +450,10 @@ async fn estimate_translation(
 ) -> Result<EstimateReport, String> {
     let cfg_dir = config_dir(&app)?;
     let cfg = settings::load_settings(&cfg_dir);
-    let batch_size = cfg.batch_size.clamp(1, 50);
+    let options_cfg = cfg.clone();
     let (estimate, sample) = blocking(move || {
         let dir = PathBuf::from(project_dir);
-        let game = project::load_project(&dir)?;
-        let mut opts = TranslateOptions::new(game.target_language);
-        opts.source_language = game.source_language;
-        opts.batch_size = batch_size;
+        let opts = translate_options(project::load_project(&dir)?, &options_cfg, false);
         romtranslate_core::pipeline::estimate_translation(&ProjectDb::open(&dir)?, &opts)
     })
     .await?;
@@ -386,6 +482,54 @@ async fn estimate_translation(
         output_tokens: tokens(estimate.output_chars),
         calibrated,
     })
+}
+
+/// As opcoes da rodada com as configuracoes do app: a mesma conta pra medir,
+/// exportar os lotes e traduzir.
+fn translate_options(game: GameProject, cfg: &AppSettings, redo_errors: bool) -> TranslateOptions {
+    let mut opts = TranslateOptions::new(game.target_language);
+    opts.source_language = game.source_language;
+    opts.batch_size = cfg.batch_size.clamp(1, 50);
+    opts.parallel = cfg.parallel.max(1);
+    opts.shorten_rounds = cfg.shorten_rounds;
+    opts.redo_errors = redo_errors;
+    opts
+}
+
+/// Grava em `path` os lotes exatos da rodada de agora (prompt e frases, em
+/// JSON): pra traduzir fora do app. Devolve quantos lotes.
+#[tauri::command]
+async fn export_requests(
+    app: AppHandle,
+    project_dir: String,
+    path: String,
+    redo_errors: Option<bool>,
+) -> Result<usize, String> {
+    let cfg = settings::load_settings(&config_dir(&app)?);
+    blocking(move || {
+        let dir = PathBuf::from(project_dir);
+        let opts = translate_options(
+            project::load_project(&dir)?,
+            &cfg,
+            redo_errors.unwrap_or(false),
+        );
+        romtranslate_core::pipeline::write_requests(
+            &ProjectDb::open(&dir)?,
+            &opts,
+            Path::new(&path),
+        )
+    })
+    .await
+}
+
+/// Grava as traducoes de um TSV (`id<TAB>traducao`). Devolve quantas.
+#[tauri::command]
+async fn import_translations(project_dir: String, path: String) -> Result<usize, String> {
+    blocking(move || {
+        let mut db = ProjectDb::open(&PathBuf::from(project_dir))?;
+        export::import_tsv(&mut db, Path::new(&path))
+    })
+    .await
 }
 
 // ---- Conta do ChatGPT pelo Codex CLI ----
@@ -485,10 +629,7 @@ async fn do_translate(
     let (provider, model) = build_provider(&cfg, &cfg_dir)?;
 
     let game = project::load_project(&dir).map_err(|e| e.to_string())?;
-    let mut opts = TranslateOptions::new(game.target_language);
-    opts.source_language = game.source_language;
-    opts.batch_size = cfg.batch_size.clamp(1, 50);
-    opts.redo_errors = redo_errors;
+    let opts = translate_options(game, &cfg, redo_errors);
 
     let mut db = ProjectDb::open(&dir).map_err(|e| e.to_string())?;
     let mut global = open_global_tm(&cfg_dir);
@@ -533,6 +674,14 @@ pub fn run() {
             list_pictures,
             picture_png,
             read_pictures,
+            mark_pictures_without_text,
+            audit_project,
+            last_scan,
+            list_alphabets,
+            save_alphabet,
+            mark_not_text,
+            export_requests,
+            import_translations,
             inspect_file,
             create_project,
             open_project,

@@ -592,6 +592,30 @@ pub fn unmark_internal(db: &mut ProjectDb, id: &str) -> Result<()> {
     }
 }
 
+/// Marca como nao-texto (dado lido como texto) as frases `ids` e, com
+/// `kind`, todas as que tem esse erro de validacao: saem da traducao e nao
+/// sao gravadas (`ProjectDb::mark_stray`), e a marca fica mesmo extraindo de
+/// novo. Devolve (marcadas, pedidas).
+pub fn mark_not_text(
+    db: &mut ProjectDb,
+    ids: &[String],
+    kind: Option<IssueKind>,
+) -> Result<(usize, usize)> {
+    let mut ids = ids.to_vec();
+    if let Some(kind) = kind {
+        ids.extend(
+            validate_project_db(db)?
+                .issues
+                .into_iter()
+                .filter(|i| i.kind == kind)
+                .map(|i| i.entry_id),
+        );
+    }
+    ids.sort();
+    ids.dedup();
+    Ok((db.mark_stray(&ids)?, ids.len()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

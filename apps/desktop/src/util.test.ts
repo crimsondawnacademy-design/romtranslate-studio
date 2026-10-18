@@ -4,6 +4,8 @@ import {
   encodedByteLength,
   formatBytes,
   formatOffset,
+  hexInput,
+  parseHex,
   pointerCount,
 } from "./util";
 import { TextEntry } from "./types";
@@ -60,5 +62,18 @@ describe("pointerCount", () => {
     expect(pointerCount(entry({ terminated: true }))).toBe(0);
     expect(pointerCount(entry(null))).toBe(0);
     expect(pointerCount(entry({ pointers: "lixo" }))).toBe(0);
+  });
+});
+
+describe("parseHex", () => {
+  it("le hexadecimal com ou sem 0x; vazio e sem limite; resto e invalido", () => {
+    expect(parseHex("1A40")).toBe(0x1a40);
+    expect(parseHex(" 0x1bc0000 ")).toBe(0x1bc0000);
+    expect(parseHex("")).toBeNull();
+    expect(parseHex("0x")).toBeNull();
+    expect(parseHex("12g")).toBeUndefined();
+    expect(parseHex("-10")).toBeUndefined();
+    expect(hexInput(parseHex("0x00ff"))).toBe("FF");
+    expect(hexInput(null)).toBe("");
   });
 });

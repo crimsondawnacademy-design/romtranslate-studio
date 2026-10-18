@@ -4,16 +4,22 @@ import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { makeT, MessageId } from "./i18n";
+import AlphabetPanel from "./AlphabetPanel";
+import AuditPanel from "./AuditPanel";
 import PicturesPanel from "./PicturesPanel";
+import StepsGuide, { Step } from "./StepsGuide";
 import {
   defaultProjectDir,
   encodedByteLength,
   formatBytes,
   formatOffset,
+  hexInput,
+  parseHex,
   pointerCount,
 } from "./util";
 import {
   AppSettings,
+  AuditReport,
   CLAUDE_PRICES,
   EstimateReport,
   ExtractOutcome,
@@ -22,6 +28,7 @@ import {
   PLATFORM_NAMES,
   ProgressEvent,
   RelativeCandidate,
+  ScanConfig,
   ScanEncoding,
   ScanOutcome,
   SettingsReport,
@@ -103,6 +110,9 @@ export default function ProjectView({
   const [minChars, setMinChars] = useState(4);
   const [onlyText, setOnlyText] = useState(true);
   const [tblPath, setTblPath] = useState<string | null>(null);
+  // Regiao do Escanear, em hexadecimal como a pessoa digitou ("" = sem limite).
+  const [regionStart, setRegionStart] = useState("");
+  const [regionEnd, setRegionEnd] = useState("");
   const [xray, setXray] = useState<XrayReport | null>(null);
   const [relWord, setRelWord] = useState("");
   const [relCandidates, setRelCandidates] = useState<RelativeCandidate[] | null>(null);
@@ -134,9 +144,26 @@ export default function ProjectView({
   // um erro sem saida, a tela pergunta e segue com a acao que foi pedida.
   const [remoteAsk, setRemoteAsk] = useState<"test" | "translate" | null>(null);
   const [reinsertError, setReinsertError] = useState<string | null>(null);
-  // Erro de configurar, testar ou traduzir aparece junto dos botoes: o aviso
-  // geral fica no topo da pagina, fora de vista de quem esta neste painel.
+  // O erro de cada acao aparece no painel dela: o aviso geral fica no topo da
+  // pagina, fora de vista de quem esta la embaixo (armadilha 7.17).
+  const [providerError, setProviderError] = useState<string | null>(null);
+  const [estimateError, setEstimateError] = useState<string | null>(null);
   const [translateError, setTranslateError] = useState<string | null>(null);
+  const [editorError, setEditorError] = useState<string | null>(null);
+  const [patchError, setPatchError] = useState<string | null>(null);
+  const [picturesError, setPicturesError] = useState(false);
+  const [audit, setAudit] = useState<AuditReport | null>(null);
+  const [auditing, setAuditing] = useState(false);
+  const [auditError, setAuditError] = useState<string | null>(null);
+  // Traducao por fora: os lotes exportados e o TSV importado.
+  const [outsideInfo, setOutsideInfo] = useState<string | null>(null);
+  const [outsideRedo, setOutsideRedo] = useState(false);
+  const [notTextMarked, setNotTextMarked] = useState<number | null>(null);
+  // Conta das mudancas nas traducoes: a copia reinserida fica velha quando a
+  // conta passa da que ela tinha.
+  const [revision, setRevision] = useState(0);
+  const [reinsertedAt, setReinsertedAt] = useState<number | null>(null);
+  const bump = () => setRevision((r) => r + 1);
 
   const [translating, setTranslating] = useState(false);
   // "Cancelar" foi clicado e a rodada ainda nao devolveu o resumo.
@@ -192,13 +219,25 @@ export default function ProjectView({
         setAnthropicKeySet(r.anthropicKeySet);
       })
       .catch((e) => setError(String(e)));
+    // A regiao e a tabela do ultimo scan ficam no projeto.
+    invoke<ScanConfig | null>("last_scan", { projectDir })
+      .then((last) => {
+        if (!last) return;
+        setEncoding(last.encoding);
+        setMinChars(last.minChars);
+        setOnlyText(last.onlyText);
+        setTblPath(last.tblPath);
+        setRegionStart(hexInput(last.regionStart));
+        setRegionEnd(hexInput(last.regionEnd));
+      })
+      .catch((e) => setError(String(e)));
     const unlisten = listen<ProgressEvent>("translation-progress", (event) => {
       setProgress(event.payload);
     });
     return () => {
       void unlisten.then((fn) => fn());
     };
-  }, [reloadEntries, reloadGlossary]);
+  }, [reloadEntries, reloadGlossary, projectDir]);
 
   async function chooseTbl() {
     const path = await open({
@@ -218,6 +257,12 @@ export default function ProjectView({
       setError(t("extract.tblMissing"));
       return;
     }
+    const start = parseHex(regionStart);
+    const end = parseHex(regionEnd);
+    if (start === undefined || end === undefined) {
+      setError(t("extract.regionInvalid"));
+      return;
+    }
     setError(null);
     setSavedPath(null);
     setBusy(true);
@@ -228,8 +273,8 @@ export default function ProjectView({
           encoding,
           tblPath: encoding === "table" ? tblPath : null,
           minChars,
-          regionStart: null,
-          regionEnd: null,
+          regionStart: start,
+          regionEnd: end,
           onlyText,
         },
       });
@@ -251,6 +296,7 @@ export default function ProjectView({
         reread: 0,
         structured: false,
       });
+      bump();
       await reloadEntries();
     } catch (e) {
       setError(String(e));
@@ -326,6 +372,7 @@ export default function ProjectView({
         reread: outcome.reread,
         structured: true,
       });
+      bump();
       await reloadEntries();
     } catch (e) {
       setError(String(e));
@@ -337,7 +384,11 @@ export default function ProjectView({
   async function runReinsert() {
     setReinsertError(null);
     setReinsertOutcome(null);
+    // Auditoria e patch eram da copia anterior.
+    setAudit(null);
+    setPatchOutcome(null);
     setReinserting(true);
+    const at = revision;
     try {
       // Padrao: a traducao com erro fica de fora e a frase segue no original.
       const outcome = await invoke<ReinsertOutcome>("reinsert_project", {
@@ -345,6 +396,7 @@ export default function ProjectView({
         policy: allowErrors ? "force" : "skip",
       });
       setReinsertOutcome(outcome);
+      setReinsertedAt(at);
       await reloadEntries();
     } catch (e) {
       setReinsertError(String(e));
@@ -354,7 +406,7 @@ export default function ProjectView({
   }
 
   async function runPatchExport() {
-    setError(null);
+    setPatchError(null);
     setPatchOutcome(null);
     setPatching(true);
     try {
@@ -364,9 +416,86 @@ export default function ProjectView({
       });
       setPatchOutcome(outcome);
     } catch (e) {
-      setError(String(e));
+      setPatchError(String(e));
     } finally {
       setPatching(false);
+    }
+  }
+
+  async function runAudit() {
+    setAuditError(null);
+    setAuditing(true);
+    try {
+      setAudit(await invoke<AuditReport>("audit_project", { projectDir }));
+    } catch (e) {
+      setAuditError(String(e));
+    } finally {
+      setAuditing(false);
+    }
+  }
+
+  /** Imagens lidas ou conferidas sem texto saem da conta da auditoria. */
+  function picturesChecked(ids: string[]) {
+    setAudit((a) => {
+      if (!a) return a;
+      const unchecked = a.pictures.unchecked.filter((id) => !ids.includes(id));
+      return { ...a, pictures: { ...a.pictures, unchecked } };
+    });
+  }
+
+  /** Os lotes exatos da rodada de agora, pra traduzir fora do app. */
+  async function exportRequests() {
+    setTranslateError(null);
+    setOutsideInfo(null);
+    if (!(await saveSettings(settings, setTranslateError))) return;
+    const path = await save({
+      defaultPath: `${projectDir}/lotes.json`,
+      filters: [{ name: "JSON", extensions: ["json"] }],
+    });
+    if (typeof path !== "string") return;
+    try {
+      const n = await invoke<number>("export_requests", {
+        projectDir,
+        path,
+        redoErrors: outsideRedo,
+      });
+      setOutsideInfo(t("outside.exported", { n, path }));
+    } catch (e) {
+      setTranslateError(String(e));
+    }
+  }
+
+  /** A resposta de fora, em TSV (id, TAB, traducao), com a validacao de sempre. */
+  async function importTranslations() {
+    setTranslateError(null);
+    setOutsideInfo(null);
+    const path = await open({
+      multiple: false,
+      directory: false,
+      filters: [{ name: "TSV", extensions: ["tsv", "txt"] }],
+    });
+    if (typeof path !== "string") return;
+    try {
+      const n = await invoke<number>("import_translations", { projectDir, path });
+      bump();
+      setOutsideInfo(t("outside.imported", { n }));
+      await runValidation(setTranslateError);
+    } catch (e) {
+      setTranslateError(String(e));
+    }
+  }
+
+  /** Dado lido como texto: sai da traducao e da reinsercao. */
+  async function markNotText(ids: string[], kind: "no_letters" | null = null) {
+    setError(null);
+    setEditorError(null);
+    try {
+      const n = await invoke<number>("mark_not_text", { projectDir, ids, kind });
+      setNotTextMarked(n);
+      bump();
+      await runValidation(kind ? setError : setEditorError);
+    } catch (e) {
+      (kind ? setError : setEditorError)(String(e));
     }
   }
 
@@ -403,10 +532,16 @@ export default function ProjectView({
     else await runTranslation(allowed);
   }
 
-  /** Grava o que esta na tela. `false` = falhou, com o erro ja exibido. */
-  async function saveSettings(current: AppSettings | null = settings): Promise<boolean> {
+  /**
+   * Grava o que esta na tela. `false` = falhou, com o erro ja exibido no
+   * painel de quem pediu (`fail`).
+   */
+  async function saveSettings(
+    current: AppSettings | null = settings,
+    fail: (error: string) => void = setProviderError,
+  ): Promise<boolean> {
     if (!current) return false;
-    setTranslateError(null);
+    setProviderError(null);
     setTestResult(null);
     try {
       const report = await invoke<SettingsReport>("save_settings", {
@@ -421,7 +556,7 @@ export default function ProjectView({
       setAnthropicKeyInput("");
       return true;
     } catch (e) {
-      setTranslateError(String(e));
+      fail(String(e));
       return false;
     }
   }
@@ -441,7 +576,7 @@ export default function ProjectView({
       );
     } catch (e) {
       setCodexLogged(false);
-      setTranslateError(String(e));
+      setProviderError(String(e));
     }
   }, [codexCommand, codexOwnAccount]);
 
@@ -453,14 +588,14 @@ export default function ProjectView({
 
   /** Login da conta do app: o navegador abre e a pessoa escolhe a conta la. */
   async function codexLogin(switching: boolean) {
-    setTranslateError(null);
+    setProviderError(null);
     setTestResult(null);
     setLoggingIn(true);
     try {
       if (switching) await invoke("codex_logout", { command: codexCommand });
       await invoke("codex_login", { command: codexCommand });
     } catch (e) {
-      setTranslateError(String(e));
+      setProviderError(String(e));
     } finally {
       setLoggingIn(false);
       await refreshCodexAccount();
@@ -468,12 +603,12 @@ export default function ProjectView({
   }
 
   async function codexLogout() {
-    setTranslateError(null);
+    setProviderError(null);
     setTestResult(null);
     try {
       await invoke("codex_logout", { command: codexCommand });
     } catch (e) {
-      setTranslateError(String(e));
+      setProviderError(String(e));
     }
     await refreshCodexAccount();
   }
@@ -482,11 +617,12 @@ export default function ProjectView({
   async function runEstimate() {
     setEstimating(true);
     setEstimate(null);
+    setEstimateError(null);
     try {
-      if (!(await saveSettings())) return;
+      if (!(await saveSettings(settings, setEstimateError))) return;
       setEstimate(await invoke<EstimateReport>("estimate_translation", { projectDir }));
     } catch (e) {
-      setTranslateError(String(e));
+      setEstimateError(String(e));
     } finally {
       setEstimating(false);
     }
@@ -503,13 +639,13 @@ export default function ProjectView({
       setTestResult(t("translate.testOk", { model }));
     } catch (e) {
       if (needsRemoteConsent(e)) setRemoteAsk("test");
-      else setTranslateError(String(e));
+      else setProviderError(String(e));
     } finally {
       setTesting(false);
     }
   }
 
-  const runValidation = useCallback(async () => {
+  const runValidation = useCallback(async (fail: (error: string) => void = setError) => {
     try {
       const report = await invoke<ValidationReport>("validate_project", { projectDir });
       const map: Record<string, ValidationIssue[]> = {};
@@ -520,7 +656,7 @@ export default function ProjectView({
       setValReport(report);
       await reloadEntries();
     } catch (e) {
-      setError(String(e));
+      fail(String(e));
     }
   }, [projectDir, reloadEntries]);
 
@@ -528,21 +664,23 @@ export default function ProjectView({
     setSummary(null);
     setProgress(null);
     setRemoteAsk(null);
+    setTranslateError(null);
     setTranslating(true);
     try {
       // Traduz com o provider que esta na tela, nao com o ultimo gravado.
-      if (!(await saveSettings(current))) return;
+      if (!(await saveSettings(current, setTranslateError))) return;
       const result = await invoke<TranslateSummary>("translate_project", {
         projectDir,
         redoErrors,
       });
       setSummary(result);
       if (result.stopped) setTranslateError(t("translate.stopped", { error: result.stopped }));
-      await runValidation(); // erros aparecem antes de qualquer reinsercao
+      await runValidation(setTranslateError); // erros aparecem antes de qualquer reinsercao
     } catch (e) {
       if (needsRemoteConsent(e)) setRemoteAsk("translate");
       else setTranslateError(String(e));
     } finally {
+      bump(); // mesmo parada no meio, o que veio esta gravado
       setTranslating(false);
       setCancelling(false);
       setProgress(null);
@@ -551,7 +689,7 @@ export default function ProjectView({
 
   async function saveDraft() {
     if (!selectedId) return;
-    setError(null);
+    setEditorError(null);
     try {
       const issues = await invoke<ValidationIssue[]>("update_entry", {
         projectDir,
@@ -559,14 +697,15 @@ export default function ProjectView({
         translation: draft,
       });
       setIssuesByEntry((prev) => ({ ...prev, [selectedId]: issues }));
+      bump();
       await reloadEntries();
     } catch (e) {
-      setError(String(e));
+      setEditorError(String(e));
     }
   }
 
   async function toggleReviewed(entry: TextEntry) {
-    setError(null);
+    setEditorError(null);
     try {
       await invoke<string>("set_entry_reviewed", {
         projectDir,
@@ -575,23 +714,25 @@ export default function ProjectView({
       });
       await reloadEntries();
     } catch (e) {
-      setError(String(e));
+      setEditorError(String(e));
     }
   }
 
   async function unmarkInternal(entry: TextEntry) {
-    setError(null);
+    setEditorError(null);
     try {
       await invoke("unmark_internal", { projectDir, id: entry.id });
       await reloadEntries();
     } catch (e) {
-      setError(String(e));
+      setEditorError(String(e));
     }
   }
 
   function selectEntry(entry: TextEntry) {
     setSelectedId(entry.id);
     setDraft(entry.translatedText ?? "");
+    setEditorError(null);
+    setNotTextMarked(null);
   }
 
   async function cancelTranslation() {
@@ -701,10 +842,139 @@ export default function ProjectView({
   const hasJis16 = entries.some(
     (e) => typeof e.encoding === "object" && e.encoding.table === "jis16",
   );
+  const noLetters = valReport?.issues.filter((i) => i.kind === "no_letters").length ?? 0;
+  // Rodada interrompida (cancelada ou o provider parou) com frase pendente.
+  const paused =
+    !translating && !!summary && (summary.cancelled || !!summary.stopped) && pending > 0;
+
+  const remoteAskBox = (
+    <div className="warn" role="alert">
+      {t("translate.remoteAsk")}
+      <div className="actions">
+        <button onClick={() => setRemoteAsk(null)}>{t("translate.cancel")}</button>
+        <button className="primary" onClick={allowRemoteAndContinue}>
+          {t("translate.remoteAllow")}
+        </button>
+      </div>
+    </div>
+  );
+
+  // O passo a passo: o que falta em cada passo e em que painel o erro aparece.
+  const translated = entries.length > 0 && pending === 0 && failed === 0;
+  const reinsertFresh = reinsertOutcome !== null && reinsertedAt === revision;
+  const unchecked = audit?.pictures.unchecked.length;
+  const auditClean = !!audit && reinsertFresh && audit.remainingChars === 0 && unchecked === 0;
+  const steps: Step[] = [
+    {
+      key: "extract",
+      title: "steps.extract",
+      panel: "step-extract",
+      panelName: t("extract.title"),
+      state: busy ? "running" : error ? "error" : entries.length > 0 ? "done" : "todo",
+      detail:
+        entries.length > 0
+          ? t("steps.extract.done", { n: entries.length })
+          : t("steps.extract.todo"),
+    },
+    {
+      key: "estimate",
+      title: "steps.estimate",
+      panel: "step-estimate",
+      panelName: t("estimate.title"),
+      state: estimating
+        ? "running"
+        : estimateError
+          ? "error"
+          : estimate || (entries.length > 0 && pending === 0)
+            ? "done"
+            : "todo",
+      detail: estimate
+        ? t("steps.estimate.done", {
+            batches: estimate.batches,
+            entries: estimate.entries,
+            input: estimate.inputTokens.toLocaleString(),
+          })
+        : entries.length > 0 && pending === 0
+          ? t("steps.estimate.nothing")
+          : t("steps.estimate.todo"),
+    },
+    {
+      key: "translate",
+      title: "steps.translate",
+      panel: "step-translate",
+      panelName: t("translate.title"),
+      state: translating ? "running" : translateError ? "error" : translated ? "done" : "todo",
+      detail: translating
+        ? t("steps.translate.running", {
+            done: progress?.done ?? 0,
+            total: progress?.total ?? pending,
+          })
+        : paused
+          ? t("steps.translate.paused", { pending })
+          : translated
+            ? t("steps.translate.done")
+            : t("steps.translate.todo", { pending, failed }),
+    },
+    {
+      key: "pictures",
+      title: "steps.pictures",
+      panel: "step-pictures",
+      panelName: t("pictures.title"),
+      state: picturesError ? "error" : unchecked === 0 ? "done" : "todo",
+      detail:
+        unchecked === undefined
+          ? t("steps.pictures.todo")
+          : unchecked === 0
+            ? t("steps.pictures.done")
+            : t("steps.pictures.unchecked", { n: unchecked }),
+    },
+    {
+      key: "reinsert",
+      title: "steps.reinsert",
+      panel: "step-reinsert",
+      panelName: t("reinsert.title"),
+      state: reinserting ? "running" : reinsertError ? "error" : reinsertFresh ? "done" : "todo",
+      detail: reinsertFresh
+        ? t("steps.reinsert.done", {
+            applied: reinsertOutcome.apply.applied,
+            kept: reinsertOutcome.apply.keptOriginal + reinsertOutcome.skippedErrors,
+          })
+        : reinsertOutcome
+          ? t("steps.reinsert.stale")
+          : t("steps.reinsert.todo"),
+    },
+    {
+      key: "audit",
+      title: "steps.audit",
+      panel: "step-audit",
+      panelName: t("audit.title"),
+      state: auditing ? "running" : auditError ? "error" : auditClean ? "done" : "todo",
+      detail: !audit
+        ? t("steps.audit.todo")
+        : auditClean
+          ? t("steps.audit.done")
+          : t("steps.audit.left", {
+              chars: audit.remainingChars.toLocaleString(),
+              pictures: unchecked ?? 0,
+            }),
+    },
+    {
+      key: "patch",
+      title: "steps.patch",
+      panel: "step-patch",
+      panelName: t("patch.title"),
+      state: patching ? "running" : patchError ? "error" : patchOutcome ? "done" : "todo",
+      detail: patchOutcome
+        ? t("steps.patch.done", { format: patchOutcome.patchFormat })
+        : t("steps.patch.todo"),
+    },
+  ];
 
   return (
     <section className="card">
-      <h2 data-step="1">{t("extract.title")}</h2>
+      <h2 data-step="1" id="step-extract">
+        {t("extract.title")}
+      </h2>
       <dl className="facts">
         <dt>{t("inspect.file")}</dt>
         <dd className="path">{project.sourcePath}</dd>
@@ -719,6 +989,9 @@ export default function ProjectView({
           {t(warning)}
         </div>
       )}
+
+      <StepsGuide steps={steps} t={t} />
+
       {error && (
         <div className="error" role="alert">
           <strong>{t("common.error")}:</strong> {error}
@@ -747,6 +1020,28 @@ export default function ProjectView({
             max={64}
             value={minChars}
             onChange={(e) => setMinChars(Number(e.target.value) || 1)}
+          />
+        </label>
+        <label title={t("extract.regionHint")}>
+          {t("extract.regionStart")}
+          <input
+            type="text"
+            size={10}
+            className="mono"
+            value={regionStart}
+            placeholder="0"
+            onChange={(e) => setRegionStart(e.target.value)}
+          />
+        </label>
+        <label title={t("extract.regionHint")}>
+          {t("extract.regionEnd")}
+          <input
+            type="text"
+            size={10}
+            className="mono"
+            value={regionEnd}
+            placeholder={hexInput(project.sourceSize)}
+            onChange={(e) => setRegionEnd(e.target.value)}
           />
         </label>
         <label className="checkline" title={t("extract.onlyTextHint")}>
@@ -783,7 +1078,16 @@ export default function ProjectView({
         </div>
       </div>
       <p className="hint left">{t("extract.hint")}</p>
+      <p className="hint left">{t("extract.regionHint")}</p>
 
+      {hasJis16 && (
+        <AlphabetPanel
+          projectDir={projectDir}
+          t={t}
+          disabled={busy || sourceBroken}
+          onSaved={runStructuredExtract}
+        />
+      )}
       {encoding === "table" && (
         <div className="panel">
           <h3>{t("relative.title")}</h3>
@@ -875,13 +1179,6 @@ export default function ProjectView({
         </div>
       )}
 
-      <PicturesPanel
-        projectDir={projectDir}
-        t={t}
-        onRead={reloadEntries}
-        disabled={sourceBroken || translating}
-      />
-
       {scanInfo && (
         <div className="ok">
           {t("entries.saved", { n: scanInfo.found })}
@@ -942,7 +1239,7 @@ export default function ProjectView({
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
             />
-            <button onClick={runValidation}>{t("validate.run")}</button>
+            <button onClick={() => runValidation()}>{t("validate.run")}</button>
             <button onClick={() => exportAs("json")}>{t("export.json")}</button>
             <button onClick={() => exportAs("csv")}>{t("export.csv")}</button>
           </div>
@@ -953,7 +1250,20 @@ export default function ProjectView({
                 warnings: valReport.warnings,
                 checked: valReport.checked,
               })}
+              {noLetters > 0 && (
+                <>
+                  <br />
+                  {t("validate.noLetters", { n: noLetters })}
+                  <br />
+                  <button onClick={() => markNotText([], "no_letters")}>
+                    {t("validate.markNoLetters", { n: noLetters })}
+                  </button>
+                </>
+              )}
             </div>
+          )}
+          {notTextMarked !== null && !selected && (
+            <div className="ok">{t("validate.marked", { n: notTextMarked })}</div>
           )}
           {filtered.length > RENDER_CAP && (
             <p className="hint left">
@@ -1015,11 +1325,14 @@ export default function ProjectView({
               entry={selected}
               draft={draft}
               issues={issuesByEntry[selected.id] ?? []}
+              error={editorError}
+              notTextMarked={notTextMarked}
               t={t}
               onDraft={setDraft}
               onSave={saveDraft}
               onToggleReviewed={() => toggleReviewed(selected)}
               onUnmarkInternal={() => unmarkInternal(selected)}
+              onNotText={() => markNotText([selected.id])}
             />
           ) : (
             <p className="empty">{t("editor.pick")}</p>
@@ -1028,8 +1341,9 @@ export default function ProjectView({
       )}
 
       {settings && endpoint && (
-        <div className="panel">
-          <h3 data-step="2">{t("translate.title")}</h3>
+        <>
+          <div className="panel">
+            <h3>{t("provider.title")}</h3>
           <div className="scan-controls">
             <label>
               {t("translate.provider")}
@@ -1142,6 +1456,36 @@ export default function ProjectView({
                 }
               />
             </label>
+            <label title={t("translate.parallelHint")}>
+              {t("translate.parallel")}
+              <input
+                type="number"
+                min={1}
+                max={16}
+                value={settings.parallel}
+                onChange={(e) =>
+                  setSettings({
+                    ...settings,
+                    parallel: Math.min(16, Math.max(1, Number(e.target.value) || 1)),
+                  })
+                }
+              />
+            </label>
+            <label title={t("translate.shortenRoundsHint")}>
+              {t("translate.shortenRounds")}
+              <input
+                type="number"
+                min={0}
+                max={5}
+                value={settings.shortenRounds}
+                onChange={(e) =>
+                  setSettings({
+                    ...settings,
+                    shortenRounds: Math.min(5, Math.max(0, Number(e.target.value) || 0)),
+                  })
+                }
+              />
+            </label>
             {settings.provider === "openai_compatible" && (
               <label>
                 {t("translate.apiKey")} {apiKeySet && <em>{t("translate.apiKeySet")}</em>}
@@ -1169,62 +1513,6 @@ export default function ProjectView({
           </div>
           {settings.provider === "anthropic" && (
             <p className="hint left">{t("translate.claudeKeyHint")}</p>
-          )}
-          {paidByToken && (
-            <>
-              <div className="scan-controls">
-                <label title={t("translate.priceHint")}>
-                  {t("translate.priceInput")}
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={settings.priceInput}
-                    onChange={(e) =>
-                      setSettings({ ...settings, priceInput: Math.max(0, Number(e.target.value) || 0) })
-                    }
-                  />
-                </label>
-                <label title={t("translate.priceHint")}>
-                  {t("translate.priceOutput")}
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    value={settings.priceOutput}
-                    onChange={(e) =>
-                      setSettings({ ...settings, priceOutput: Math.max(0, Number(e.target.value) || 0) })
-                    }
-                  />
-                </label>
-                <button onClick={runEstimate} disabled={estimating || translating}>
-                  {estimating ? t("translate.estimating") : t("translate.estimate")}
-                </button>
-              </div>
-              <p className="hint left">
-                {prices
-                  ? t("translate.priceUsed", { input: prices[0], output: prices[1] })
-                  : t("translate.priceMissing")}
-              </p>
-              {estimate && (
-                <div className="warn">
-                  {t("translate.estimateResult", {
-                    entries: estimate.entries,
-                    batches: estimate.batches,
-                    input: estimate.inputTokens.toLocaleString(),
-                    output: estimate.outputTokens.toLocaleString(),
-                  })}
-                  {dollars(estimate.inputTokens, estimate.outputTokens) !== null &&
-                    ` ${t("translate.estimateCost", {
-                      cost: money(dollars(estimate.inputTokens, estimate.outputTokens) ?? 0),
-                    })}`}
-                  <br />
-                  {estimate.calibrated
-                    ? t("translate.estimateCalibrated")
-                    : t("translate.estimateRough")}
-                </div>
-              )}
-            </>
           )}
           {settings.provider === "codex_cli" && (
             <>
@@ -1273,10 +1561,6 @@ export default function ProjectView({
               </p>
             </>
           )}
-          {hasAscii && <p className="hint left">{t("translate.ascii")}</p>}
-          {hasJapanese && <p className="hint left">{t("translate.japanese")}</p>}
-          {hasJis16 && <p className="hint left">{t("translate.jis16")}</p>}
-          {internal > 0 && <p className="hint left">{t("translate.internal", { n: internal })}</p>}
           {settings.provider !== "ollama" && (
             <label className="checkline">
               <input
@@ -1300,219 +1584,373 @@ export default function ProjectView({
             <button onClick={() => testProvider()} disabled={testing || translating}>
               {testing ? t("translate.testing") : t("translate.test")}
             </button>
-            {translating ? (
-              <button onClick={cancelTranslation} disabled={cancelling}>
-                {cancelling ? t("translate.cancelling") : t("translate.cancel")}
-              </button>
-            ) : (
-              <button
-                className="primary"
-                onClick={() => runTranslation()}
-                disabled={pending === 0 || sourceBroken}
-              >
-                {t("translate.run")} ({pending})
-              </button>
-            )}
-            {!translating && failed > 0 && (
-              <button
-                onClick={() => runTranslation(settings, true)}
-                disabled={sourceBroken}
-                title={t("translate.redoErrorsHint")}
-              >
-                {t("translate.redoErrors")} ({failed})
-              </button>
-            )}
           </div>
-          {remoteAsk && (
-            <div className="warn" role="alert">
-              {t("translate.remoteAsk")}
-              <div className="actions">
-                <button onClick={() => setRemoteAsk(null)}>{t("translate.cancel")}</button>
-                <button className="primary" onClick={allowRemoteAndContinue}>
-                  {t("translate.remoteAllow")}
-                </button>
-              </div>
-            </div>
-          )}
-          {translateError && (
+          {remoteAsk === "test" && remoteAskBox}
+          {providerError && (
             <div className="error" role="alert">
-              <strong>{t("common.error")}:</strong> {translateError}
+              <strong>{t("common.error")}:</strong> {providerError}
             </div>
           )}
           {testResult && <div className="ok">{testResult}</div>}
-          {translating && (
-            <div className="progress-row">
-              <progress value={progress?.done ?? 0} max={progress?.total ?? 1} />
-              <span>
-                {cancelling
-                  ? t("translate.cancelling")
-                  : progress
-                    ? `${progress.done}/${progress.total} — ${t(
-                        `translate.phase.${progress.phase}` as MessageId,
-                      )}`
-                    : t("translate.running")}
-              </span>
+          </div>
+
+          <div className="panel" id="step-estimate">
+            <h3 data-step="2">{t("estimate.title")}</h3>
+            <p className="hint left">{t("estimate.hint")}</p>
+            {paidByToken && (
+              <>
+                <div className="scan-controls">
+                  <label title={t("translate.priceHint")}>
+                    {t("translate.priceInput")}
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={settings.priceInput}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          priceInput: Math.max(0, Number(e.target.value) || 0),
+                        })
+                      }
+                    />
+                  </label>
+                  <label title={t("translate.priceHint")}>
+                    {t("translate.priceOutput")}
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      value={settings.priceOutput}
+                      onChange={(e) =>
+                        setSettings({
+                          ...settings,
+                          priceOutput: Math.max(0, Number(e.target.value) || 0),
+                        })
+                      }
+                    />
+                  </label>
+                </div>
+                <p className="hint left">
+                  {prices
+                    ? t("translate.priceUsed", { input: prices[0], output: prices[1] })
+                    : t("translate.priceMissing")}
+                </p>
+              </>
+            )}
+            <div className="actions">
+              <button
+                className="primary"
+                onClick={runEstimate}
+                disabled={estimating || translating || sourceBroken}
+              >
+                {estimating ? t("translate.estimating") : t("translate.estimate")}
+              </button>
             </div>
-          )}
-          {summary && (
-            <div className="ok">
-              {t("translate.summary", {
-                translated: summary.translated,
-                tmHits: summary.tmHits,
-                failed: summary.failed,
-              })}
-              {summary.cancelled && t("translate.summaryCancelled")}
-              {summary.shortened > 0 &&
-                t("translate.summaryShortened", { shortened: summary.shortened })}
-              {summary.tooLong > 0 && t("translate.summaryTooLong", { tooLong: summary.tooLong })}
-              {summary.notText > 0 && t("translate.summaryNotText", { notText: summary.notText })}
-              {summary.inputTokens + summary.outputTokens > 0 && (
-                <>
-                  <br />
-                  {t("translate.spent", {
-                    input: summary.inputTokens.toLocaleString(),
-                    output: summary.outputTokens.toLocaleString(),
-                  })}
-                  {dollars(summary.inputTokens, summary.outputTokens) !== null &&
-                    ` ${t("translate.spentCost", {
-                      cost: money(dollars(summary.inputTokens, summary.outputTokens) ?? 0),
-                    })}`}
-                </>
+            {estimateError && (
+              <div className="error" role="alert">
+                <strong>{t("common.error")}:</strong> {estimateError}
+              </div>
+            )}
+            {estimate && (
+              <div className="warn">
+                {t("translate.estimateResult", {
+                  entries: estimate.entries,
+                  batches: estimate.batches,
+                  input: estimate.inputTokens.toLocaleString(),
+                  output: estimate.outputTokens.toLocaleString(),
+                })}
+                {dollars(estimate.inputTokens, estimate.outputTokens) !== null &&
+                  ` ${t("translate.estimateCost", {
+                    cost: money(dollars(estimate.inputTokens, estimate.outputTokens) ?? 0),
+                  })}`}
+                <br />
+                {estimate.calibrated
+                  ? t("translate.estimateCalibrated")
+                  : t("translate.estimateRough")}
+              </div>
+            )}
+          </div>
+
+          <div className="panel" id="step-translate">
+            <h3 data-step="3">{t("translate.title")}</h3>
+            {hasAscii && <p className="hint left">{t("translate.ascii")}</p>}
+            {hasJapanese && <p className="hint left">{t("translate.japanese")}</p>}
+            {hasJis16 && <p className="hint left">{t("translate.jis16")}</p>}
+            {internal > 0 && (
+              <p className="hint left">{t("translate.internal", { n: internal })}</p>
+            )}
+            <div className="actions">
+              {translating ? (
+                <button onClick={cancelTranslation} disabled={cancelling}>
+                  {cancelling ? t("translate.cancelling") : t("translate.cancel")}
+                </button>
+              ) : (
+                <button
+                  className="primary"
+                  onClick={() => runTranslation()}
+                  disabled={pending === 0 || sourceBroken}
+                >
+                  {paused ? t("translate.resume") : t("translate.run")} ({pending})
+                </button>
+              )}
+              {!translating && failed > 0 && (
+                <button
+                  onClick={() => runTranslation(settings, true)}
+                  disabled={sourceBroken}
+                  title={t("translate.redoErrorsHint")}
+                >
+                  {t("translate.redoErrors")} ({failed})
+                </button>
               )}
             </div>
-          )}
-        </div>
-      )}
-
-      {entries.length > 0 && (
-        <div className="panel">
-          <h3 data-step="3">{t("reinsert.title")}</h3>
-          <p className="hint left">{t("reinsert.hint")}</p>
-          <label className="checkline" title={t("reinsert.advancedHint")}>
-            <input
-              type="checkbox"
-              checked={allowErrors}
-              onChange={(e) => setAllowErrors(e.target.checked)}
-            />
-            {t("reinsert.advanced")}
-          </label>
-          {allowErrors && <div className="warn">{t("reinsert.advancedHint")}</div>}
-          <div className="actions">
-            <select
-              value={patchFormat}
-              onChange={(e) => setPatchFormat(e.target.value as typeof patchFormat)}
-              title={t("patch.formatHint")}
-            >
-              <option value="auto">{t("patch.formatAuto")}</option>
-              <option value="ips">IPS</option>
-              <option value="bps">BPS</option>
-            </select>
-            <button
-              onClick={runPatchExport}
-              disabled={patching || reinserting || sourceBroken}
-              title={t("patch.hint")}
-            >
-              {patching ? t("patch.exporting") : t("patch.export")}
-            </button>
-            <button
-              className="primary"
-              onClick={runReinsert}
-              disabled={reinserting || sourceBroken || translating}
-            >
-              {reinserting ? t("reinsert.running") : t("reinsert.run")}
-            </button>
-          </div>
-          {reinsertError && (
-            <div className="error" role="alert">
-              <strong>{t("common.error")}:</strong> {reinsertError}
-            </div>
-          )}
-          {reinsertOutcome && (
-            <>
+            {(translating || paused) && (
+              <p className="hint left">{t("translate.resumeHint")}</p>
+            )}
+            {remoteAsk === "translate" && remoteAskBox}
+            {translateError && (
+              <div className="error" role="alert">
+                <strong>{t("common.error")}:</strong> {translateError}
+              </div>
+            )}
+            {translating && (
+              <div className="progress-row">
+                <progress value={progress?.done ?? 0} max={progress?.total ?? 1} />
+                <span>
+                  {cancelling
+                    ? t("translate.cancelling")
+                    : progress
+                      ? `${progress.done}/${progress.total} — ${t(
+                          `translate.phase.${progress.phase}` as MessageId,
+                        )}`
+                      : t("translate.running")}
+                </span>
+              </div>
+            )}
+            {summary && (
               <div className="ok">
-                {t("reinsert.done")}
-                <span className="path">{reinsertOutcome.workingPath}</span>
-                <button
-                  onClick={() =>
-                    revealItemInDir(reinsertOutcome.workingPath).catch((e) =>
-                      setError(String(e)),
-                    )
-                  }
-                >
-                  {t("reinsert.reveal")}
-                </button>
-                <br />
-                {t("reinsert.applied", {
-                  applied: reinsertOutcome.apply.applied,
-                  kept: reinsertOutcome.apply.keptOriginal,
+                {t("translate.summary", {
+                  translated: summary.translated,
+                  tmHits: summary.tmHits,
+                  failed: summary.failed,
                 })}
-                {reinsertOutcome.apply.relocated > 0 && (
+                {summary.cancelled && t("translate.summaryCancelled")}
+                {summary.shortened > 0 &&
+                  t("translate.summaryShortened", { shortened: summary.shortened })}
+                {summary.tooLong > 0 &&
+                  t("translate.summaryTooLong", { tooLong: summary.tooLong })}
+                {summary.notText > 0 &&
+                  t("translate.summaryNotText", { notText: summary.notText })}
+                {summary.inputTokens + summary.outputTokens > 0 && (
                   <>
                     <br />
-                    {t("reinsert.relocated", { n: reinsertOutcome.apply.relocated })}
-                  </>
-                )}
-                {reinsertOutcome.apply.noRoom > 0 && (
-                  <>
-                    <br />
-                    {t("reinsert.noRoom", { n: reinsertOutcome.apply.noRoom })}
-                  </>
-                )}
-                {reinsertOutcome.apply.packedLeftOut > 0 && (
-                  <>
-                    <br />
-                    {t("reinsert.packedLeftOut", { n: reinsertOutcome.apply.packedLeftOut })}
-                  </>
-                )}
-                {reinsertOutcome.pictures.pictures > 0 && (
-                  <>
-                    <br />
-                    {t("reinsert.pictures", {
-                      pictures: reinsertOutcome.pictures.pictures,
-                      drawn: reinsertOutcome.pictures.drawn,
+                    {t("translate.spent", {
+                      input: summary.inputTokens.toLocaleString(),
+                      output: summary.outputTokens.toLocaleString(),
                     })}
+                    {dollars(summary.inputTokens, summary.outputTokens) !== null &&
+                      ` ${t("translate.spentCost", {
+                        cost: money(dollars(summary.inputTokens, summary.outputTokens) ?? 0),
+                      })}`}
                   </>
                 )}
               </div>
-              {reinsertOutcome.pictures.leftOut.length > 0 && (
-                <div className="warn">
-                  {t("reinsert.picturesLeftOut", { n: reinsertOutcome.pictures.leftOut.length })}
-                  {reinsertOutcome.pictures.leftOut.map(([id, why]) => (
-                    <div key={id}>
-                      {id}: {why}
-                    </div>
-                  ))}
-                </div>
-              )}
-              <p className="hint left">{t("reinsert.personal")}</p>
-              <ul className="evidence">
-                {reinsertOutcome.verification.checks.map((c) => (
-                  <li key={c}>{c}</li>
-                ))}
-              </ul>
-              {reinsertOutcome.skippedErrors > 0 && (
-                <div className="warn">
-                  {t("reinsert.skipped", { n: reinsertOutcome.skippedErrors })}
-                </div>
-              )}
-              {reinsertOutcome.forcedErrors > 0 && (
-                <div className="warn">
-                  {t("reinsert.forced", { n: reinsertOutcome.forcedErrors })}
-                </div>
-              )}
-            </>
-          )}
-          {patchOutcome && (
-            <div className="ok">
-              {t("patch.done", { size: patchOutcome.patchSize, format: patchOutcome.patchFormat })}
-              <br />
-              <span className="path">{patchOutcome.patchPath}</span>
-              <span className="path">{patchOutcome.manifestPath}</span>
-              <span className="path">{patchOutcome.csvPath}</span>
-            </div>
-          )}
-        </div>
+            )}
+            <details className="outside">
+              <summary>{t("outside.title")}</summary>
+              <p className="hint left">{t("outside.hint")}</p>
+              <div className="actions">
+                {failed > 0 && (
+                  <label className="checkline">
+                    <input
+                      type="checkbox"
+                      checked={outsideRedo}
+                      onChange={(e) => setOutsideRedo(e.target.checked)}
+                    />
+                    {t("outside.redoErrors")}
+                  </label>
+                )}
+                <button onClick={exportRequests} disabled={translating || sourceBroken}>
+                  {t("outside.export")}
+                </button>
+                <button onClick={importTranslations} disabled={translating}>
+                  {t("outside.import")}
+                </button>
+              </div>
+              {outsideInfo && <div className="ok">{outsideInfo}</div>}
+            </details>
+          </div>
+        </>
       )}
+
+      <PicturesPanel
+        projectDir={projectDir}
+        t={t}
+        onRead={async () => {
+          bump();
+          await reloadEntries();
+        }}
+        onChecked={picturesChecked}
+        onError={setPicturesError}
+        disabled={sourceBroken || translating}
+      />
+
+      <div className="panel" id="step-reinsert">
+        <h3 data-step="5">{t("reinsert.title")}</h3>
+        <p className="hint left">{t("reinsert.hint")}</p>
+        <label className="checkline" title={t("reinsert.advancedHint")}>
+          <input
+            type="checkbox"
+            checked={allowErrors}
+            onChange={(e) => setAllowErrors(e.target.checked)}
+          />
+          {t("reinsert.advanced")}
+        </label>
+        {allowErrors && <div className="warn">{t("reinsert.advancedHint")}</div>}
+        <div className="actions">
+          <button
+            className="primary"
+            onClick={runReinsert}
+            disabled={reinserting || sourceBroken || translating || entries.length === 0}
+          >
+            {reinserting ? t("reinsert.running") : t("reinsert.run")}
+          </button>
+        </div>
+        {reinsertError && (
+          <div className="error" role="alert">
+            <strong>{t("common.error")}:</strong> {reinsertError}
+          </div>
+        )}
+        {reinsertOutcome && (
+          <>
+            <div className="ok">
+              {t("reinsert.done")}
+              <span className="path">{reinsertOutcome.workingPath}</span>
+              <button
+                onClick={() =>
+                  revealItemInDir(reinsertOutcome.workingPath).catch((e) =>
+                    setReinsertError(String(e)),
+                  )
+                }
+              >
+                {t("reinsert.reveal")}
+              </button>
+              <br />
+              {t("reinsert.applied", {
+                applied: reinsertOutcome.apply.applied,
+                kept: reinsertOutcome.apply.keptOriginal,
+              })}
+              {reinsertOutcome.apply.relocated > 0 && (
+                <>
+                  <br />
+                  {t("reinsert.relocated", { n: reinsertOutcome.apply.relocated })}
+                </>
+              )}
+              {reinsertOutcome.apply.noRoom > 0 && (
+                <>
+                  <br />
+                  {t("reinsert.noRoom", { n: reinsertOutcome.apply.noRoom })}
+                </>
+              )}
+              {reinsertOutcome.apply.packedLeftOut > 0 && (
+                <>
+                  <br />
+                  {t("reinsert.packedLeftOut", { n: reinsertOutcome.apply.packedLeftOut })}
+                </>
+              )}
+              {reinsertOutcome.pictures.pictures > 0 && (
+                <>
+                  <br />
+                  {t("reinsert.pictures", {
+                    pictures: reinsertOutcome.pictures.pictures,
+                    drawn: reinsertOutcome.pictures.drawn,
+                  })}
+                </>
+              )}
+            </div>
+            {reinsertOutcome.pictures.leftOut.length > 0 && (
+              <div className="warn">
+                {t("reinsert.picturesLeftOut", { n: reinsertOutcome.pictures.leftOut.length })}
+                {reinsertOutcome.pictures.leftOut.map(([id, why]) => (
+                  <div key={id}>
+                    {id}: {why}
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="hint left">{t("reinsert.personal")}</p>
+            <ul className="evidence">
+              {reinsertOutcome.verification.checks.map((c) => (
+                <li key={c}>{c}</li>
+              ))}
+            </ul>
+            {reinsertOutcome.skippedErrors > 0 && (
+              <div className="warn">
+                {t("reinsert.skipped", { n: reinsertOutcome.skippedErrors })}
+              </div>
+            )}
+            {reinsertOutcome.forcedErrors > 0 && (
+              <div className="warn">
+                {t("reinsert.forced", { n: reinsertOutcome.forcedErrors })}
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      <AuditPanel
+        audit={audit}
+        running={auditing}
+        error={auditError}
+        disabled={sourceBroken || reinserting || translating}
+        t={t}
+        onRun={runAudit}
+        onPick={(id) => {
+          const entry = entries.find((e) => e.id === id);
+          if (!entry) return;
+          setStatusFilter("all");
+          setFilter("");
+          selectEntry(entry);
+          document.querySelector(".editor")?.scrollIntoView({ behavior: "smooth" });
+        }}
+      />
+
+      <div className="panel" id="step-patch">
+        <h3 data-step="7">{t("patch.title")}</h3>
+        <p className="hint left">{t("patch.hint")}</p>
+        <div className="actions">
+          <select
+            value={patchFormat}
+            onChange={(e) => setPatchFormat(e.target.value as typeof patchFormat)}
+            title={t("patch.formatHint")}
+          >
+            <option value="auto">{t("patch.formatAuto")}</option>
+            <option value="ips">IPS</option>
+            <option value="bps">BPS</option>
+          </select>
+          <button
+            className="primary"
+            onClick={runPatchExport}
+            disabled={patching || reinserting || sourceBroken}
+          >
+            {patching ? t("patch.exporting") : t("patch.export")}
+          </button>
+        </div>
+        {patchError && (
+          <div className="error" role="alert">
+            <strong>{t("common.error")}:</strong> {patchError}
+          </div>
+        )}
+        {patchOutcome && (
+          <div className="ok">
+            {t("patch.done", { size: patchOutcome.patchSize, format: patchOutcome.patchFormat })}
+            <br />
+            <span className="path">{patchOutcome.patchPath}</span>
+            <span className="path">{patchOutcome.manifestPath}</span>
+            <span className="path">{patchOutcome.csvPath}</span>
+          </div>
+        )}
+      </div>
 
       <details className="panel">
         <summary>
@@ -1568,22 +2006,30 @@ interface EntryEditorProps {
   entry: TextEntry;
   draft: string;
   issues: ValidationIssue[];
+  /** Erro de salvar, revisar ou marcar esta frase: aparece aqui, nao no topo. */
+  error: string | null;
+  /** Quantas a ultima marca de nao-texto mudou (null = nenhuma marca agora). */
+  notTextMarked: number | null;
   t: ReturnType<typeof makeT>;
   onDraft: (v: string) => void;
   onSave: () => void;
   onToggleReviewed: () => void;
   onUnmarkInternal: () => void;
+  onNotText: () => void;
 }
 
 function EntryEditor({
   entry,
   draft,
   issues,
+  error,
+  notTextMarked,
   t,
   onDraft,
   onSave,
   onToggleReviewed,
   onUnmarkInternal,
+  onNotText,
 }: EntryEditorProps) {
   const draftBytes = encodedByteLength(draft, entry.encoding);
   const originalBytes = entry.originalBytes.length / 2;
@@ -1635,8 +2081,12 @@ function EntryEditor({
       {entry.status === "internal" && <p className="hint left">{t("editor.internal")}</p>}
 
       <div className="actions">
-        {entry.status === "internal" && (
+        {entry.status === "internal" ? (
           <button onClick={onUnmarkInternal}>{t("editor.unmarkInternal")}</button>
+        ) : (
+          <button onClick={onNotText} title={t("editor.notTextHint")}>
+            {t("editor.notText")}
+          </button>
         )}
         <button onClick={onToggleReviewed} disabled={!entry.translatedText}>
           {entry.status === "reviewed"
@@ -1647,6 +2097,14 @@ function EntryEditor({
           {t("editor.save")}
         </button>
       </div>
+      {error && (
+        <div className="error" role="alert">
+          <strong>{t("common.error")}:</strong> {error}
+        </div>
+      )}
+      {notTextMarked !== null && (
+        <div className="ok">{t("validate.marked", { n: notTextMarked })}</div>
+      )}
     </div>
   );
 }
