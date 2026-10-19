@@ -75,6 +75,11 @@ pub struct Source {
     /// linha medida no jogo, e a gravacao quebra a linha que passar dela.
     #[serde(default)]
     pub quebra: Option<String>,
+    /// Codigo que fecha uma pagina da caixa de texto ("E5", a espera do
+    /// botao): cada pagina da traducao cabe nas linhas da mesma pagina do
+    /// original.
+    #[serde(default)]
+    pub pagina: Option<String>,
     pub ponteiros: Pointers,
 }
 
@@ -141,6 +146,7 @@ struct Rules {
     align: usize,
     params: HashMap<u8, usize>,
     newline: Option<String>,
+    page: Option<String>,
 }
 
 impl Rules {
@@ -173,7 +179,18 @@ impl Rules {
             }
             None => None,
         };
+        let page = match &source.pagina {
+            Some(code) => {
+                let byte = hex(code, "pagina")?;
+                let [byte] = byte[..] else {
+                    return Err(err(format!("pagina \"{code}\" tem que ser de 1 byte")));
+                };
+                Some(tag(&[byte]))
+            }
+            None => None,
+        };
         Ok(Rules {
+            page,
             header: hex(&source.cabecalho, "cabecalho")?,
             end,
             align: source.alinhamento,
@@ -414,6 +431,9 @@ pub fn extract(project_dir: &Path, data: &[u8], profile: &Profile) -> Result<Ext
             if let (Some(line), Some(nl)) = (line, &newline) {
                 perfil["linha"] = serde_json::json!(line);
                 perfil["quebra"] = serde_json::json!(nl);
+                if let Some(page) = &rules.page {
+                    perfil["pagina"] = serde_json::json!(page);
+                }
             }
             out.entries.push(TextEntry {
                 id: format!("perfil-{at:08x}"),
@@ -505,6 +525,44 @@ pub fn wrapped(entry: &TextEntry, text: &str) -> Option<String> {
     Some(wrap(text, newline, width))
 }
 
+/// O codigo de quebra de linha da frase do perfil (`[E6]`), se ela tem um.
+pub fn newline(entry: &TextEntry) -> Option<&str> {
+    entry.metadata.get("perfil")?.get("quebra")?.as_str()
+}
+
+/// Linhas com texto de cada pagina (o trecho ate o codigo de pagina).
+fn page_lines(text: &str, newline: &str, page: Option<&str>) -> Vec<usize> {
+    let pages: Vec<&str> = match page {
+        Some(page) => text.split(page).collect(),
+        None => vec![text],
+    };
+    pages
+        .iter()
+        .map(|page| {
+            page.split(newline)
+                .filter(|line| !visible(line, "").trim().is_empty())
+                .count()
+        })
+        .collect()
+}
+
+/// A traducao, depois de quebrada pelo app, tem numa pagina mais linhas que
+/// a mesma pagina do original: `Some((pagina, linhas, cabem))`, a primeira.
+/// A caixa de texto do jogo tem a altura dela; o que passa some ou vaza.
+pub fn page_overflow(entry: &TextEntry, translation: &str) -> Option<(usize, usize, usize)> {
+    let perfil = entry.metadata.get("perfil")?;
+    let nl = perfil.get("quebra")?.as_str()?;
+    let page = perfil.get("pagina").and_then(|p| p.as_str());
+    let text = wrapped(entry, translation)?;
+    let original = page_lines(&entry.source_text, nl, page);
+    page_lines(&text, nl, page)
+        .into_iter()
+        .zip(original)
+        .enumerate()
+        .find(|(_, (lines, room))| lines > room)
+        .map(|(i, (lines, room))| (i + 1, lines, room))
+}
+
 /// Uma frase pronta pra gravar.
 struct Placed<'a> {
     entry: &'a TextEntry,
@@ -514,29 +572,63 @@ struct Placed<'a> {
     new: Vec<u8>,
 }
 
-/// Onde cada frase unica (pelos bytes novos) vai, em ordem, no espaco
-/// `room`. `None` = nao coube.
-fn pack(
-    placed: &[Placed],
-    room: &[(usize, usize)],
-    align: usize,
-) -> Option<HashMap<Vec<u8>, usize>> {
-    let mut where_: HashMap<Vec<u8>, usize> = HashMap::new();
-    let mut slot = 0;
-    let mut cursor = room.first()?.0;
-    for p in placed {
-        if where_.contains_key(&p.new) {
+/// Trechos [inicio, fim) do arquivo.
+type Spans = Vec<(usize, usize)>;
+
+/// Onde cada frase vai, na ordem de `placed` (que esta pela posicao). A que
+/// cabe no lugar dela fica onde esta — so a copia de uma repetida sai,
+/// apontando pra primeira; a que cresceu vai pra sobra (o resto do lugar das
+/// que encolheram e o lugar das que sairam), a maior primeiro, no menor
+/// buraco em que cabe. Mudar de lugar so o que precisa protege o texto que o
+/// jogo acha sem passar pelo ponteiro. `None` = alguma nao coube; devolve
+/// tambem o espaco que ficou livre, pra ser zerado.
+fn pack(placed: &[Placed], align: usize) -> Option<(Vec<usize>, Spans)> {
+    let pad = |n: usize| n.next_multiple_of(align);
+    let mut target = vec![0; placed.len()];
+    let mut first: HashMap<&[u8], usize> = HashMap::new();
+    let mut free: Spans = Vec::new();
+    let mut movers = Vec::new();
+    for (i, p) in placed.iter().enumerate() {
+        let slot = pad(p.old.len());
+        if let Some(&at) = first.get(&p.new[..]) {
+            target[i] = at;
+            free.push((p.at, p.at + slot));
+        } else if pad(p.new.len()) <= slot {
+            target[i] = p.at;
+            first.insert(&p.new, p.at);
+            free.push((p.at + pad(p.new.len()), p.at + slot));
+        } else {
+            free.push((p.at, p.at + slot));
+            movers.push(i);
+        }
+    }
+    free.retain(|(a, b)| a < b);
+    free.sort_unstable();
+    let mut merged: Spans = Vec::new();
+    for (a, b) in free {
+        match merged.last_mut() {
+            Some(last) if a <= last.1 => last.1 = last.1.max(b),
+            _ => merged.push((a, b)),
+        }
+    }
+    let zeroed = merged.clone();
+    movers.sort_by_key(|&i| std::cmp::Reverse(placed[i].new.len()));
+    for i in movers {
+        if let Some(&at) = first.get(&placed[i].new[..]) {
+            target[i] = at;
             continue;
         }
-        let size = p.new.len().next_multiple_of(align);
-        while cursor + size > room.get(slot)?.1 {
-            slot += 1;
-            cursor = room.get(slot)?.0;
-        }
-        where_.insert(p.new.clone(), cursor);
-        cursor += size;
+        let size = pad(placed[i].new.len());
+        let (best, _) = merged
+            .iter()
+            .enumerate()
+            .filter(|(_, (a, b))| b - a >= size)
+            .min_by_key(|(_, (a, b))| b - a)?;
+        target[i] = merged[best].0;
+        merged[best].0 += size;
+        first.insert(&placed[i].new, target[i]);
     }
-    Some(where_)
+    Some((target, zeroed))
 }
 
 fn perfil_field(entry: &TextEntry, key: &str) -> Option<u64> {
@@ -663,13 +755,12 @@ pub fn apply(
             )));
         }
 
-        // Remonta: em ordem, cada frase unica no proximo lugar livre. Se nao
-        // couber (o banco pode ter buracos de outro dado no meio), a traducao
-        // que mais cresceu volta ao original e tenta de novo; so com
-        // originais tudo cabe, porque e o arranjo de antes.
-        let where_ = loop {
-            match pack(&placed, &room, rules.align) {
-                Some(where_) => break where_,
+        // Remonta. Se nao couber (o banco pode ter buracos de outro dado no
+        // meio), a traducao que mais cresceu volta ao original e tenta de
+        // novo; so com originais tudo fica onde estava.
+        let (target, zeroed) = loop {
+            match pack(&placed, rules.align) {
+                Some(plan) => break plan,
                 None => {
                     let worst = placed
                         .iter_mut()
@@ -687,20 +778,20 @@ pub fn apply(
                 }
             }
         };
-        for &(a, b) in &room {
+        for &(a, b) in &zeroed {
             out[a..b].fill(0);
         }
-        for (bytes, &at) in &where_ {
-            out[at..at + bytes.len()].copy_from_slice(bytes);
-        }
-        for p in &placed {
-            let target = where_[&p.new];
-            let value = address(target)?.to_le_bytes();
-            for &k in &p.pointers {
-                out[k..k + 4].copy_from_slice(&value);
-            }
-            if target != p.at && p.entry.translated_text.is_some() {
-                report.relocated += 1;
+        for (p, &at) in placed.iter().zip(&target) {
+            out[at..at + p.new.len().next_multiple_of(rules.align)].fill(0);
+            out[at..at + p.new.len()].copy_from_slice(&p.new);
+            if at != p.at {
+                let value = address(at)?.to_le_bytes();
+                for &k in &p.pointers {
+                    out[k..k + 4].copy_from_slice(&value);
+                }
+                if p.entry.translated_text.is_some() {
+                    report.relocated += 1;
+                }
             }
         }
 

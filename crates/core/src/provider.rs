@@ -142,6 +142,13 @@ pub fn build_system_prompt(req: &TranslationRequest) -> String {
             p.push_str(
                 "- There are no accented letters: write the plain letter (a for á, c for ç, E for É).\n",
             );
+        } else {
+            // Com a lista e o teto de caracteres, um modelo leve escreve sem
+            // acento mesmo com a fonte tendo todos: medido em 19/10/2026 num
+            // jogo de DS, 110 de 1.158 traducoes com acento.
+            p.push_str(
+                "- The font HAS the accented letters listed above: write every word with the accents and diacritics the target language requires (for example ã, é, ç in Portuguese). A missing accent is a spelling mistake. An accented letter counts as one character, the same as a plain one.\n",
+            );
         }
         p.push_str(
             "- If a punctuation mark or a digit is not listed, rephrase without it.\n\

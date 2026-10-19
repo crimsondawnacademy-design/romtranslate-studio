@@ -185,27 +185,59 @@ fn translations_grow_and_shrink_inside_the_bank_and_every_pointer_follows() {
 fn a_long_line_is_broken_where_the_game_breaks_it() {
     let tmp = TempDir::new("linha");
     let dir = project(&tmp);
+    // A IA escreveu uma linha so, de 37 letras: passa da caixa (28) e e
+    // quebrada no espaco, com o codigo do jogo — duas linhas, como o original.
     translate(
         &dir,
         &[(
             "[E3:10]The castle is quiet tonight.[E6]Too quiet.",
-            "[E3:10]Esta noite o castelo [E6]Quieto demais.",
-        )],
-    );
-    // A IA escreveu uma linha de 31 letras: passa da caixa (28) e e quebrada
-    // no espaco, com o codigo do jogo.
-    translate(
-        &dir,
-        &[(
-            "[E3:10]The castle is quiet tonight.[E6]Too quiet.",
-            "[E3:10]O castelo e quieto nesta noite.[E6]Ok.",
+            "[E3:10]O castelo e quieto nesta noite demais.",
         )],
     );
     let outcome = reinsert_project_with(&dir, ErrorPolicy::Skip).unwrap();
+    assert_eq!(outcome.skipped_errors, 0);
     let rom = fs::read(&outcome.working_path).unwrap();
     assert_eq!(
         read(&rom, 1),
-        "[E3:10]O castelo e quieto nesta[E6]noite.[E6]Ok."
+        "[E3:10]O castelo e quieto nesta[E6]noite demais."
+    );
+}
+
+#[test]
+fn a_page_cannot_get_more_lines_than_the_box_had() {
+    let tmp = TempDir::new("pagina");
+    let dir = project(&tmp);
+    let speech = "[E3:10]The castle is quiet tonight.[E6]Too quiet.";
+    // Linhas refluidas: o [E6] pode sair, o app quebra de novo.
+    translate(
+        &dir,
+        &[(speech, "[E3:10]O castelo esta quieto. Quieto demais.")],
+    );
+    let entry = entries(&dir)
+        .into_iter()
+        .find(|e| e.source_text == speech)
+        .unwrap();
+    let table = romtranslate_core::tbl::TblTable::load(&dir.join("tables/letras.tbl")).unwrap();
+    let issues = romtranslate_core::validate::validate_entry(&entry, Some(&table));
+    assert!(issues.is_empty(), "{issues:?}");
+    // Mais linhas do que a caixa tinha: erro.
+    translate(
+        &dir,
+        &[(
+            speech,
+            "[E3:10]O castelo esta quieto esta noite,[E6]quieto demais, quieto demais.",
+        )],
+    );
+    let entry = entries(&dir)
+        .into_iter()
+        .find(|e| e.source_text == speech)
+        .unwrap();
+    let issues = romtranslate_core::validate::validate_entry(&entry, None);
+    assert!(
+        issues
+            .iter()
+            .any(|i| i.message.contains("linhas na pagina 1")),
+        "{issues:?}"
     );
 }
 

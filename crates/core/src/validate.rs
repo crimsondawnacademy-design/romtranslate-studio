@@ -270,6 +270,10 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
         source_tokens.remove(layout.soft());
         translation_tokens.remove(layout.soft());
     }
+    if let Some(newline) = crate::profile::newline(entry) {
+        source_tokens.remove(newline);
+        translation_tokens.remove(newline);
+    }
     // Kanji da fonte do jogo que a tabela nao leu (`[045C]`) e texto: some na
     // traducao junto com o resto do japones.
     let unread = |token: &str| {
@@ -418,6 +422,19 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
                 ),
             );
         }
+    }
+
+    // Frase do perfil: cada pagina da caixa cabe nas linhas que a mesma pagina
+    // tinha no original, ja com as quebras que o app poe.
+    if let Some((page, lines, room)) = crate::profile::page_overflow(entry, translation) {
+        push(
+            Severity::Error,
+            IssueKind::ByteOverflow,
+            format!(
+                "a traducao ocupa {lines} linhas na pagina {page} da caixa de texto, e o original \
+                 ocupava {room} — encurte o texto ou diga o mesmo em menos linhas"
+            ),
+        );
     }
 
     // Anomalia de comprimento (em chars, so para textos nao-minusculos).
