@@ -106,6 +106,10 @@ Toda plataforma real é **experimental**. Jogos usam motores, compressões e tab
 - A maior parte do texto só pode ter o tamanho do original. Crescer depende de uma tabela de ponteiros que o app reconheça; tabela indicada pelo usuário está no roteiro.
 - Escolher a região do texto e a tabela de caracteres de um jogo de cartucho ainda é trabalho manual.
 
+## Traduzir com uma IA o jogo que o app não lê
+
+Quando a extração automática não acha a fala de um jogo, uma IA de programação estuda o arquivo por você: acha a tabela de letras, onde cada frase começa e termina, os ponteiros e as letras acentuadas da fonte, e anota tudo num perfil pequeno do jogo (`perfil.toml`, ver [docs/PERFIL.md](docs/PERFIL.md)). O app traduz, valida, regrava e exporta o patch. O passo a passo está em [skills/traduzir-rom/SKILL.md](skills/traduzir-rom/SKILL.md), com ferramentas pequenas em Python ao lado. O Claude Code acha a skill sozinho quando aberto nesta pasta; o Codex e outras IAs chegam a ela pelo [AGENTS.md](AGENTS.md). Não precisa ser romhacker, mas precisa ter o arquivo do jogo: compartilhe só o patch e o perfil.
+
 ## Para quem gosta de fuçar
 
 - A **busca relativa** descobre a tabela de caracteres do jogo a partir de uma palavra que você sabe que aparece nele, e grava o `.tbl`.

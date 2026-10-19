@@ -106,6 +106,10 @@ Every real platform is **experimental**. Games use different engines, compressio
 - Most text can only be as long as the original. Growing it needs a pointer table the app recognises; tables declared by the user are on the roadmap.
 - Choosing the text region and the character table for a cartridge game is still manual work.
 
+## Translate a game the app cannot read, with an AI
+
+When the automatic extraction does not find a game's dialogue, an AI coding assistant can study the file for you: find the letter table, where each line starts and ends, the pointers and the font's accented letters, and write it down as a small game profile (`perfil.toml`, see [docs/PERFIL.md](docs/PERFIL.md)). The app then translates, validates, writes back and exports the patch. The step-by-step guide is [skills/traduzir-rom/SKILL.md](skills/traduzir-rom/SKILL.md) (Portuguese), with small Python helpers next to it. Claude Code picks it up when opened in this folder; Codex and other assistants are pointed to it by [AGENTS.md](AGENTS.md). You do not need to be a romhacker, but you do need a game file you own: share only the patch and the profile.
+
 ## For tinkerers
 
 - **Relative search** finds a game's custom character table from one word you know is in it, and writes the `.tbl` for you.

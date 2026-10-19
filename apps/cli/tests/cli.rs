@@ -232,6 +232,64 @@ fn scan_reads_a_table_inside_a_region() {
     assert_eq!(fs::read(tmp.0.join("game.nes")).unwrap(), rom);
 }
 
+/// O caminho da skill `skills/traduzir-rom`: a extracao automatica nao le a
+/// fala, o perfil e a tabela escritos depois de estudar o arquivo leem, e o
+/// resto e o CLI de sempre (lotes, TSV, reinsercao conferida, patch).
+#[test]
+fn profile_path_from_the_skill() {
+    let tmp = TempDir::new("perfil");
+    let rom = synth::make_profile_bank();
+    let project = tmp.project("game.gba", &rom);
+    ok(&["extract", &project]);
+    let auto = entries(&tmp, &project);
+    assert!(!auto
+        .iter()
+        .any(|e| e["sourceText"].as_str().unwrap().contains("castle")));
+
+    let dir = Path::new(&project);
+    fs::create_dir_all(dir.join("tables")).unwrap();
+    fs::write(dir.join("tables/letras.tbl"), synth::profile_table()).unwrap();
+    fs::write(dir.join("perfil.toml"), synth::profile_toml()).unwrap();
+    assert_eq!(ok_json(&["extract", &project])["saved"], 5);
+
+    let batches = tmp.path("lotes.json");
+    ok(&["estimate", &project, "--pedidos", &batches]);
+    let batches: Value = serde_json::from_str(&fs::read_to_string(&batches).unwrap()).unwrap();
+    assert_eq!(batches[0]["items"].as_array().unwrap().len(), 5);
+
+    let pt = |source: &str| match source {
+        "Bat" => "Rato",
+        "Skeleton" => "Esqueleto",
+        "Restores 100 HP." => "Restaura 100 PV.",
+        _ => "[E3:10]O castelo dorme quieto.[E6]Quieto demais.",
+    };
+    let tsv: String = entries(&tmp, &project)
+        .iter()
+        .map(|e| {
+            format!(
+                "{}\t{}\n",
+                e["id"].as_str().unwrap(),
+                pt(e["sourceText"].as_str().unwrap())
+            )
+        })
+        .collect();
+    fs::write(tmp.path("t.tsv"), tsv).unwrap();
+    let applied = ok_json(&["apply", &project, &tmp.path("t.tsv")]);
+    assert_eq!(applied["validation"]["errors"], 0, "{applied}");
+
+    let reinserted = ok_json(&["reinsert", &project, "--policy", "block"]);
+    assert_eq!(reinserted["apply"]["applied"], 5, "{reinserted}");
+    assert_eq!(reinserted["apply"]["noRoom"], 0);
+    assert_eq!(reinserted["verification"]["ok"], true);
+    let working = fs::read(reinserted["workingPath"].as_str().unwrap()).unwrap();
+    assert!(contains(&working, &synth::profile_encode("Esqueleto")));
+
+    let patch = ok_json(&["patch", &project, "--format", "ips"]);
+    let ips = fs::read(patch["patchPath"].as_str().unwrap()).unwrap();
+    assert_eq!(apply_ips(&rom, &ips).unwrap(), working);
+    assert_eq!(fs::read(tmp.0.join("game.gba")).unwrap(), rom);
+}
+
 #[test]
 fn bad_input_fails_with_a_clear_message() {
     let tmp = TempDir::new("errors");

@@ -2326,3 +2326,35 @@ por construção. Perfil de jogo comercial não entra no repo (regra dos nomes);
 fica no projeto de quem traduz.
 
 **Driver:** claude.
+
+## 2026-10-19 — Skill pra IA no repositório: o caminho do jogo que o app não lê
+
+**Contexto:** a avaliação de 19/10 (STATE, próximo passo 0f) mostrou que
+traduzir um jogo novo exige estudar o formato dele (no DS de 19/10, ~1 h de
+IA em sessão: tabela, cabeçalho, códigos, ponteiros, fonte) e que o motor do
+app é o que deixa o resto seguro. O estudo era feito com Python à mão, sem
+roteiro escrito.
+
+**Decisão:** `skills/traduzir-rom/SKILL.md` (formato de skill do Claude Code)
+com o processo em 10 passos, do `create` ao `patch`, cada um com comando, o
+que olhar e quando está pronto; `.claude/skills/traduzir-rom` é um link pra
+ela (o Claude Code acha sozinho no repositório) e `AGENTS.md` aponta pra ela
+(Codex e outras). As ferramentas de investigação ficam ao lado
+(`ferramentas/`, Python 3 só da biblioteca padrão, Pillow só no desenho da
+fonte), fora do app e do core: busca relativa com letra de 8 ou 16 bits,
+lista de frases com a mesma leitura do perfil, ponteiros de 32 bits com a
+conta do perfil, desenho de fonte de 1 bit por ponto e mapa do cartucho de
+DS com o endereço de carga. `teste.py` confere todas em arquivo sintético, e
+o teste da CLI `profile_path_from_the_skill` fixa o caminho de comandos da
+skill na fixture `synth::make_profile_bank` (`synthetic_perfil.gba` no
+`gen_fixtures`).
+
+**Consequências:** quem tem uma IA de programação traduz um jogo que o app
+não lê sem ser romhacker; o perfil escrito volta pro app e é o que um dia
+vira a biblioteca de perfis (0f, iii). As ferramentas não passam pela
+validação do `CLAUDE.md` (são Python): rodar o `teste.py` ao mexer nelas.
+Achados ao testar o caminho: o `audit` não conta o que segue em inglês (só
+japonês), e o teto de bytes do nome curto conta com sobra que nem sempre é
+contígua — a skill ensina a contornar os dois.
+
+**Driver:** claude.
