@@ -843,6 +843,11 @@ fn judge(entry: &TextEntry, answer: &str) -> Answer {
         Answer::NotText
     } else if has_japanese(&entry.source_text) && has_japanese(answer) {
         Answer::Untranslated
+    } else if answer.chars().any(|c| c.is_control() && c != '\n') {
+        // Caractere de controle no lugar de letra: o modelo leve montou mal o
+        // JSON (19/10/2026, 11 de 1.222 frases: "S\u{f} sei" por "Só sei").
+        // A frase fica pendente, nunca gravada assim.
+        Answer::Untranslated
     } else {
         Answer::Translation
     }
@@ -1113,4 +1118,34 @@ fn relevant_terms(glossary: &[GlossaryTerm], batch: &[TextEntry]) -> Vec<Glossar
         })
         .cloned()
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn entry(text: &str) -> TextEntry {
+        TextEntry {
+            id: "t".to_string(),
+            resource_path: None,
+            offset: Some(0),
+            original_bytes: text.as_bytes().to_vec(),
+            source_text: text.to_string(),
+            translated_text: None,
+            context: None,
+            max_bytes: None,
+            encoding: TextEncoding::Ascii,
+            status: TranslationStatus::Untranslated,
+            metadata: serde_json::json!({}),
+        }
+    }
+
+    #[test]
+    fn an_answer_with_a_control_character_is_not_a_translation() {
+        let e = entry("I just know she is gone.");
+        assert!(judge(&e, "Só sei que ela se foi.") == Answer::Translation);
+        assert!(judge(&e, "S\u{f} sei que ela se foi.") == Answer::Untranslated);
+        assert!(judge(&e, "Um moleque como voc\0") == Answer::Untranslated);
+        assert!(judge(&e, "Linha um\nlinha dois") == Answer::Translation);
+    }
 }

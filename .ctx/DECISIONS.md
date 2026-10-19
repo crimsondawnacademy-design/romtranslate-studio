@@ -2277,3 +2277,52 @@ de 2/4 bits por ponto não ganha letra (a troca pela sem acento continua).
 que a extração de agora põe em outro código).
 
 **Driver:** claude.
+
+## 2026-10-19 — Perfil do jogo: o formato que a regra automática não pega vira um arquivo que quem estudou o jogo escreve
+
+**Contexto:** pedido do Rhuan: traduzir por inteiro um jogo de DS em inglês
+"usando nosso sistema" e avaliar se o produto deve ser app ou projeto com skill
+pra IA. A extração do DS trouxe 55.587 "frases", todas lixo (vídeo e som lidos
+como texto), e nenhuma fala: o texto mora num overlay (código carregado na
+memória, que o adapter não extrai), com letra = ASCII − 0x20, frase aberta por
+`01 00`, fechada por `EA`, códigos com 1 ou 2 bytes de parâmetro e ponteiros de
+32 bits com o endereço de MEMÓRIA da frase. A memória do jogo não tem área
+livre: os overlays vêm colados uns nos outros.
+
+**Decisão:** `<projeto>/perfil.toml` (`crates/core/src/profile.rs`) descreve
+cada banco de frases: faixa no arquivo, tabela de letras, cabeçalho,
+terminador, alinhamento, códigos com parâmetro, código de quebra de linha,
+código de página e onde procurar os ponteiros (`memoria` + `origem`). Com
+perfil, a extração do projeto é a dele (a varredura do adapter fica de fora e
+o que ela tinha deixado sem tradução sai do banco). Frase = cabeçalho
+alinhado lido pela tabela até o terminador, com ponteiro exato e cara de
+texto; byte fora da tabela vira `[XX]`/`[XX:PP]` e a linha dele é escrita
+numa seção gerada da tabela (a extração lê só as linhas da pessoa). A
+gravação remonta o banco DENTRO do espaço que ele ocupava: a frase que cabe
+fica no lugar, só a que cresceu muda (pra sobra), a cópia repetida aponta pra
+primeira, todo ponteiro é reapontado e conferido. Cada frase tem teto de
+bytes (`max_bytes`: o espaço dela com o alinhamento e, nas curtas, a sobra
+que as repetidas liberam), que vai pro pedido à IA como `maxChars` e entra
+na repergunta; a quebra de linha pode mudar (o app quebra de novo pela
+largura medida), e cada página da caixa não pode ter mais linhas que no
+original.
+
+**Alternativas consideradas:** (1) script só pra esse jogo, fora do app —
+resolve um jogo e não deixa nada; (2) ensinar o adapter de DS a achar isso
+sozinho — cabeçalho, terminador e parâmetros variam de jogo pra jogo, e errar
+aqui corrompe o jogo; (3) deixar crescer o overlay — o jogo zera a memória
+depois dele (armadilha 7.1); (4) remontar tudo em ordem (primeira versão):
+movia 1.212 de 1.222 frases, e qualquer frase que o jogo achasse sem o
+ponteiro quebraria.
+
+**Consequências:** o app traduz um formato que antes não lia, sem crescer o
+arquivo e sem mudar de lugar o que cabe. O perfil é escrito por quem estudou
+o jogo (pessoa ou IA): é o pedaço que nenhuma regra automática garante, e é
+pequeno, sem byte do jogo — pode ser compartilhado. No jogo medido: 1.224
+frases de 1.280 candidatos; tradução pela IA do app em 2 rodadas; 1.225
+ponteiros conferidos fora do app levando à tradução; nada mudou fora do
+banco. O espaço é o do inglês (a memória está cheia): a tradução sai concisa
+por construção. Perfil de jogo comercial não entra no repo (regra dos nomes);
+fica no projeto de quem traduz.
+
+**Driver:** claude.

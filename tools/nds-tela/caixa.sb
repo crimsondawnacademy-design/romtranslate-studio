@@ -1,0 +1,6 @@
+(version 1)
+; O jogo roda sem rede e so escreve na pasta das fotos (parametro SAIDA).
+(allow default)
+(deny network*)
+(deny file-write*)
+(allow file-write* (subpath (param "SAIDA")) (literal "/dev/null"))
