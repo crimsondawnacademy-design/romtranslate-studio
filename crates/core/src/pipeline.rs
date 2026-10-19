@@ -259,6 +259,16 @@ fn batch_request(
                             &extract_tokens(&e.source_text),
                         )
                     })
+                    // Frase do perfil do jogo: muda de lugar, mas o banco tem
+                    // o tamanho dele, e o teto da frase garante a soma.
+                    .or_else(|| {
+                        table
+                            .filter(|_| crate::profile::is_profile(e))
+                            .zip(e.max_bytes)
+                            .map(|(table, max)| {
+                                table.chars_that_fit_keeping(max, &extract_tokens(&e.source_text))
+                            })
+                    })
                     // Japones diz em 2 bytes o que o portugues diz em 5 ou
                     // 6 letras: sem o teto ja no primeiro pedido, quase toda
                     // frase presa ao espaco dela voltaria grande demais.
@@ -872,7 +882,8 @@ fn save_translation(
 /// em tabela), o encoding escreve tudo, ou `text` nem se escreve nele.
 fn excess(entry: &TextEntry, text: &str, charset: Option<Charset>) -> Option<usize> {
     let charset = charset?;
-    if entry.can_grow() {
+    // A do perfil cresce ate o teto dela, e o teto e o espaco.
+    if entry.can_grow() && !crate::profile::is_profile(entry) {
         return None;
     }
     let table = match charset {
@@ -988,7 +999,10 @@ fn shorter_please(item: &mut BatchItem, entry: &TextEntry, charset: Option<Chars
     let room = match charset {
         Charset::Ascii => entry.max_bytes.unwrap_or(entry.original_bytes.len()),
         Charset::Table(table) => table.chars_that_fit_keeping(
-            entry.original_bytes.len(),
+            entry
+                .max_bytes
+                .filter(|_| crate::profile::is_profile(entry))
+                .unwrap_or(entry.original_bytes.len()),
             &extract_tokens(&entry.source_text),
         ),
         Charset::Image => match crate::images::place_of(entry) {

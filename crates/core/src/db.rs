@@ -162,6 +162,25 @@ impl ProjectDb {
         Ok(removed)
     }
 
+    /// Tira do projeto toda entry sem traducao que a extracao nao devolveu: com
+    /// perfil do jogo, o que a varredura de antes leu e lixo ou leitura velha.
+    pub fn remove_untranslated_absent(&mut self, extracted: &[TextEntry]) -> Result<usize> {
+        let extracted: HashSet<&str> = extracted.iter().map(|e| e.id.as_str()).collect();
+        let tx = Transaction::new_unchecked(&self.conn, TransactionBehavior::Immediate)?;
+        let mut removed = 0;
+        {
+            let mut delete =
+                tx.prepare("DELETE FROM entries WHERE id=?1 AND translated_text IS NULL")?;
+            for e in self.load_entries()? {
+                if e.translated_text.is_none() && !extracted.contains(e.id.as_str()) {
+                    removed += delete.execute([&e.id])?;
+                }
+            }
+        }
+        tx.commit()?;
+        Ok(removed)
+    }
+
     /// Tira do projeto a leitura antiga que a extracao nova trocou por outra:
     /// a entry que nao voltou, no mesmo encoding de uma que voltou e em cima
     /// dos mesmos bytes — tenha traducao ou nao. Sem isto, depois de uma

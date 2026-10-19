@@ -1149,8 +1149,12 @@ fn tag_group(entries: &mut [TextEntry], bank: &Bank, inside: Vec<(usize, usize)>
 
 /// A largura da caixa de texto guardada na entry (`tag`), se ha uma.
 pub(crate) fn line_width(entry: &TextEntry) -> Option<usize> {
-    let line = entry.metadata.get("bank")?.get("line")?.as_u64()?;
-    Some(line as usize)
+    let line = match entry.metadata.get("bank") {
+        Some(bank) => bank.get("line")?,
+        // Frase do perfil do jogo com quebra de linha declarada.
+        None => entry.metadata.get("perfil")?.get("linha")?,
+    };
+    Some(line.as_u64()? as usize)
 }
 
 pub(crate) struct BankPlan {

@@ -389,11 +389,14 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
     // linha (trecho entre dois codigos) ate a largura medida no jogo. Onde o
     // app quebra as linhas, so sobra a palavra que sozinha nao cabe.
     if let Some(width) = crate::adapters::bank::line_width(entry) {
-        let line = match &layout {
-            Some(layout) => layout.wrap(translation).1,
-            None => crate::adapters::bank::longest_line(translation),
+        // A frase do perfil tambem tem as linhas quebradas pelo app.
+        let wrapped = crate::profile::wrapped(entry, translation);
+        let line = match (&layout, &wrapped) {
+            (Some(layout), _) => layout.wrap(translation).1,
+            (None, Some(text)) => crate::adapters::bank::longest_line(text),
+            (None, None) => crate::adapters::bank::longest_line(translation),
         };
-        if line > width && layout.is_some() {
+        if line > width && (layout.is_some() || wrapped.is_some()) {
             push(
                 Severity::Warning,
                 IssueKind::ByteOverflow,

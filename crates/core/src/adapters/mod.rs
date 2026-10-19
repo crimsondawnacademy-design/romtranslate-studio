@@ -186,7 +186,13 @@ pub fn extract_project(project_dir: &Path) -> Result<ExtractOutcome> {
         .ok_or_else(|| CoreError::Project(format!("adapter {} nao existe", game.adapter_id)))?;
     // mmap: DVD de PS2 (>2 GiB) extrai sem carregar o arquivo em RAM.
     let data = crate::fileio::read_view(&game.source_path)?;
-    let extraction = adapter.extract_with(&data, &hints(project_dir)?)?;
+    // Com perfil do jogo, o texto e o que ele descreve: a varredura do adapter
+    // fica de fora (num DS ela traz o video e o som lidos como frase).
+    let profile = crate::profile::load(project_dir)?;
+    let extraction = match &profile {
+        Some(profile) => crate::profile::extract(project_dir, &data, profile)?,
+        None => adapter.extract_with(&data, &hints(project_dir)?)?,
+    };
     // A tabela de antes fica a mao: e com ela que as traducoes ja feitas
     // foram escritas.
     let mut older = HashMap::new();
@@ -235,8 +241,11 @@ pub fn extract_project(project_dir: &Path) -> Result<ExtractOutcome> {
             reread += 1;
         }
     }
-    let removed =
+    let mut removed =
         db.remove_stale_junk(&extraction.entries)? + db.remove_overlapped(&extraction.entries)?;
+    if profile.is_some() {
+        removed += db.remove_untranslated_absent(&extraction.entries)?;
+    }
     let stray = db.mark_stray(&crate::scan::stray_ids(&extraction.entries))?;
     Ok(ExtractOutcome {
         saved,

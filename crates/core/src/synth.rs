@@ -1411,6 +1411,101 @@ pub fn make_gba_rom_jis16_archive() -> Vec<u8> {
     rom
 }
 
+/// As frases do banco de `make_profile_bank`, na ordem do banco. A quarta
+/// repete a primeira; `[E6]` quebra a linha e `[E3:10]` e um codigo com um
+/// byte de parametro.
+pub const PROFILE_LINES: [&str; 5] = [
+    "Bat",
+    "[E3:10]The castle is quiet tonight.[E6]Too quiet.",
+    "Restores 100 HP.",
+    "Bat",
+    "Skeleton",
+];
+/// Onde o "modulo" do banco e carregado na memoria, e onde ele comeca no
+/// arquivo (`make_profile_bank`).
+pub const PROFILE_MEMORY: u32 = 0x0210_0000;
+pub const PROFILE_ORIGIN: usize = 0x1000;
+/// Faixa do banco de frases e a posicao da tabela de ponteiros.
+pub const PROFILE_BANK: std::ops::Range<usize> = 0x2000..0x2100;
+pub const PROFILE_TABLE: usize = 0x1100;
+
+/// Uma letra do banco do `make_profile_bank`: ASCII com 0x20 a menos.
+pub fn profile_encode(text: &str) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        if let Some(code) = rest.strip_prefix('[') {
+            let close = code.find(']').expect("codigo fechado");
+            for part in code[..close].split(':') {
+                for i in (0..part.len()).step_by(2) {
+                    out.push(u8::from_str_radix(&part[i..i + 2], 16).expect("hex"));
+                }
+            }
+            rest = &code[close + 1..];
+        } else {
+            let c = rest.chars().next().expect("letra");
+            out.push(c as u8 - 0x20);
+            rest = &rest[c.len_utf8()..];
+        }
+    }
+    out
+}
+
+/// GBA de 16 KiB com um banco de frases no formato que so um perfil descreve
+/// (`profile`): cada frase abre com `01 00`, as letras sao ASCII com 0x20 a
+/// menos, `EA` fecha, alinhada em 4. Um "modulo" carregado em
+/// `PROFILE_MEMORY` comeca em `PROFILE_ORIGIN`; a tabela em `PROFILE_TABLE`
+/// guarda o endereco de memoria de cada frase de `PROFILE_LINES` e, por
+/// ultimo, o de um dado que tambem abre com `01 00` mas nao e texto.
+pub fn make_profile_bank() -> Vec<u8> {
+    let mut rom = make_gba_rom("PERFIL");
+    rom.resize(16 * 1024, 0);
+    let mut at = PROFILE_BANK.start;
+    let put = |rom: &mut Vec<u8>, at: &mut usize, body: &[u8], slot: usize| {
+        let start = *at;
+        rom[start..start + 2].copy_from_slice(&[1, 0]);
+        rom[start + 2..start + 2 + body.len()].copy_from_slice(body);
+        rom[start + 2 + body.len()] = 0xEA;
+        *at = (start + 3 + body.len()).next_multiple_of(4);
+        let address = PROFILE_MEMORY + (start - PROFILE_ORIGIN) as u32;
+        let k = PROFILE_TABLE + 4 * slot;
+        rom[k..k + 4].copy_from_slice(&address.to_le_bytes());
+    };
+    for (slot, line) in PROFILE_LINES.iter().enumerate() {
+        put(&mut rom, &mut at, &profile_encode(line), slot);
+    }
+    put(
+        &mut rom,
+        &mut at,
+        &[0xF1, 0xFF, 0x13, 0xFF, 0x02, 0x9C, 0xC0],
+        PROFILE_LINES.len(),
+    );
+    rom
+}
+
+/// A tabela de letras do `make_profile_bank`, no formato `.tbl`.
+pub fn profile_table() -> String {
+    (0..0x5Fu8)
+        .map(|b| format!("{b:02X}={}\n", (b + 0x20) as char))
+        .collect()
+}
+
+/// O perfil do `make_profile_bank`.
+pub fn profile_toml() -> String {
+    format!(
+        "[[texto]]\nnome = \"modulo\"\ntabela = \"letras\"\ninicio = {}\nfim = {}\n\
+         cabecalho = \"0100\"\nterminador = \"EA\"\nalinhamento = 4\nquebra = \"E6\"\n\
+         parametros = {{ E3 = 1 }}\n\n[texto.ponteiros]\nmemoria = {}\norigem = {}\n\
+         procurar = [[{}, {}]]\n",
+        PROFILE_BANK.start,
+        PROFILE_BANK.end,
+        PROFILE_MEMORY,
+        PROFILE_ORIGIN,
+        PROFILE_TABLE,
+        PROFILE_TABLE + 64
+    )
+}
+
 /// Texto de verdade do `make_gba_rom_with_junk`, na ordem em que aparece.
 pub const JUNK_ROM_PHRASES: [&str; 3] = [
     "The old bridge is out. Take the forest road.",

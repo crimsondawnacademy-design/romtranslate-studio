@@ -224,7 +224,9 @@ impl TextEntry {
     /// ponteiro em tabela (vai pra outro lugar) ou esta numa mensagem de
     /// banco (`adapters::bank`: o bloco e remontado).
     pub fn can_grow(&self) -> bool {
-        !self.pointers().is_empty() || self.metadata.get("bank").is_some_and(|v| v.is_object())
+        !self.pointers().is_empty()
+            || self.metadata.get("bank").is_some_and(|v| v.is_object())
+            || crate::profile::is_profile(self)
     }
 
     /// So as posicoes dos ponteiros, de qualquer largura.

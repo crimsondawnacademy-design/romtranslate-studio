@@ -162,9 +162,21 @@ fn reinsert(
     }
 
     // Texto desenhado nao passa pelo adapter: e escrito na imagem depois.
-    let (pictures, mut entries): (Vec<TextEntry>, Vec<TextEntry>) = entries
+    let (pictures, entries): (Vec<TextEntry>, Vec<TextEntry>) = entries
         .into_iter()
         .partition(|e| e.encoding == TextEncoding::Image);
+    // Nem a frase do perfil do jogo: o banco dela e remontado antes.
+    let (profiled, mut entries): (Vec<TextEntry>, Vec<TextEntry>) =
+        entries.into_iter().partition(crate::profile::is_profile);
+    let profile = match profiled.is_empty() {
+        true => None,
+        false => Some(crate::profile::load(project_dir)?.ok_or_else(|| {
+            CoreError::Project(format!(
+                "o projeto tem frases do perfil do jogo, mas o {} sumiu — extraia de novo",
+                crate::profile::FILE
+            ))
+        })?),
+    };
     let mut drawn = crate::images::Applied::default();
     let mut letters = 0;
 
@@ -188,7 +200,25 @@ fn reinsert(
     let apply_report = if size <= in_memory_max {
         let original =
             fs::read(&project.source_path).map_err(|e| CoreError::io(&project.source_path, e))?;
-        let mut applied = adapter.apply_text(&original, &entries)?;
+        // O banco do perfil e remontado primeiro, e o adapter grava o resto
+        // por cima (e fecha os checksums do formato depois de tudo).
+        let mut base = original.clone();
+        let profiled_report = match &profile {
+            Some(profile) => crate::profile::apply(project_dir, profile, &mut base, &profiled)?,
+            None => Default::default(),
+        };
+        if policy == ErrorPolicy::Block && profiled_report.no_room > 0 {
+            return Err(CoreError::Project(format!(
+                "{} traducoes do perfil do jogo nao couberam no banco de frases — encurte essas \
+                 traducoes (ou reinsira pulando as frases com erro)",
+                profiled_report.no_room
+            )));
+        }
+        let mut applied = adapter.apply_text(&base, &entries)?;
+        applied.report.applied += profiled_report.applied;
+        applied.report.kept_original += profiled_report.kept_original;
+        applied.report.relocated += profiled_report.relocated;
+        applied.report.no_room += profiled_report.no_room;
         if policy == ErrorPolicy::Block && applied.report.no_room > 0 {
             return Err(CoreError::Project(format!(
                 "{} traducoes ficaram sem espaco: o bloco de mensagens delas, remontado, nao \
@@ -233,6 +263,11 @@ fn reinsert(
             drawn.left_out.push((
                 entry.id.clone(),
                 "texto desenhado so e escrito em arquivo que cabe na memoria".to_string(),
+            ));
+        }
+        if profile.is_some() {
+            return Err(CoreError::Project(
+                "o perfil do jogo so vale em arquivo que cabe na memoria".to_string(),
             ));
         }
         stream_apply_iso(&project.source_path, &entries, &tmp, in_memory_max)?
