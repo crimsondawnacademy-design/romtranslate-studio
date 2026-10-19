@@ -28,6 +28,16 @@ pub struct BatchItem {
     /// mensagens por rodada.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_line: Option<usize>,
+    /// So em frase do perfil do jogo com codigo de pagina (`profile`):
+    /// quantas linhas cada pagina da caixa de texto pode ter, na ordem — as
+    /// da mesma pagina do original. Medido em 19/10/2026 num jogo de DS: sem
+    /// isto no pedido, 24 frases voltaram com pagina a mais.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_lines: Option<Vec<usize>>,
+    /// O codigo que fecha a pagina (`[E5]`): vai uma vez so no prompt, na
+    /// regra de `max_lines`, e nao no item.
+    #[serde(skip)]
+    pub page_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -177,6 +187,20 @@ pub fn build_system_prompt(req: &TranslationRequest) -> String {
              - Keep every code in square brackets exactly as it is and in the same order: you cannot add, remove or move line breaks.\n",
         );
     }
+    let pages: std::collections::BTreeSet<&str> = req
+        .items
+        .iter()
+        .filter(|item| item.max_lines.is_some())
+        .filter_map(|item| item.page_code.as_deref())
+        .collect();
+    if !pages.is_empty() {
+        let codes = pages.into_iter().collect::<Vec<_>>().join(" or ");
+        p.push_str(&format!(
+            "Pages (STRICT): items with \"maxLines\" are shown in the game's text box one page at a time; a page ends at the code {codes}.\n\
+             - \"maxLines\" lists, in order, how many lines each page of that item can have. The app breaks every line longer than \"maxLine\" at a space.\n\
+             - Write each page so that, broken that way, it fits in its number of lines; if it does not, say it with fewer words. Keep every {codes} where it is.\n",
+        ));
+    }
     p.push_str(
         "Respond with ONLY valid JSON in this exact shape, one entry per input item, same ids:\n\
          {\"translations\":[{\"id\":\"...\",\"translation\":\"...\"}]}\n",
@@ -248,6 +272,8 @@ mod tests {
                 max_bytes: Some(24),
                 max_chars: None,
                 max_line: None,
+                max_lines: None,
+                page_code: None,
             }],
             source_language: Some("en-US".into()),
             target_language: "pt-BR".into(),

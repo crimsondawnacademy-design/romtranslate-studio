@@ -150,9 +150,22 @@ export interface TranslateSummary {
 }
 
 /** Tamanho da rodada que "Traduzir pendentes" faria agora. */
+/** Uma fonte do perfil do jogo (`perfil.toml`) e as frases que ela deu. */
+export interface SourceSummary {
+  name: string;
+  table: string;
+  start: number;
+  end: number;
+  sentences: number;
+}
+
 export interface EstimateReport {
   entries: number;
   batches: number;
+  /** Chamadas de margem pelas reperguntas. */
+  retryBatches: number;
+  /** Da entrada, as instruções que o provedor põe em cada chamada. */
+  overheadTokens: number;
   inputTokens: number;
   outputTokens: number;
   /** true = contado pelo próprio modelo; false = média de caracteres por token. */

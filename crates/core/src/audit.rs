@@ -4,7 +4,8 @@
 //! trabalho e lida de novo com a mesma extracao do app, e cada trecho que
 //! ainda tem a escrita do idioma de origem entra na conta, com o motivo. So o
 //! japones tem escrita propria pra contar (kana e kanji); em outro idioma,
-//! conta o trecho que esta no jogo igual ao original.
+//! conta o trecho que esta no jogo igual ao original (sem traducao, com erro
+//! ou nao gravado). Com perfil do jogo, a releitura e a do perfil.
 //!
 //! O que a releitura nao alcanca fica em contas a parte: frase desenhada (a
 //! traducao vira pixel) e imagem que ninguem conferiu.
@@ -138,10 +139,18 @@ pub fn audit_project(project_dir: &Path) -> Result<AuditReport> {
         source_chars: text.iter().map(|e| count(&e.source_text)).sum(),
         remaining_chars: 0,
         remaining: Vec::new(),
+        // Fora do japones, letra nao separa fala de lixo: conta o que tem cara
+        // de texto.
         not_text: entries
             .iter()
-            .filter(|e| e.status == TranslationStatus::Internal && count(&e.source_text) > 0)
-            .filter(|_| japanese)
+            .filter(|e| e.status == TranslationStatus::Internal)
+            .filter(|e| {
+                if japanese {
+                    count(&e.source_text) > 0
+                } else {
+                    crate::scan::looks_like_text(&e.source_text)
+                }
+            })
             .count(),
         pictures: PictureAudit::default(),
     };
@@ -155,10 +164,14 @@ pub fn audit_project(project_dir: &Path) -> Result<AuditReport> {
         }
     };
 
+    // A mesma extracao do projeto: com perfil, a dele (a varredura do adapter
+    // nem chega no banco que o perfil descreve).
     let data = crate::fileio::read_view(&working_path)?;
-    let again = adapter
-        .extract_with(&data, &adapters::hints(project_dir)?)?
-        .entries;
+    let again = match crate::profile::load(project_dir)? {
+        Some(profile) => crate::profile::reread(project_dir, &data, &profile)?,
+        None => adapter.extract_with(&data, &adapters::hints(project_dir)?)?,
+    }
+    .entries;
     let stray: HashSet<String> = crate::scan::stray_ids(&again).into_iter().collect();
     for e in again
         .iter()
@@ -174,6 +187,10 @@ pub fn audit_project(project_dir: &Path) -> Result<AuditReport> {
             .or_else(|| by_text.get(e.source_text.as_str()));
         let why = match known {
             Some(old) if old.status == TranslationStatus::Internal => continue,
+            // Traducao igual ao original (nome proprio): esta gravada.
+            Some(old) if old.translated_text.as_deref() == Some(old.source_text.as_str()) => {
+                continue
+            }
             Some(old) => why_of(old),
             // Fora do projeto so conta onde ha escrita pra reconhecer.
             None if japanese => Why::NotInProject,

@@ -2358,3 +2358,32 @@ japonês), e o teto de bytes do nome curto conta com sobra que nem sempre é
 contígua — a skill ensina a contornar os dois.
 
 **Driver:** claude.
+
+## 2026-10-19 — Assistente de perfil propõe e lê, mas não declara o que só o jogo confirma
+
+**Contexto:** o perfil do jogo de DS de 19/10 levou ~1 h de investigação em
+sessão de IA. Busca relativa, achar ponteiros e votar cabeçalho/terminador são
+mecânicos; parâmetro de código, quebra de linha e fim de página não.
+
+**Decisão:** `romtranslate perfil-sugerir` (`profile_draft.rs`) escreve um
+rascunho com tabela, cabeçalho, terminador, alinhamento, ponteiros e faixa, e
+lê o jogo com ele pra dizer quantas frases deu. Cabeçalho = prefixo mais comum
+entre TODOS os começos com ponteiro em volta da palavra (no jogo medido, só
+611 de 1.458 eram frase: o resto é ponteiro de código que cai perto). Os
+códigos fora da tabela vão listados em comentário, sem `quebra`, `pagina` nem
+`parametros` declarados. `procurar` só cobre módulo com endereço de carga
+(ARM9/ARM7/overlay, ou o cartucho de GBA): palavra de arquivo de dados com o
+endereço de uma frase seria reescrita na gravação. Perfil existente nunca é
+sobrescrito (vai pra `perfil-rascunho.toml`).
+
+**Alternativas consideradas:** (1) inferir parâmetro pelo byte seguinte — com
+ASCII deslocado quase todo byte é "letra", não separa; (2) aceitar ponteiro em
+qualquer lugar do cartucho — 16 "ponteiros" em 9 arquivos de dados no jogo
+medido; (3) faixa = módulo inteiro — lê código como frase e é lento sem
+cabeçalho.
+
+**Consequências:** no jogo de DS o rascunho bate com o perfil feito à mão nos
+valores mecânicos e lê 1.214 de 1.224 frases; quem estudou o jogo confirma o
+resto. Base de ponteiro de outra plataforma (SNES, PS1) não é coberta.
+
+**Driver:** claude.

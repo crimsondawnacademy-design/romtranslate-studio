@@ -231,6 +231,32 @@ pub fn make_nds_rom_with_message_table() -> Vec<u8> {
     build_nds(&files)
 }
 
+/// Sequencias com cara de texto plantadas em cada arquivo binario do
+/// `make_nds_rom_with_binary_files`.
+pub const NDS_BINARY_JUNK: [&str; 2] = ["FOREST THEME LOOP", "Castle Hall Ambience"];
+
+/// NDS com os arquivos base mais tres de formato binario reconhecido pelo
+/// cabecalho — som (`SDAT`), modelo 3D (`BMD0`) e video (`MODS`) —, cada um
+/// com `NDS_BINARY_JUNK` dentro, e `fala.sdat`: nome de som, conteudo de
+/// texto (o nome nao decide).
+pub fn make_nds_rom_with_binary_files() -> Vec<u8> {
+    let binary = |magic: &[u8]| {
+        let mut file = magic.to_vec();
+        file.resize(0x20, 0x01);
+        for text in NDS_BINARY_JUNK {
+            file.extend_from_slice(text.as_bytes());
+            file.extend_from_slice(&[0, 0x81, 0x02]);
+        }
+        file
+    };
+    let mut files = base_nds_files();
+    files.push(("bgm.sdat", binary(b"SDAT\xFF\xFE\x00\x01")));
+    files.push(("hero.nsbmd", binary(b"BMD0\xFF\xFE\x02\x00")));
+    files.push(("intro.mods", binary(b"MODSN3\x0C\x00")));
+    files.push(("fala.sdat", b"THE BRIDGE IS OUT TONIGHT\0".to_vec()));
+    build_nds(&files)
+}
+
 /// NDS minimo: header + FNT (so a raiz) + FAT + arquivos alinhados em 0x40.
 fn build_nds(files: &[(&str, Vec<u8>)]) -> Vec<u8> {
     use crate::adapters::nds::{crc16, LOGO_CRC_EXPECTED};
@@ -1504,6 +1530,68 @@ pub fn profile_toml() -> String {
         PROFILE_TABLE,
         PROFILE_TABLE + 64
     )
+}
+
+/// O banco de `PROFILE_LINES` como um modulo carregado em `memory`: tabela de
+/// ponteiros no comeco (o endereco de memoria de cada frase e, por ultimo, o
+/// de um dado que abre igual e nao e texto), frases a partir de 0x40, no
+/// formato do `make_profile_bank`.
+fn profile_module(memory: u32) -> Vec<u8> {
+    let mut module = vec![0u8; 0x200];
+    let mut at = 0x40;
+    let bodies = PROFILE_LINES
+        .iter()
+        .map(|line| profile_encode(line))
+        .chain([vec![0xF1, 0xFF, 0x13, 0xFF, 0x02, 0x9C, 0xC0]]);
+    for (slot, body) in bodies.enumerate() {
+        module[at..at + 2].copy_from_slice(&[1, 0]);
+        module[at + 2..at + 2 + body.len()].copy_from_slice(&body);
+        module[at + 2 + body.len()] = 0xEA;
+        let address = memory + at as u32;
+        module[slot * 4..slot * 4 + 4].copy_from_slice(&address.to_le_bytes());
+        at = (at + 3 + body.len()).next_multiple_of(4);
+    }
+    module
+}
+
+/// Onde o overlay do `make_nds_profile_bank` e carregado.
+pub const NDS_OVERLAY_MEMORY: u32 = 0x0219_0000;
+/// Onde o `make_gba_profile_bank` poe o banco no cartucho.
+pub const GBA_PROFILE_AT: usize = 0x2000;
+
+/// DS com o banco do perfil num overlay (`ov0.bin`, file id 0) que a tabela
+/// de overlays do ARM9 (header 0x50) diz carregar em `NDS_OVERLAY_MEMORY`.
+pub fn make_nds_profile_bank() -> Vec<u8> {
+    use crate::adapter::GameAdapter;
+    use crate::adapters::nds::{crc16, NdsAdapter};
+
+    let module = profile_module(NDS_OVERLAY_MEMORY);
+    let mut y9 = vec![0u8; 32];
+    y9[4..8].copy_from_slice(&NDS_OVERLAY_MEMORY.to_le_bytes());
+    y9[8..12].copy_from_slice(&(module.len() as u32).to_le_bytes());
+    let mut rom = build_nds(&[("ov0.bin", module), ("y9.bin", y9)]);
+    let table = NdsAdapter
+        .list_resources(&rom)
+        .expect("filesystem sintetico")
+        .into_iter()
+        .find(|f| f.path == "y9.bin")
+        .expect("y9.bin")
+        .offset as u32;
+    rom[0x50..0x54].copy_from_slice(&table.to_le_bytes());
+    rom[0x54..0x58].copy_from_slice(&32u32.to_le_bytes());
+    let crc = crc16(&rom[..0x15E]);
+    rom[0x15E..0x160].copy_from_slice(&crc.to_le_bytes());
+    rom
+}
+
+/// GBA de 16 KiB com o banco do perfil em `GBA_PROFILE_AT`, os ponteiros com
+/// o endereco do cartucho (`0x08000000` + posicao).
+pub fn make_gba_profile_bank() -> Vec<u8> {
+    let mut rom = make_gba_rom("PERFIL GBA");
+    rom.resize(16 * 1024, 0);
+    let module = profile_module(0x0800_0000 + GBA_PROFILE_AT as u32);
+    plant(&mut rom, GBA_PROFILE_AT, &module);
+    rom
 }
 
 /// Texto de verdade do `make_gba_rom_with_junk`, na ordem em que aparece.

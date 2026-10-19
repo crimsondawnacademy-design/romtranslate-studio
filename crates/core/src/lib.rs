@@ -19,6 +19,7 @@ pub mod lz77;
 pub mod patch;
 pub mod pipeline;
 pub mod profile;
+pub mod profile_draft;
 pub mod project;
 pub mod provider;
 pub mod providers;

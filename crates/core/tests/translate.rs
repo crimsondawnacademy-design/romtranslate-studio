@@ -404,6 +404,38 @@ async fn estimate_measures_the_round_before_it_runs_and_usage_is_summed_after() 
     assert!(sample.is_none());
 }
 
+/// A estimativa conta a margem das reperguntas e as instrucoes que o Codex
+/// poe em cada chamada: em 19/10/2026 ela previu 90 mil tokens de entrada e
+/// a rodada gastou 624 mil.
+#[test]
+fn the_estimate_counts_the_re_asks_and_the_provider_instructions() {
+    use romtranslate_core::pipeline::{
+        call_overhead_tokens, estimate_translation, DEFAULT_CHARS_PER_TOKEN,
+    };
+
+    let tmp = TempDir::new("estimate-margin");
+    let mut db = ProjectDb::open(&tmp.0).unwrap();
+    let lines: Vec<TextEntry> = (0..9)
+        .map(|i| entry(&format!("e{i}"), &format!("LINE NUMBER {i}")))
+        .collect();
+    db.upsert_entries(&lines).unwrap();
+
+    let (plain, _) = estimate_translation(&db, &opts()).unwrap();
+    assert_eq!(plain.retry_batches, 0);
+    let asking = TranslateOptions {
+        shorten_rounds: 2,
+        ..opts()
+    };
+    let (margin, _) = estimate_translation(&db, &asking).unwrap();
+    assert_eq!((margin.batches, margin.retry_batches), (3, 1));
+    assert!(margin.input_chars > plain.input_chars);
+    assert!(margin.output_chars > plain.output_chars);
+
+    let (api, _) = margin.tokens(DEFAULT_CHARS_PER_TOKEN, "anthropic");
+    let (codex, _) = margin.tokens(DEFAULT_CHARS_PER_TOKEN, "codex_cli");
+    assert_eq!(codex - api, 4 * call_overhead_tokens("codex_cli"));
+}
+
 /// Conta sem limite, sem login ou sem rede: o provider nao volta mais. A
 /// rodada para em vez de falhar a fila inteira lote por lote, e diz por que.
 #[tokio::test]

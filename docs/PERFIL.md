@@ -33,6 +33,36 @@ Ponteiro = palavra de 32 bits, little-endian, alinhada, com o valor
 `memoria = 0x08000000` e `origem = 0`. Num módulo de DS (ARM9 ou overlay),
 `memoria` é o endereço de carga e `origem` a posição do módulo no cartucho.
 
+## Rascunho automático
+
+```bash
+romtranslate perfil-sugerir jogo.rtsproj --palavra Soma
+```
+
+Com uma palavra que aparece na tela (só letras, com maiúscula e minúscula,
+como o nome do herói), o app propõe tudo de uma vez e escreve um
+`perfil.toml` de rascunho (ou `perfil-rascunho.toml`, se o projeto já tem
+um — o que existe nunca é tocado):
+
+- a tabela de letras pela busca relativa (`tables/perfil-letras.tbl`; se
+  maiúscula e minúscula estão a 0x20 uma da outra, o ASCII imprimível
+  deslocado inteiro);
+- os ponteiros de 32 bits pras frases em volta da palavra, nas bases comuns:
+  cartucho de GBA em `0x08000000`, e no DS cada módulo (ARM9, ARM7, overlay)
+  pelo endereço de carga do header — o `memoria`, a `origem` e o `procurar`
+  saem daí;
+- o cabeçalho (o começo mais comum das frases com ponteiro), o terminador (o
+  último byte antes da frase seguinte) e o alinhamento;
+- a faixa, lendo o jogo com o rascunho em volta da palavra.
+
+Ele diz quantas frases o rascunho lê, mostra as que têm a palavra e lista os
+códigos fora da tabela com quantas vezes aparecem. Quebra de linha, fim de
+página e códigos com parâmetro ficam em comentário pra conferir: o mais
+comum costuma ser a quebra e o segundo a página, mas só o jogo confirma. No
+jogo de DS de 19/10 o rascunho achou o mesmo módulo, endereço, cabeçalho,
+terminador e alinhamento do perfil escrito à mão, e leu 1.214 das 1.224
+frases (as outras precisavam dos parâmetros declarados).
+
 ## Como achar cada valor
 
 1. **Tabela de letras:** procure uma palavra que aparece na tela (nome do
@@ -66,7 +96,8 @@ tabela ganha, no fim, uma seção gerada com cada código achado
   liberam.
 - Com `quebra`, a linha que passa da largura medida no jogo é quebrada no
   espaço. Com `pagina`, cada página da caixa não pode ter mais linhas que no
-  original: o que passaria vira erro de validação, e a frase fica no
+  original: o pedido à IA leva quantas linhas cabem em cada página
+  (`maxLines`), o que passaria vira erro de validação, e a frase fica no
   original até ser encurtada.
 - Toda frase é conferida: cada ponteiro leva aos bytes novos dela, senão nada
   é gravado.

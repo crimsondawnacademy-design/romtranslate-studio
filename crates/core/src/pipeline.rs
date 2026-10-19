@@ -95,11 +95,47 @@ pub const DEFAULT_CHARS_PER_TOKEN: f64 = 3.5;
 pub struct TranslationEstimate {
     pub entries: usize,
     pub batches: usize,
-    /// Tamanho de tudo o que seria enviado (prompt de sistema + itens).
+    /// Chamadas a mais, de margem, pelas reperguntas (frase que nao coube ou
+    /// perdeu um codigo volta ao provider): `RETRY_CALLS_PERCENT`.
+    pub retry_batches: usize,
+    /// Tamanho de tudo o que seria enviado (prompt de sistema + itens), com a
+    /// margem das reperguntas.
     pub input_chars: usize,
     /// Tamanho esperado das respostas: a traducao costuma ficar perto do
-    /// original, mais o JSON em volta. Raciocinio do modelo nao esta aqui.
+    /// original, mais o JSON em volta, com a margem das reperguntas.
+    /// Raciocinio do modelo nao esta aqui.
     pub output_chars: usize,
+}
+
+/// Reperguntas medidas em 19/10/2026 num jogo de DS (1.222 frases com teto,
+/// lotes de 50, 2 voltas): 189 e 163 frases voltaram ao provider (13-16%),
+/// em 6 e 5 chamadas a mais sobre 32 (16-19%).
+const RETRY_CALLS_PERCENT: usize = 20;
+const RETRY_ITEMS_PERCENT: usize = 16;
+
+/// Tokens que o provider poe em toda chamada alem do pedido do app: as
+/// instrucoes do proprio agente. Medido em 19/10/2026 com o Codex CLI
+/// (`lean_flags`, modelo leve): 624 mil tokens de entrada em 38 chamadas,
+/// onde o pedido do app somava ~120 mil — ~13 mil por chamada (na rodada
+/// seguinte, ~8 mil). Nas APIs o pedido e so o do app, ja na conta.
+pub fn call_overhead_tokens(provider: &str) -> u64 {
+    match provider {
+        "codex_cli" => 13_000,
+        _ => 0,
+    }
+}
+
+impl TranslationEstimate {
+    /// (entrada, saida) em tokens: os caracteres pela media `chars_per_token`
+    /// mais as instrucoes que o `provider` poe em cada chamada.
+    pub fn tokens(&self, chars_per_token: f64, provider: &str) -> (u64, u64) {
+        let tokens = |chars: usize| (chars as f64 / chars_per_token).ceil() as u64;
+        let calls = (self.batches + self.retry_batches) as u64;
+        (
+            tokens(self.input_chars) + calls * call_overhead_tokens(provider),
+            tokens(self.output_chars),
+        )
+    }
 }
 
 /// Os lotes que `run_translation` mandaria agora ao provider, sem a memoria
@@ -160,18 +196,30 @@ pub fn estimate_translation(
     let mut estimate = TranslationEstimate {
         entries: requests.iter().map(|r| r.items.len()).sum(),
         batches: requests.len(),
+        retry_batches: 0,
         input_chars: 0,
         output_chars: 0,
     };
+    let (mut system, mut items) = (0, 0);
     for request in &requests {
-        estimate.input_chars += crate::provider::build_system_prompt(request).len()
-            + crate::provider::build_user_prompt(request).len();
+        system += crate::provider::build_system_prompt(request).len();
+        items += crate::provider::build_user_prompt(request).len();
         estimate.output_chars += 20
             + request
                 .items
                 .iter()
                 .map(|item| item.id.len() + item.text.len() * 12 / 10 + 40)
                 .sum::<usize>();
+    }
+    estimate.input_chars = system + items;
+    // A repergunta leva a frase e a traducao de antes: o dobro do item.
+    // ponytail: margem fixa, medida num jogo so; entra mesmo onde nenhuma
+    // frase tem teto (a de codigo faltando tambem volta).
+    if opts.shorten_rounds > 0 && !requests.is_empty() {
+        estimate.retry_batches = (requests.len() * RETRY_CALLS_PERCENT).div_ceil(100);
+        estimate.input_chars += estimate.retry_batches * system / requests.len()
+            + items * 2 * RETRY_ITEMS_PERCENT / 100;
+        estimate.output_chars += estimate.output_chars * RETRY_ITEMS_PERCENT / 100;
     }
     Ok((estimate, requests.into_iter().next()))
 }
@@ -226,8 +274,14 @@ fn batch_request(
     TranslationRequest {
         items: batch
             .iter()
-            .map(|e| (e, crate::adapters::bank::Layout::of(e)))
-            .map(|(e, layout)| BatchItem {
+            .map(|e| {
+                (
+                    e,
+                    crate::adapters::bank::Layout::of(e),
+                    crate::profile::page_room(e),
+                )
+            })
+            .map(|(e, layout, page)| BatchItem {
                 id: e.id.clone(),
                 // Onde o app quebra as linhas, a frase vai inteira pro modelo.
                 text: match &layout {
@@ -282,6 +336,8 @@ fn batch_request(
                             .map(|(_, block)| crate::images::chars_that_fit(&block))
                     }),
                 max_line: crate::adapters::bank::line_width(e).filter(|_| layout.is_none()),
+                max_lines: page.as_ref().map(|(_, lines)| lines.clone()),
+                page_code: page.map(|(code, _)| code),
             })
             .collect(),
         source_language: opts.source_language.clone(),
@@ -1123,6 +1179,28 @@ fn relevant_terms(glossary: &[GlossaryTerm], batch: &[TextEntry]) -> Vec<Glossar
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A conta da rodada medida em 19/10/2026 (jogo de DS, Codex): o app
+    /// mandava 330.629 caracteres em 32 lotes (63.104 de prompt de sistema);
+    /// a conta com margem e instrucoes tem que cobrir os 624.034 tokens
+    /// cobrados, e a de antes previa ~94 mil.
+    #[test]
+    fn the_measured_round_fits_in_the_estimate() {
+        let (system, items, batches) = (63_104, 267_525, 32);
+        let retry_batches = (batches * RETRY_CALLS_PERCENT).div_ceil(100);
+        let estimate = TranslationEstimate {
+            entries: 1_222,
+            batches,
+            retry_batches,
+            input_chars: system
+                + items
+                + retry_batches * system / batches
+                + items * 2 * RETRY_ITEMS_PERCENT / 100,
+            output_chars: 0,
+        };
+        let (input, _) = estimate.tokens(DEFAULT_CHARS_PER_TOKEN, "codex_cli");
+        assert!((624_034..800_000).contains(&input), "{input}");
+    }
 
     fn entry(text: &str) -> TextEntry {
         TextEntry {

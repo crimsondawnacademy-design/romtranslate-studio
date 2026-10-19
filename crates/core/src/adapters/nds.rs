@@ -43,6 +43,46 @@ pub const LOGO_CRC_EXPECTED: u16 = 0xCF56;
 const MAX_FILES: usize = 8192;
 const MAX_DIRS: u16 = 2048;
 
+/// (posicao, bytes) do cabecalho de formatos binarios do DS que nao guardam
+/// fala: som (SDAT e as partes dele), modelo, textura e animacao 3D, grafico
+/// 2D, fonte e video. Varridos como texto, viram frase de lixo: medido em
+/// 19/10/2026 num jogo de DS, 55.587 sequencias, todas do video, do som e dos
+/// modelos. Vale o cabecalho, nao o nome do arquivo.
+// ponytail: lista fechada; formato novo de video/som entra aqui quando
+// aparecer num jogo. `FF E8 "DSMD"` e o video daquele jogo de 19/10.
+const BINARY_FORMATS: &[(usize, &[u8])] = &[
+    (0, b"SDAT"),
+    (0, b"SSEQ"),
+    (0, b"SSAR"),
+    (0, b"SBNK"),
+    (0, b"SWAR"),
+    (0, b"SWAV"),
+    (0, b"STRM"),
+    (0, b"BMD0"),
+    (0, b"BTX0"),
+    (0, b"BCA0"),
+    (0, b"BTA0"),
+    (0, b"BTP0"),
+    (0, b"BMA0"),
+    (0, b"BVA0"),
+    (0, b"RGCN"),
+    (0, b"RLCN"),
+    (0, b"RCSN"),
+    (0, b"RECN"),
+    (0, b"RNAN"),
+    (0, b"RTFN"),
+    (0, b"MODS"),
+    (0, b"VXDS"),
+    (0, b"\xFF\xE8DSMD"),
+];
+
+/// O arquivo e de um formato binario conhecido (`BINARY_FORMATS`)?
+fn binary_format(file: &[u8]) -> bool {
+    BINARY_FORMATS
+        .iter()
+        .any(|(at, magic)| file.get(*at..).is_some_and(|f| f.starts_with(magic)))
+}
+
 /// CRC-16 (poly refletido 0xA001, init 0xFFFF) — o CRC usado pelo header NDS.
 pub fn crc16(data: &[u8]) -> u16 {
     let mut crc: u16 = 0xFFFF;
@@ -176,6 +216,64 @@ fn walk_filesystem(data: &[u8], layout: &FsLayout) -> Result<Vec<ResourceDescrip
         }
     }
     Ok(files)
+}
+
+/// Um trecho do cartucho que o DS copia pra memoria num endereco fixo:
+/// (nome, inicio no arquivo, fim, endereco de carga).
+pub type Module = (String, usize, usize, u32);
+
+/// Os modulos com endereco de carga (GBATEK): ARM9, ARM7 e os overlays de
+/// cada um (tabela de 32 bytes por overlay, com o endereco e o file id na
+/// FAT). Overlay comprimido fica de fora: a posicao no arquivo nao
+/// corresponde a da memoria. Header ou tabela fora do arquivo: lista vazia
+/// ou parcial, nunca panico.
+pub fn modules(data: &[u8]) -> Vec<Module> {
+    let mut out = Vec::new();
+    let span = |off: usize, size: usize| {
+        let end = off.checked_add(size)?;
+        (size > 0 && end <= data.len()).then_some((off, end))
+    };
+    for (name, at) in [("arm9", 0x20), ("arm7", 0x30)] {
+        let (Ok(off), Ok(load), Ok(size)) = (
+            read_u32(data, at),
+            read_u32(data, at + 8),
+            read_u32(data, at + 12),
+        ) else {
+            return out;
+        };
+        if let Some((start, end)) = span(off as usize, size as usize) {
+            out.push((name.to_string(), start, end, load));
+        }
+    }
+    let Ok(fat) = read_u32(data, 0x48) else {
+        return out;
+    };
+    for (prefix, at) in [("overlay", 0x50), ("overlay7", 0x58)] {
+        let (Ok(table), Ok(size)) = (read_u32(data, at), read_u32(data, at + 4)) else {
+            continue;
+        };
+        for k in 0..(size as usize / 32).min(MAX_FILES) {
+            let entry = table as usize + k * 32;
+            let fields = (
+                read_u32(data, entry),
+                read_u32(data, entry + 4),
+                read_u32(data, entry + 0x18),
+                read_u32(data, entry + 0x1C),
+            );
+            let (Ok(id), Ok(load), Ok(file), Ok(flags)) = fields else {
+                break;
+            };
+            let at = fat as usize + file as usize * 8;
+            let (Ok(start), Ok(end)) = (read_u32(data, at), read_u32(data, at + 4)) else {
+                continue;
+            };
+            let compressed = flags & (1 << 24) != 0;
+            if !compressed && start < end && end as usize <= data.len() {
+                out.push((format!("{prefix} {id}"), start as usize, end as usize, load));
+            }
+        }
+    }
+    out
 }
 
 /// Uma leitura por trecho. Texto ASCII lido como UTF-16LE vira "CJK" falso
@@ -450,6 +548,12 @@ impl GameAdapter for NdsAdapter {
             };
             let mut found =
                 resolve_encoding_overlaps(scan(ScanEncoding::Ascii)?, scan(ScanEncoding::Utf16Le)?);
+            // Som, modelo, video: o que a varredura leu ali e descartado, com
+            // ponteiro ou sem.
+            if path != "header" && binary_format(&data[start as usize..end as usize]) {
+                out.discarded += found.len();
+                continue;
+            }
             for e in found.iter_mut() {
                 e.resource_path = Some(path.clone());
                 e.max_bytes = Some(e.original_bytes.len());

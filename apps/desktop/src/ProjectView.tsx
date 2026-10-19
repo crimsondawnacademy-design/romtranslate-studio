@@ -32,6 +32,7 @@ import {
   ScanEncoding,
   ScanOutcome,
   SettingsReport,
+  SourceSummary,
   PatchExportOutcome,
   ReinsertOutcome,
   TextEntry,
@@ -192,6 +193,9 @@ export default function ProjectView({
   const [draft, setDraft] = useState("");
 
   const sourceBroken = warning === "project.sourceMissing";
+  // undefined = ainda lendo; null = o projeto nao tem perfil.
+  const [profile, setProfile] = useState<SourceSummary[] | null | undefined>(undefined);
+  const [profileError, setProfileError] = useState<string | null>(null);
 
   const reloadEntries = useCallback(async () => {
     try {
@@ -208,6 +212,17 @@ export default function ProjectView({
       setError(String(e));
     }
   }, [projectDir]);
+
+  // O perfil e as frases de cada fonte mudam com a extracao: le de novo com
+  // a lista.
+  useEffect(() => {
+    invoke<SourceSummary[] | null>("profile_summary", { projectDir })
+      .then((p) => {
+        setProfile(p);
+        setProfileError(null);
+      })
+      .catch((e) => setProfileError(String(e)));
+  }, [projectDir, entries]);
 
   useEffect(() => {
     void reloadEntries();
@@ -890,7 +905,7 @@ export default function ProjectView({
             : "todo",
       detail: estimate
         ? t("steps.estimate.done", {
-            batches: estimate.batches,
+            batches: estimate.batches + estimate.retryBatches,
             entries: estimate.entries,
             input: estimate.inputTokens.toLocaleString(),
           })
@@ -1079,6 +1094,36 @@ export default function ProjectView({
       </div>
       <p className="hint left">{t("extract.hint")}</p>
       <p className="hint left">{t("extract.regionHint")}</p>
+
+      <div className="panel">
+        <h3>{t("profile.title")}</h3>
+        {profileError ? (
+          <div className="error" role="alert">
+            <strong>{t("common.error")}:</strong> {profileError}
+          </div>
+        ) : profile === null ? (
+          <p className="hint left">{t("profile.none")}</p>
+        ) : (
+          profile && (
+            <>
+              <p className="hint left">{t("profile.has", { n: profile.length })}</p>
+              <ul>
+                {profile.map((s, i) => (
+                  <li key={i}>
+                    {t("profile.source", {
+                      name: s.name,
+                      table: s.table,
+                      start: formatOffset(s.start),
+                      end: formatOffset(s.end),
+                      n: s.sentences,
+                    })}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )
+        )}
+      </div>
 
       {hasJis16 && (
         <AlphabetPanel
@@ -1657,9 +1702,14 @@ export default function ProjectView({
                 {t("translate.estimateResult", {
                   entries: estimate.entries,
                   batches: estimate.batches,
+                  retry: estimate.retryBatches,
                   input: estimate.inputTokens.toLocaleString(),
                   output: estimate.outputTokens.toLocaleString(),
                 })}
+                {estimate.overheadTokens > 0 &&
+                  ` ${t("translate.estimateOverhead", {
+                    overhead: estimate.overheadTokens.toLocaleString(),
+                  })}`}
                 {dollars(estimate.inputTokens, estimate.outputTokens) !== null &&
                   ` ${t("translate.estimateCost", {
                     cost: money(dollars(estimate.inputTokens, estimate.outputTokens) ?? 0),

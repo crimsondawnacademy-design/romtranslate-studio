@@ -212,6 +212,20 @@ async fn audit_project(
     blocking(move || romtranslate_core::audit::audit_project(&PathBuf::from(project_dir))).await
 }
 
+/// As fontes do perfil do jogo (`perfil.toml`) e as frases de cada uma;
+/// `None` = o projeto nao tem perfil.
+#[tauri::command]
+async fn profile_summary(
+    project_dir: String,
+) -> Result<Option<Vec<romtranslate_core::profile::SourceSummary>>, String> {
+    blocking(move || {
+        let dir = PathBuf::from(project_dir);
+        let entries = ProjectDb::open(&dir)?.load_entries()?;
+        romtranslate_core::profile::summary(&dir, &entries)
+    })
+    .await
+}
+
 /// A regiao e a tabela do ultimo scan, guardadas no projeto.
 #[tauri::command]
 async fn last_scan(project_dir: String) -> Result<Option<ScanConfig>, String> {
@@ -436,6 +450,10 @@ async fn test_provider(app: AppHandle) -> Result<String, String> {
 struct EstimateReport {
     entries: usize,
     batches: usize,
+    /// Chamadas de margem pelas reperguntas.
+    retry_batches: usize,
+    /// Da entrada, os tokens das instrucoes que o provider poe em cada chamada.
+    overhead_tokens: u64,
     input_tokens: u64,
     output_tokens: u64,
     /// `true` = a conta de tokens foi calibrada pelo proprio modelo (API do
@@ -474,12 +492,15 @@ async fn estimate_translation(
             }
         }
     }
-    let tokens = |chars: usize| (chars as f64 / chars_per_token).ceil() as u64;
+    let (input_tokens, output_tokens) = estimate.tokens(chars_per_token, &cfg.provider);
     Ok(EstimateReport {
         entries: estimate.entries,
         batches: estimate.batches,
-        input_tokens: tokens(estimate.input_chars),
-        output_tokens: tokens(estimate.output_chars),
+        retry_batches: estimate.retry_batches,
+        overhead_tokens: (estimate.batches + estimate.retry_batches) as u64
+            * romtranslate_core::pipeline::call_overhead_tokens(&cfg.provider),
+        input_tokens,
+        output_tokens,
         calibrated,
     })
 }
@@ -676,6 +697,7 @@ pub fn run() {
             read_pictures,
             mark_pictures_without_text,
             audit_project,
+            profile_summary,
             last_scan,
             list_alphabets,
             save_alphabet,

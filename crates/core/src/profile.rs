@@ -25,7 +25,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::adapter::{ApplyReport, Extraction};
 use crate::error::{CoreError, Result};
@@ -132,6 +132,43 @@ pub fn load(project_dir: &Path) -> Result<Option<Profile>> {
         Rules::of(source)?;
     }
     Ok(Some(profile))
+}
+
+/// Uma fonte do perfil como a tela mostra: o que ela descreve e quantas
+/// frases do projeto vieram dela.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceSummary {
+    pub name: String,
+    pub table: String,
+    pub start: u64,
+    pub end: u64,
+    pub sentences: usize,
+}
+
+/// As fontes do perfil do projeto, com as frases de `entries` que cada uma
+/// deu. `None` = o projeto nao tem perfil. Editar e no arquivo.
+pub fn summary(project_dir: &Path, entries: &[TextEntry]) -> Result<Option<Vec<SourceSummary>>> {
+    let Some(profile) = load(project_dir)? else {
+        return Ok(None);
+    };
+    Ok(Some(
+        profile
+            .texto
+            .iter()
+            .enumerate()
+            .map(|(index, source)| SourceSummary {
+                name: source.nome.clone(),
+                table: source.tabela.clone(),
+                start: source.inicio,
+                end: source.fim,
+                sentences: entries
+                    .iter()
+                    .filter(|e| perfil_field(e, "fonte") == Some(index as u64))
+                    .count(),
+            })
+            .collect(),
+    ))
 }
 
 /// A entry veio de um perfil.
@@ -288,8 +325,25 @@ fn lines<'a>(text: &'a str, newline: &str) -> impl Iterator<Item = usize> + 'a {
         .into_iter()
 }
 
-/// Extracao de todas as fontes do perfil.
+/// Extracao de todas as fontes do perfil. A secao gerada de cada tabela e
+/// refeita com os codigos achados.
 pub fn extract(project_dir: &Path, data: &[u8], profile: &Profile) -> Result<Extraction> {
+    read_sources(project_dir, data, profile, true)
+}
+
+/// A mesma leitura sem tocar nas tabelas: pra reler a copia traduzida
+/// (`audit`), onde o codigo que uma traducao tirou sumiria da secao gerada e
+/// a frase original deixaria de ser gravavel.
+pub fn reread(project_dir: &Path, data: &[u8], profile: &Profile) -> Result<Extraction> {
+    read_sources(project_dir, data, profile, false)
+}
+
+fn read_sources(
+    project_dir: &Path,
+    data: &[u8],
+    profile: &Profile,
+    write_tables: bool,
+) -> Result<Extraction> {
     let mut out = Extraction::default();
     for (index, source) in profile.texto.iter().enumerate() {
         let rules = Rules::of(source)?;
@@ -452,7 +506,9 @@ pub fn extract(project_dir: &Path, data: &[u8], profile: &Profile) -> Result<Ext
                 metadata: serde_json::json!({ "perfil": perfil }),
             });
         }
-        write_codes(&table_path, &codes)?;
+        if write_tables {
+            write_codes(&table_path, &codes)?;
+        }
     }
     Ok(out)
 }
@@ -544,6 +600,19 @@ fn page_lines(text: &str, newline: &str, page: Option<&str>) -> Vec<usize> {
                 .count()
         })
         .collect()
+}
+
+/// O teto de linhas de cada pagina da frase do perfil com codigo de pagina:
+/// (codigo da pagina, linhas de cada pagina do original) — o que
+/// `page_overflow` cobra, pro pedido a IA saber antes.
+pub fn page_room(entry: &TextEntry) -> Option<(String, Vec<usize>)> {
+    let perfil = entry.metadata.get("perfil")?;
+    let page = perfil.get("pagina")?.as_str()?;
+    let nl = perfil.get("quebra")?.as_str()?;
+    Some((
+        page.to_string(),
+        page_lines(&entry.source_text, nl, Some(page)),
+    ))
 }
 
 /// A traducao, depois de quebrada pelo app, tem numa pagina mais linhas que

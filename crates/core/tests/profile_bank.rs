@@ -275,3 +275,113 @@ fn a_different_file_is_refused_instead_of_patched_blind() {
         .to_string();
     assert!(err.contains("Re-extraia"), "{err}");
 }
+
+/// Jogo em ingles com perfil: a auditoria rele a copia pelo perfil e conta a
+/// frase que segue no original — sem traducao ou com erro. Antes ela relia
+/// pela varredura do adapter, que nao chega no banco, e dava 100% traduzido.
+#[test]
+fn the_audit_rereads_the_bank_through_the_profile_in_any_language() {
+    use romtranslate_core::audit::{audit_project, Why};
+
+    let tmp = TempDir::new("auditoria");
+    let dir = project(&tmp);
+    let speech = "[E3:10]The castle is quiet tonight.[E6]Too quiet.";
+    translate(
+        &dir,
+        &[
+            // Sem as outras encolherem, nao cabe: traduzida e nao gravada.
+            ("Bat", "Morcego"),
+            // Nome que fica igual: esta gravado, nao conta.
+            ("Skeleton", "Skeleton"),
+            // Sem o codigo do jogo: erro de validacao, fica o original.
+            (speech, "O castelo esta calmo hoje."),
+        ],
+    );
+    let outcome = reinsert_project_with(&dir, ErrorPolicy::Skip).unwrap();
+    assert_eq!(outcome.skipped_errors, 1);
+    assert!(outcome.apply.no_room > 0);
+    let table = fs::read_to_string(dir.join("tables/letras.tbl")).unwrap();
+
+    let report = audit_project(&dir).unwrap();
+    let mut left: Vec<(&str, Why)> = report
+        .remaining
+        .iter()
+        .map(|l| (l.text.as_str(), l.why))
+        .collect();
+    left.sort();
+    assert_eq!(
+        left,
+        vec![
+            ("Bat", Why::NotWritten),
+            ("Restores 100 HP.", Why::Untranslated),
+            (speech, Why::Error)
+        ]
+    );
+    assert!(report.remaining_chars > 0 && report.remaining_chars < report.source_chars);
+    // A releitura nao mexe na tabela do projeto.
+    assert_eq!(
+        fs::read_to_string(dir.join("tables/letras.tbl")).unwrap(),
+        table
+    );
+}
+
+/// Com codigo de pagina no perfil, o pedido a IA leva as linhas que cada
+/// pagina da caixa pode ter, e o prompt diz a regra (medido em 19/10/2026:
+/// sem isso, 24 frases voltaram com pagina a mais).
+#[test]
+fn the_request_says_how_many_lines_each_page_can_have() {
+    use romtranslate_core::pipeline::{translation_requests, TranslateOptions};
+    use romtranslate_core::provider::build_system_prompt;
+
+    let tmp = TempDir::new("maxlines");
+    let dir = project(&tmp);
+    let toml = synth::profile_toml().replace("quebra = \"E6\"", "quebra = \"E6\"\npagina = \"E5\"");
+    fs::write(dir.join("perfil.toml"), toml).unwrap();
+    extract_project(&dir).unwrap();
+
+    let db = ProjectDb::open(&dir).unwrap();
+    let requests = translation_requests(&db, &TranslateOptions::new("pt-BR")).unwrap();
+    let items: Vec<_> = requests.iter().flat_map(|r| &r.items).collect();
+    let speech = items.iter().find(|i| i.text.contains("castle")).unwrap();
+    // Uma pagina de duas linhas, como no original.
+    assert_eq!(speech.max_lines, Some(vec![2]));
+    let json = serde_json::to_string(speech).unwrap();
+    assert!(json.contains("\"maxLines\":[2]"), "{json}");
+    assert!(
+        !json.contains("E5"),
+        "o codigo vai no prompt, nao no item: {json}"
+    );
+    // Frase de uma linha so nao tem caixa medida: sem teto de linhas.
+    let bat = items.iter().find(|i| i.text == "Bat").unwrap();
+    assert_eq!(bat.max_lines, None);
+
+    let request = requests
+        .iter()
+        .find(|r| r.items.iter().any(|i| i.max_lines.is_some()))
+        .unwrap();
+    let prompt = build_system_prompt(request);
+    assert!(prompt.contains("Pages (STRICT)"), "{prompt}");
+    assert!(prompt.contains("a page ends at the code [E5]"), "{prompt}");
+}
+
+/// O que a tela mostra do perfil: cada fonte e quantas frases ela deu.
+#[test]
+fn the_profile_summary_lists_each_source_with_its_sentences() {
+    use romtranslate_core::profile::{summary, SourceSummary};
+
+    let tmp = TempDir::new("resumo");
+    let dir = project(&tmp);
+    let got = summary(&dir, &entries(&dir)).unwrap();
+    assert_eq!(
+        got,
+        Some(vec![SourceSummary {
+            name: "modulo".to_string(),
+            table: "letras".to_string(),
+            start: synth::PROFILE_BANK.start as u64,
+            end: synth::PROFILE_BANK.end as u64,
+            sentences: synth::PROFILE_LINES.len(),
+        }])
+    );
+    fs::remove_file(dir.join("perfil.toml")).unwrap();
+    assert_eq!(summary(&dir, &entries(&dir)).unwrap(), None);
+}

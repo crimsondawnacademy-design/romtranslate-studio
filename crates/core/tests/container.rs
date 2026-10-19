@@ -72,6 +72,28 @@ fn nds_probe_detects_fixture_and_rejects_garbage() {
 }
 
 #[test]
+fn nds_sound_model_and_video_files_are_not_read_as_text() {
+    let out = NdsAdapter
+        .extract(&synth::make_nds_rom_with_binary_files())
+        .unwrap();
+    let texts: Vec<&str> = out.entries.iter().map(|e| e.source_text.as_str()).collect();
+    for junk in synth::NDS_BINARY_JUNK {
+        assert!(!texts.contains(&junk), "{junk} veio de arquivo binario");
+    }
+    // Pelo cabecalho, nao pelo nome: o texto de "fala.sdat" fica.
+    assert!(texts.contains(&"THE BRIDGE IS OUT TONIGHT"), "{texts:?}");
+    assert!(texts.contains(&"PRESS START BUTTON"));
+    // O que saiu conta como descartado: pelo menos uma leitura de cada um.
+    let base = NdsAdapter.extract(&synth::make_nds_rom()).unwrap();
+    assert!(
+        out.discarded >= base.discarded + 3,
+        "{} vs {}",
+        out.discarded,
+        base.discarded
+    );
+}
+
+#[test]
 fn nds_filesystem_lists_files_and_rejects_lying_headers() {
     let rom = synth::make_nds_rom();
     let files = NdsAdapter.list_resources(&rom).unwrap();

@@ -130,7 +130,9 @@ const messages = {
     "translate.estimate": "Calcular gasto",
     "translate.estimating": "Calculando...",
     "translate.estimateResult":
-      "Traduzir as {entries} frases pendentes são {batches} chamadas: cerca de {input} tokens de entrada e {output} de saída.",
+      "Estimativa: traduzir as {entries} frases pendentes são {batches} chamadas, mais {retry} de margem para as reperguntas (frase que não coube ou perdeu um código volta à IA): cerca de {input} tokens de entrada e {output} de saída.",
+    "translate.estimateOverhead":
+      "A entrada inclui cerca de {overhead} tokens das instruções que o provedor põe em cada chamada (medido no Codex).",
     "translate.estimateCost": "Custo estimado: US$ {cost}.",
     "translate.estimateCalibrated":
       "Entrada contada pelo próprio modelo. A saída é uma estimativa: modelo que raciocina antes de responder gasta mais saída do que isso. A memória de tradução pode reduzir o total.",
@@ -246,6 +248,12 @@ const messages = {
     "xray.lz77Truncated": "A busca parou no teto de trabalho: pode haver mais blocos.",
     "xray.dense":
       "{dense}% do arquivo é denso (comprimido, cifrado, áudio ou vídeo) e {blank}% é vazio. É uma estimativa por entropia, não uma leitura do formato.",
+    "profile.title": "Perfil do jogo",
+    "profile.none":
+      "Este projeto não tem perfil do jogo (perfil.toml): a extração usa a regra automática do formato. Se ela não acha as falas, descreva onde o texto está num perfil.toml na pasta do projeto (guia em docs/PERFIL.md). O comando romtranslate perfil-sugerir monta um rascunho a partir de uma palavra do jogo.",
+    "profile.has":
+      "O projeto tem perfil do jogo (perfil.toml), com {n} fonte(s): a extração é a dele. Para mudar, edite o arquivo na pasta do projeto e extraia de novo.",
+    "profile.source": "{name}: tabela {table}, de {start} a {end} — {n} frases no projeto",
     "relative.title": "Descobrir a tabela de caracteres",
     "relative.hint":
       "Jogo de cartucho raramente usa ASCII. Digite uma palavra que você sabe que aparece no jogo (só letras, 4 ou mais): o app a procura pela distância entre as letras e monta o .tbl. Busque uma palavra em maiúsculas e outra em minúsculas para cobrir os dois casos.",
@@ -312,7 +320,7 @@ const messages = {
     "steps.extract.todo": "Clique em “Extração estruturada”: ela lê os textos do jogo e guarda o espaço de cada frase.",
     "steps.extract.done": "{n} frases no projeto.",
     "steps.estimate.todo": "Clique em “Calcular gasto”: diz quantas chamadas e tokens a tradução vai usar, sem chamar a IA.",
-    "steps.estimate.done": "{batches} chamadas para {entries} frases (~{input} tokens de entrada).",
+    "steps.estimate.done": "Estimativa: {batches} chamadas para {entries} frases (~{input} tokens de entrada).",
     "steps.estimate.nothing": "Nada pendente para traduzir.",
     "steps.translate.todo": "{pending} frases pendentes e {failed} com erro. Traduza pela IA, ou por fora (exportar os lotes e importar o TSV).",
     "steps.translate.running": "Traduzindo: {done} de {total}. Cancelar guarda o que já veio; depois é só retomar.",
@@ -520,7 +528,9 @@ const messages = {
     "translate.estimate": "Estimate spend",
     "translate.estimating": "Estimating...",
     "translate.estimateResult":
-      "Translating the {entries} pending lines takes {batches} calls: about {input} input tokens and {output} output tokens.",
+      "Estimate: translating the {entries} pending lines takes {batches} calls, plus {retry} as a margin for the re-asks (a line that did not fit or lost a code goes back to the AI): about {input} input tokens and {output} output tokens.",
+    "translate.estimateOverhead":
+      "The input includes about {overhead} tokens of the instructions the provider adds to every call (measured on Codex).",
     "translate.estimateCost": "Estimated cost: US$ {cost}.",
     "translate.estimateCalibrated":
       "Input counted by the model itself. Output is an estimate: a model that reasons before answering spends more output than this. Translation memory may lower the total.",
@@ -635,6 +645,12 @@ const messages = {
     "xray.lz77Truncated": "The search stopped at its work limit: there may be more blocks.",
     "xray.dense":
       "{dense}% of the file is dense (compressed, encrypted, audio or video) and {blank}% is empty. This is an entropy estimate, not a reading of the format.",
+    "profile.title": "Game profile",
+    "profile.none":
+      "This project has no game profile (perfil.toml): extraction uses the format's automatic rule. If it does not find the dialogue, describe where the text is in a perfil.toml in the project folder (guide in docs/PERFIL.md). The romtranslate perfil-sugerir command drafts one from a word of the game.",
+    "profile.has":
+      "The project has a game profile (perfil.toml) with {n} source(s): extraction uses it. To change it, edit the file in the project folder and extract again.",
+    "profile.source": "{name}: table {table}, from {start} to {end} — {n} lines in the project",
     "relative.title": "Find the character table",
     "relative.hint":
       "Cartridge games rarely use ASCII. Type a word you know appears in the game (letters only, 4 or more): the app finds it by the distance between its letters and builds the .tbl. Search one uppercase word and one lowercase word to cover both cases.",
@@ -701,7 +717,7 @@ const messages = {
     "steps.extract.todo": "Click “Structured extraction”: it reads the game's text and keeps the room of each line.",
     "steps.extract.done": "{n} lines in the project.",
     "steps.estimate.todo": "Click “Estimate spend”: it says how many calls and tokens the translation will use, without calling the AI.",
-    "steps.estimate.done": "{batches} calls for {entries} lines (~{input} input tokens).",
+    "steps.estimate.done": "Estimate: {batches} calls for {entries} lines (~{input} input tokens).",
     "steps.estimate.nothing": "Nothing pending to translate.",
     "steps.translate.todo": "{pending} lines pending and {failed} with errors. Translate with the AI, or outside the app (export the batches and import the TSV).",
     "steps.translate.running": "Translating: {done} of {total}. Cancelling keeps what already came back; then just resume.",

@@ -25,7 +25,7 @@ use romtranslate_core::detect::inspect;
 use romtranslate_core::export::{export_csv, export_json, import_tsv};
 use romtranslate_core::patch::{export_patch, PatchFormat};
 use romtranslate_core::pipeline::{
-    estimate_translation, run_translation, write_requests, TranslateOptions,
+    call_overhead_tokens, estimate_translation, run_translation, write_requests, TranslateOptions,
     DEFAULT_CHARS_PER_TOKEN,
 };
 use romtranslate_core::project::{create_project, load_project, CreateProjectArgs};
@@ -217,6 +217,17 @@ enum Command {
         /// ips ou bps [padrao: IPS se couber, senao BPS]
         #[arg(long, value_parser = named::<PatchFormat>)]
         format: Option<PatchFormat>,
+    },
+    /// Rascunho do perfil do jogo (perfil.toml) a partir de uma palavra que
+    /// aparece na tela: tabela de letras, cabecalho, terminador, alinhamento e
+    /// ponteiros (GBA 0x08000000, modulos do DS pelo endereco de carga), com
+    /// comentarios dizendo o que conferir. Perfil que ja existe nao e tocado
+    PerfilSugerir {
+        #[arg(value_name = "PROJETO")]
+        project: PathBuf,
+        /// Palavra do jogo, so letras, com maiuscula e minuscula (ex.: o nome do heroi)
+        #[arg(long, value_name = "PALAVRA")]
+        palavra: String,
     },
     /// Exporta as frases do projeto (os ids que o `apply` espera)
     Export {
@@ -544,11 +555,9 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             requests,
         } => {
             let game = load(&project)?;
-            let batch = match batch {
-                Some(batch) => batch,
-                None => settings::load_settings(&config_dir()?).batch_size,
-            };
-            let mut opts = options(game, batch);
+            let cfg = settings::load_settings(&config_dir()?);
+            let mut opts = options(game, batch.unwrap_or(cfg.batch_size));
+            opts.shorten_rounds = cfg.shorten_rounds;
             opts.redo_errors = redo_errors;
             if let Some(path) = &requests {
                 write_requests(&ProjectDb::open(&project)?, &opts, path)?;
@@ -556,15 +565,28 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             let (estimate, _) = estimate_translation(&ProjectDb::open(&project)?, &opts)?;
             // Media de caracteres por token: a tela calibra pelo Claude quando ha
             // chave; aqui a conta e sempre a media.
-            let tokens = |chars: usize| (chars as f64 / DEFAULT_CHARS_PER_TOKEN).ceil() as u64;
-            let (input, output) = (tokens(estimate.input_chars), tokens(estimate.output_chars));
-            let text = format!(
-                "pendentes: {}, chamadas: {}\nenvio: {} caracteres (~{input} tokens), resposta: {} caracteres (~{output} tokens)",
-                estimate.entries, estimate.batches, estimate.input_chars, estimate.output_chars
+            let (input, output) = estimate.tokens(DEFAULT_CHARS_PER_TOKEN, &cfg.provider);
+            let calls = (estimate.batches + estimate.retry_batches) as u64;
+            let overhead = calls * call_overhead_tokens(&cfg.provider);
+            let mut text = format!(
+                "estimativa, sem chamar a IA (provider {}):\npendentes: {}, chamadas: {} + {} de margem pelas reperguntas\n\
+                 envio: ~{input} tokens, resposta: ~{output} tokens (modelo que raciocina gasta mais saida)",
+                cfg.provider,
+                estimate.entries,
+                estimate.batches,
+                estimate.retry_batches
             );
+            if overhead > 0 {
+                let _ = write!(
+                    text,
+                    "\no envio inclui ~{overhead} tokens das instrucoes que o provider poe em cada chamada"
+                );
+            }
             let mut json = serde_json::to_value(&estimate)?;
             json["inputTokens"] = json!(input);
             json["outputTokens"] = json!(output);
+            json["overheadTokens"] = json!(overhead);
+            json["provider"] = json!(cfg.provider);
             Ok(Output::new(text, json))
         }
         Command::Translate {
@@ -756,6 +778,60 @@ fn run(cli: Cli) -> Result<Output, Failure> {
                 outcome.csv_path.display()
             );
             Ok(Output::new(text, serde_json::to_value(&outcome)?))
+        }
+        Command::PerfilSugerir { project, palavra } => {
+            load(&project)?;
+            let d = romtranslate_core::profile_draft::suggest(&project, &palavra)?;
+            let table = match d.ascii_shift {
+                Some(shift) => format!("ASCII com 0x{shift:X} a menos"),
+                None => "so as letras".to_string(),
+            };
+            let mut text = format!(
+                "palavra \"{palavra}\": {} ocorrencia(s); tabela {table} em {} ({})\n\
+                 trecho: {} (memoria 0x{:08X}, no arquivo em 0x{:X})\n\
+                 frases com ponteiro em volta da palavra: {}; cabecalho \"{}\", terminador \"{}\", \
+                 alinhamento {}\n\
+                 o rascunho le {} frase(s) de 0x{:X} a 0x{:X} ({} descartada(s))",
+                d.hits,
+                d.table_path.display(),
+                if d.table_created {
+                    "criada"
+                } else {
+                    "a que ja existia"
+                },
+                d.module,
+                d.memory,
+                d.origin,
+                d.pointed,
+                d.header,
+                d.terminator,
+                d.align,
+                d.sentences,
+                d.start,
+                d.end,
+                d.discarded
+            );
+            for s in &d.sample {
+                let _ = write!(text, "\n  {s}");
+            }
+            if !d.codes.is_empty() {
+                let list: Vec<String> = d
+                    .codes
+                    .iter()
+                    .take(10)
+                    .map(|(c, n)| format!("{c} x{n}"))
+                    .collect();
+                let _ = write!(text, "\ncodigos fora da tabela: {}", list.join(", "));
+            }
+            for c in &d.check {
+                let _ = write!(text, "\nconferir: {c}");
+            }
+            let _ = write!(
+                text,
+                "\nescrito: {} (rascunho: confira antes de extrair)",
+                d.path.display()
+            );
+            Ok(Output::new(text, serde_json::to_value(&d)?))
         }
         Command::Export {
             project,
