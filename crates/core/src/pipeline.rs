@@ -40,6 +40,9 @@ pub struct TranslateOptions {
     /// espaco) volta ao provider nesta rodada, sem passar pela memoria de
     /// traducao — que devolveria a mesma resposta.
     pub redo_errors: bool,
+    /// So as frases de onde o caminho (`resource_path`) contem isto: o jogo
+    /// traduzido por partes (os nomes dos menus antes das falas que os citam).
+    pub only: Option<String>,
 }
 
 impl TranslateOptions {
@@ -53,6 +56,7 @@ impl TranslateOptions {
             parallel: 4,
             shorten_rounds: 2,
             redo_errors: false,
+            only: None,
         }
     }
 }
@@ -379,6 +383,12 @@ fn wanted(entry: &TextEntry, opts: &TranslateOptions) -> bool {
     entry.status != TranslationStatus::Internal
         && (entry.translated_text.is_none()
             || (opts.redo_errors && entry.status == TranslationStatus::Error))
+        && opts.only.as_deref().is_none_or(|part| {
+            entry
+                .resource_path
+                .as_deref()
+                .is_some_and(|path| path.contains(part))
+        })
 }
 
 /// Traduz todas as entries ainda nao traduzidas do banco do projeto.

@@ -544,3 +544,27 @@ fn translate_says_why_the_round_stopped() {
         "{refused}"
     );
 }
+
+/// O jogo por partes: `--so` mede (e traduz) so as frases daquele caminho, e
+/// o `glossario` grava os nomes que a IA tem que seguir nas outras.
+#[test]
+fn part_of_the_game_and_the_glossary() {
+    let tmp = TempDir::new("partes");
+    let project = tmp.project("game.nds", &synth::make_nds_rom_with_mpt());
+    ok(&["extract", &project]);
+    let count = |part: &str| ok_json(&["estimate", &project, "--so", part])["entries"].clone();
+    assert_eq!(count("b0.mpt"), 3);
+    assert_eq!(count("nenhum"), 0);
+
+    let terms = tmp.path("termos.tsv");
+    fs::write(&terms, "Bob\t\nstick\tbastão\n\n").unwrap();
+    let saved = ok_json(&["glossario", &project, &terms]);
+    assert_eq!(
+        (saved["saved"].clone(), saved["total"].clone()),
+        (json!(2), json!(2))
+    );
+    let batches = tmp.path("lotes.json");
+    ok(&["estimate", &project, "--pedidos", &batches]);
+    let system = fs::read_to_string(&batches).unwrap();
+    assert!(system.contains("bastão"), "{system}");
+}

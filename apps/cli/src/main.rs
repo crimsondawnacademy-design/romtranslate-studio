@@ -29,6 +29,7 @@ use romtranslate_core::pipeline::{
     DEFAULT_CHARS_PER_TOKEN,
 };
 use romtranslate_core::project::{create_project, load_project, CreateProjectArgs};
+use romtranslate_core::provider::GlossaryTerm;
 use romtranslate_core::reinsert::{reinsert_project_with, ErrorPolicy};
 use romtranslate_core::scan::{scan_project, ScanConfig, ScanEncoding};
 use romtranslate_core::settings;
@@ -118,6 +119,10 @@ enum Command {
         /// Conta tambem as frases com erro de validacao (como no translate)
         #[arg(long)]
         redo_errors: bool,
+        /// So as frases de onde o caminho contem isto (o jogo por partes:
+        /// `--so MENULIST` traduz os menus antes das falas)
+        #[arg(long, value_name = "TRECHO")]
+        so: Option<String>,
         /// Grava em ARQUIVO os lotes que a rodada mandaria (prompt de sistema e
         /// frases, em JSON): pra traduzir fora do app e voltar pelo apply
         #[arg(long = "pedidos", value_name = "ARQUIVO")]
@@ -141,6 +146,20 @@ enum Command {
         /// faltando, maior que o espaco), sem a memoria de traducao
         #[arg(long)]
         redo_errors: bool,
+        /// So as frases de onde o caminho contem isto (o jogo por partes:
+        /// `--so MENULIST` traduz os menus antes das falas)
+        #[arg(long, value_name = "TRECHO")]
+        so: Option<String>,
+    },
+    /// Grava termos no glossario do projeto, de um arquivo com uma linha por
+    /// termo: termo<TAB>traducao. Sem traducao, o termo fica como esta. Termo
+    /// com maiuscula so vale escrito igual. A IA recebe, em cada lote, os
+    /// termos que aparecem nele
+    Glossario {
+        #[arg(value_name = "PROJETO")]
+        project: PathBuf,
+        #[arg(value_name = "ARQUIVO")]
+        file: PathBuf,
     },
     /// Poe os acentos nas traducoes feitas sem eles (a fonte do jogo ganhou as
     /// letras depois). O provider recebe a traducao pronta; a resposta so e
@@ -565,6 +584,7 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             project,
             batch,
             redo_errors,
+            so,
             requests,
         } => {
             let game = load(&project)?;
@@ -572,6 +592,7 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             let mut opts = options(game, batch.unwrap_or(cfg.batch_size));
             opts.shorten_rounds = cfg.shorten_rounds;
             opts.redo_errors = redo_errors;
+            opts.only = so;
             if let Some(path) = &requests {
                 write_requests(&ProjectDb::open(&project)?, &opts, path)?;
             }
@@ -608,6 +629,7 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             parallel,
             shorten_rounds,
             redo_errors,
+            so,
         } => {
             let cfg_dir = config_dir()?;
             let cfg = settings::load_settings(&cfg_dir);
@@ -615,7 +637,32 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             opts.parallel = parallel.unwrap_or(cfg.parallel);
             opts.shorten_rounds = shorten_rounds.unwrap_or(cfg.shorten_rounds);
             opts.redo_errors = redo_errors;
+            opts.only = so;
             translate(&project, &opts, &cfg, &cfg_dir)
+        }
+        Command::Glossario { project, file } => {
+            load(&project)?;
+            let text = std::fs::read_to_string(&file)
+                .map_err(|e| Failure(format!("{}: {e}", file.display())))?;
+            let mut db = ProjectDb::open(&project)?;
+            let mut saved = 0;
+            for line in text.lines().filter(|l| !l.trim().is_empty()) {
+                let (term, translation) = line.split_once('\t').unwrap_or((line, ""));
+                let translation = translation.trim();
+                db.glossary_upsert(&GlossaryTerm {
+                    term: term.trim().to_string(),
+                    translation: (!translation.is_empty()).then(|| translation.to_string()),
+                    no_translate: translation.is_empty(),
+                    case_sensitive: term.chars().any(char::is_uppercase),
+                    note: None,
+                })?;
+                saved += 1;
+            }
+            let total = db.glossary_list()?.len();
+            Ok(Output::new(
+                format!("termos gravados: {saved}, no glossario: {total}"),
+                json!({ "saved": saved, "total": total }),
+            ))
         }
         Command::Acentuar {
             project,
