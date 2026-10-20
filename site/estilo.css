@@ -1808,6 +1808,128 @@ code {
   margin-top: 0.5rem;
 }
 
+/* ---------- Traducoes da comunidade ---------- */
+
+.filtros {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.25rem;
+}
+
+.filtros label {
+  display: grid;
+  flex: 1 1 13rem;
+  gap: 0.3rem;
+  font-weight: 800;
+}
+
+.filtros label:first-child {
+  flex-basis: 22rem;
+}
+
+.filtros input,
+.filtros select {
+  font: inherit;
+  font-weight: 600;
+  color: var(--ink);
+  background: var(--paper);
+  border: var(--bw) solid var(--line);
+  border-radius: var(--r-ctl);
+  box-shadow: 0.2rem 0.24rem 0 var(--line);
+  padding: 0.55rem 0.8rem;
+}
+
+.filtros + .hint {
+  margin-top: 1.25rem;
+  font-weight: 700;
+}
+
+.catalogo {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 24rem), 1fr));
+  gap: 2.25rem;
+  margin-top: 1.75rem;
+}
+
+.trad [hidden] {
+  display: none;
+}
+
+.trad .badges {
+  margin-bottom: 0.8rem;
+}
+
+.ficha {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem 1rem;
+  margin-top: 0.9rem;
+}
+
+.ficha dt,
+.sha small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.ficha dd {
+  font-weight: 800;
+  overflow-wrap: anywhere;
+}
+
+.trad h4 {
+  font-size: 1rem;
+  font-weight: 800;
+  margin-block: 1.1rem 0.5rem;
+}
+
+.marks {
+  --icon: var(--i-check);
+  --icon-color: var(--icon-ok);
+}
+
+.trad .marks {
+  gap: 0.5rem;
+  font-size: 0.97rem;
+}
+
+.nota {
+  margin-top: 1rem;
+  font-size: 0.97rem;
+}
+
+.sha {
+  margin-top: 1.1rem;
+}
+
+.sha code {
+  display: block;
+  margin-top: 0.25rem;
+  padding: 0.35rem 0.6rem;
+  font-size: 0.78rem;
+}
+
+.trad .copy {
+  margin-top: 0.5rem;
+}
+
+.baixar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.9rem;
+  margin-top: 1rem;
+}
+
+.envio {
+  margin-top: 2.25rem;
+}
+
+.marks + .hint {
+  margin-top: 1rem;
+}
+
 /* ---------- Movimento ---------- */
 
 /* Entrada ao rolar: o site.js marca .reveal em quem entra e .in quando aparece. */

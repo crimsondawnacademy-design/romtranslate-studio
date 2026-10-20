@@ -1,0 +1,399 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light dark" />
+    <title>Traduções da comunidade · RomTranslate Studio</title>
+    <meta
+      name="description"
+      content="Jogos que alguém já traduziu com o RomTranslate Studio, por plataforma e idioma. Baixe o patch e aplique na sua cópia do jogo, ou envie a sua tradução."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="pt_BR" />
+    <meta property="og:title" content="Traduções da comunidade · RomTranslate Studio" />
+    <meta
+      property="og:description"
+      content="Antes de traduzir um jogo do zero, veja se alguém já traduziu. Baixe o patch e aplique na sua cópia do jogo."
+    />
+    <meta property="og:image" content="https://romtranslate-studio.pages.dev/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="icon" href="../logo.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="../estilo.css" />
+    <script src="../versao.js" defer></script>
+    <script src="../site.js" defer></script>
+  </head>
+  <body>
+    <a class="skip" href="#conteudo">Pular para o conteúdo</a>
+
+    <header class="top wrap">
+      <a class="brand" href="../">
+        <img src="../logo.svg" alt="" width="46" height="46" />
+        RomTranslate Studio
+      </a>
+      <nav aria-label="Seções da página">
+        <a href="#catalogo">Catálogo</a>
+        <a href="#aplicar">Como aplicar</a>
+        <a href="#enviar">Enviar a sua</a>
+        <a href="../">O app</a>
+      </nav>
+      <div class="tools">
+        <button
+          type="button"
+          class="chip motion-toggle"
+          hidden
+          data-pausar="Pausar movimento"
+          data-retomar="Retomar movimento"
+        >
+          Pausar movimento
+        </button>
+        <a class="chip" href="../en/translations/" lang="en" hreflang="en">English</a>
+      </div>
+    </header>
+
+    <main id="conteudo">
+      <!-- 1. Abertura -->
+      <section class="hero" data-anim>
+        <div class="sky-art" aria-hidden="true">
+          <i class="shape a"></i>
+          <i class="shape b"></i>
+          <i class="shape c"></i>
+        </div>
+        <div class="wrap">
+          <div class="intro">
+            <p class="badges">
+              <span class="badge">gratuito</span>
+              <span class="badge sky">feito pela comunidade</span>
+              <span class="badge star">sem jogos, só patches</span>
+            </p>
+            <h1>Jogos que alguém <span class="sticker">já traduziu</span></h1>
+            <p class="lead">
+              Antes de traduzir um jogo do zero, veja se alguém já fez. Aqui ficam as traduções
+              feitas com o RomTranslate Studio, por plataforma e idioma. Você baixa o patch e aplica
+              na sua cópia do jogo.
+            </p>
+            <p class="actions">
+              <a class="btn primary big" href="#catalogo"><span>Ver o catálogo</span></a>
+              <a class="btn big" href="#enviar"><span>Enviar a sua tradução</span></a>
+            </p>
+            <p class="hint">
+              Aqui não há jogos, nem links para baixar jogos. O patch guarda só a tradução.
+            </p>
+          </div>
+
+          <aside class="script card" aria-labelledby="tres-passos">
+            <h3 id="tres-passos">Em três passos</h3>
+            <ol class="steps" role="list">
+              <li>
+                <h4>Ache o seu jogo</h4>
+                <p>Pelo nome, pela plataforma ou pelo idioma.</p>
+              </li>
+              <li>
+                <h4>Baixe o patch</h4>
+                <p>Um arquivo pequeno, que só tem o que a tradução muda.</p>
+              </li>
+              <li>
+                <h4>Aplique na sua cópia</h4>
+                <p>O jogo original fica como estava.</p>
+              </li>
+            </ol>
+          </aside>
+        </div>
+      </section>
+
+      <!-- 2. Catalogo: a lista vem do index.json do repositorio do catalogo -->
+      <section class="sec field" id="catalogo" data-anim>
+        <div class="deco" aria-hidden="true"><i class="shape d1"></i><i class="shape d2"></i></div>
+        <div
+          class="wrap"
+          data-catalogo
+          data-raw="https://raw.githubusercontent.com/crimsondawnacademy-design/romtranslate-traducoes/main/"
+          data-pasta="https://github.com/crimsondawnacademy-design/romtranslate-traducoes/tree/main/"
+        >
+          <div class="head">
+            <h2>Catálogo</h2>
+            <p class="lead">
+              Cada tradução vale para um arquivo exato do jogo, na versão e na região dele: confira o
+              SHA-256 do seu antes de aplicar.
+            </p>
+          </div>
+
+          <div class="filtros" role="search">
+            <label
+              >Buscar
+              <input type="search" placeholder="Nome do jogo, código ou autor" autocomplete="off"
+            /></label>
+            <label
+              >Plataforma
+              <select>
+                <option value="">Todas</option>
+                <option value="Gba">Game Boy Advance</option>
+                <option value="Nds">Nintendo DS</option>
+                <option value="Nes">NES</option>
+                <option value="Snes">Super Nintendo</option>
+                <option value="GameCube">GameCube</option>
+                <option value="Ps1">PlayStation 1</option>
+                <option value="Ps2">PlayStation 2</option>
+                <option value="Psp">PSP</option>
+              </select></label
+            >
+            <label
+              >Idioma da tradução
+              <select>
+                <option value="">Todos</option>
+              </select></label
+            >
+          </div>
+
+          <p class="hint" role="status">
+            <span data-estado="carregando">Carregando o catálogo…</span>
+            <span data-estado="lista" data-modelo="Traduções na lista: {n}" hidden></span>
+            <span data-estado="vazio" hidden
+              >Ainda não há traduções no catálogo. A primeira pode ser a sua:
+              <a href="#enviar">veja como enviar</a>.</span
+            >
+            <span data-estado="nada" hidden
+              >Nenhuma tradução com esse filtro. Se ninguém traduziu esse jogo ainda,
+              <a href="#enviar">a sua pode ser a primeira</a>.</span
+            >
+            <span data-estado="erro" hidden
+              >Não deu para carregar a lista agora. Ela também está
+              <a
+                href="https://github.com/crimsondawnacademy-design/romtranslate-traducoes/tree/main/traducoes"
+                >direto no GitHub</a
+              >.</span
+            >
+          </p>
+          <noscript>
+            <p class="hint">
+              A lista precisa de JavaScript. Sem ele, veja as traduções
+              <a
+                href="https://github.com/crimsondawnacademy-design/romtranslate-traducoes/tree/main/traducoes"
+                >direto no GitHub</a
+              >.
+            </p>
+          </noscript>
+
+          <ul class="catalogo" role="list"></ul>
+
+          <template>
+            <li class="card trad">
+              <p class="badges">
+                <span class="badge sky" data-campo="plataforma"></span>
+                <span class="badge star" data-campo="idioma"></span>
+              </p>
+              <h3 data-campo="titulo"></h3>
+              <dl class="ficha">
+                <div>
+                  <dt>Quem traduziu</dt>
+                  <dd data-campo="autor"></dd>
+                </div>
+                <div>
+                  <dt>Versão</dt>
+                  <dd data-campo="versao"></dd>
+                </div>
+                <div>
+                  <dt>Falas traduzidas</dt>
+                  <dd data-campo="falas" data-modelo="{a} de {b}"></dd>
+                </div>
+                <div data-se="codigo">
+                  <dt>Código do jogo</dt>
+                  <dd data-campo="codigo"></dd>
+                </div>
+              </dl>
+              <h4>Conferido</h4>
+              <ul class="marks" data-campo="conferido"></ul>
+              <div data-se="nao-conferido">
+                <h4>Não conferido</h4>
+                <ul class="marks no" data-campo="nao-conferido"></ul>
+              </div>
+              <p class="nota" data-se="notas" data-campo="notas"></p>
+              <p class="sha">
+                <small>SHA-256 do arquivo original</small>
+                <code data-campo="sha"></code>
+              </p>
+              <p class="copy">
+                <button
+                  type="button"
+                  class="chip"
+                  data-copiar=""
+                  data-ok="Copiado"
+                  data-falhou="Não deu para copiar: selecione o número"
+                >
+                  Copiar o SHA-256</button
+                ><span role="status"></span>
+              </p>
+              <p class="baixar">
+                <a class="btn primary" data-link="patch"
+                  ><span data-campo="baixar" data-modelo="Baixar o patch ({tamanho})"></span
+                ></a>
+                <a class="btn" data-link="pasta"><span>Ver no GitHub</span></a>
+              </p>
+            </li>
+          </template>
+        </div>
+      </section>
+
+      <!-- 3. Como aplicar -->
+      <section class="sec" id="aplicar" data-anim>
+        <div class="wrap">
+          <div class="head">
+            <h2>Como aplicar uma tradução</h2>
+            <p class="lead">
+              Você precisa da sua própria cópia do jogo, a mesma que a tradução indica. Este site não
+              tem jogos.
+            </p>
+          </div>
+          <ol class="how" role="list">
+            <li class="card" style="--i: 0">
+              <h3>Confira o seu arquivo</h3>
+              <p>
+                O SHA-256 do seu jogo tem que ser igual ao da tradução. O app mostra esse número
+                quando você arrasta o jogo para a janela. No Terminal:
+                <code>shasum -a 256 jogo.gba</code> no Mac e no Linux, ou
+                <code>certutil -hashfile jogo.gba SHA256</code> no Windows.
+              </p>
+            </li>
+            <li class="card" style="--i: 1">
+              <h3>Baixe o patch</h3>
+              <p>
+                É o arquivo <code>.bps</code> da tradução. Ele guarda só o que muda no jogo, por isso
+                é pequeno.
+              </p>
+            </li>
+            <li class="card" style="--i: 2">
+              <h3>Aplique numa cópia</h3>
+              <p>
+                Abra um aplicador de patch, como o
+                <a href="https://www.marcrobledo.com/RomPatcher.js/">Rom Patcher JS</a>, que roda no
+                navegador e não envia o jogo a lugar nenhum. Escolha o jogo e o patch e salve o
+                resultado. Se o arquivo não for o da tradução, o patch BPS recusa. Guarde o original.
+              </p>
+            </li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- 4. Enviar a sua -->
+      <section class="sec field sky" id="enviar" data-anim>
+        <div class="deco" aria-hidden="true"><i class="shape d1"></i><i class="shape d2"></i></div>
+        <div class="wrap">
+          <div class="head">
+            <h2>Enviar a sua tradução</h2>
+            <p class="lead">
+              Traduziu um jogo com o RomTranslate Studio? Mande para o catálogo, e a próxima pessoa
+              não precisa começar do zero.
+            </p>
+            <p class="hint">
+              O envio é um pull request no GitHub, que dá para fazer pelo navegador. Uma checagem
+              automática confere a pasta, e o mantenedor olha antes de aceitar.
+            </p>
+          </div>
+          <div class="support">
+            <div class="card">
+              <h3>O que vai</h3>
+              <ul class="marks">
+                <li>O patch, em BPS: escolha BPS na tela do patch do app.</li>
+                <li>
+                  O <code>manifest.json</code> que o app exporta junto, com o nome do jogo, o seu, a
+                  versão, o que você conferiu e o que não conferiu.
+                </li>
+                <li>
+                  O perfil do jogo (<code>perfil.toml</code>) e a tabela de letras, se o jogo
+                  precisou: quem vier depois melhora a tradução sem estudar o jogo de novo.
+                </li>
+              </ul>
+            </div>
+            <div class="card">
+              <h3>O que nunca vai</h3>
+              <ul class="marks no">
+                <li>O jogo (ROM ou ISO), BIOS ou arquivo compactado.</li>
+                <li>O <code>translations.csv</code>, porque ele traz o texto original do jogo.</li>
+                <li>Imagem de tela e link para baixar jogo.</li>
+              </ul>
+              <p class="hint">
+                A checagem recusa qualquer arquivo fora da lista e o patch que leva o jogo junto.
+              </p>
+            </div>
+          </div>
+          <p class="envio">
+            <a
+              class="btn primary big"
+              href="https://github.com/crimsondawnacademy-design/romtranslate-traducoes#enviar-a-sua-tradução"
+              ><span>Ver o guia de envio</span></a
+            >
+          </p>
+        </div>
+      </section>
+
+      <!-- 5. Regras e aviso legal -->
+      <section class="sec" id="regras">
+        <div class="wrap split">
+          <div class="head">
+            <h2>Regras e aviso legal</h2>
+          </div>
+          <div class="faq">
+            <details>
+              <summary>Por que aparecem nomes de jogos aqui?</summary>
+              <p>
+                Para você achar o seu. O nome diz só a que jogo cada patch se aplica. Os nomes e as
+                marcas pertencem aos donos, e o catálogo não tem ligação com eles.
+              </p>
+            </details>
+            <details>
+              <summary>Isso é permitido?</summary>
+              <p>
+                Não somos advogados, e este texto não é orientação jurídica. O catálogo não tem
+                jogos nem links para baixá-los: cada pessoa usa a cópia do jogo que tem, e o patch
+                guarda a tradução, não o jogo.
+              </p>
+            </details>
+            <details>
+              <summary>De quem é cada tradução?</summary>
+              <p>
+                De quem a fez. Quem envia declara que fez a tradução, ou que tem permissão de quem
+                fez, e aceita que ela seja redistribuída aqui.
+              </p>
+            </details>
+            <details>
+              <summary>A tradução está pronta?</summary>
+              <p>
+                Cada uma diz o que foi conferido e o que não foi. O app está em fase de testes, e uma
+                tradução pode ter texto cortado ou trechos sem traduzir. Achou um problema? Conte a
+                quem traduziu ou envie uma versão nova.
+              </p>
+            </details>
+            <details>
+              <summary>Quero que uma tradução saia do catálogo</summary>
+              <p>
+                Se você tem direitos sobre o jogo ou é o autor da tradução, abra uma
+                <a href="https://github.com/crimsondawnacademy-design/romtranslate-traducoes/issues"
+                  >issue no repositório do catálogo</a
+                >
+                dizendo qual é. Ela sai.
+              </p>
+            </details>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div class="wrap">
+        <p>
+          RomTranslate Studio é software livre, com
+          <a
+            href="https://github.com/crimsondawnacademy-design/romtranslate-studio/blob/main/LICENSE"
+            >licença MIT</a
+          >. As traduções ficam no
+          <a href="https://github.com/crimsondawnacademy-design/romtranslate-traducoes"
+            >repositório do catálogo</a
+          >, e cada uma é de quem a fez.
+        </p>
+        <p>Este site e o catálogo não têm jogos, nem links para baixar jogos.</p>
+      </div>
+    </footer>
+  </body>
+</html>

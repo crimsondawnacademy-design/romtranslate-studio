@@ -2387,3 +2387,53 @@ valores mecânicos e lê 1.214 de 1.224 frases; quem estudou o jogo confirma o
 resto. Base de ponteiro de outra plataforma (SNES, PS1) não é coberta.
 
 **Driver:** claude.
+
+## 2026-10-19 — Catálogo de traduções da comunidade: o site passa a mostrar nome de jogo comercial [revoga a regra dos nomes de 13/10 no que toca ao site]
+
+**Contexto:** o Rhuan pediu uma página no site com os jogos já traduzidos,
+"pra comunidade poder subir e usar a tradução em seu idioma", pra ninguém
+traduzir do zero o que já existe. Até aqui o site não mostrava nome de jogo
+comercial (13/10: "nunca tela de jogo comercial"; 19/10: "perfil de jogo
+comercial não entra no repo (regra dos nomes)"). Um catálogo sem o nome do
+jogo não serve pra achar o jogo.
+
+**Decisão:** (1) o site mostra o NOME de jogo comercial só na página
+"Traduções da comunidade" (`site/traducoes/`, `site/en/translations/`), lido
+do índice do catálogo, pra dizer a que jogo cada patch se aplica. Segue
+proibido: tela/imagem de jogo comercial, ROM, BIOS, byte de jogo e link pra
+baixar jogo, no site, no app e nos dois repositórios. (2) O catálogo é um
+repositório PÚBLICO SEPARADO na conta pessoal, `crimsondawnacademy-design/
+romtranslate-traducoes` (preparado em `~/Desktop/romtranslate-traducoes`, sem
+remoto até o Rhuan criar): uma pasta por tradução,
+`traducoes/<plataforma>/<código>-<sha8>-<idioma>/`, com o `manifest.json` que
+o app já exporta (acrescido de `title`, `author`, `version`, `checked`,
+`not_checked`, `game_code` e `notes` opcionais), UM patch BPS e, se houver,
+`perfil.toml` + `tables/*.tbl`. O perfil de jogo comercial, que não entra no
+repo do app, tem casa no catálogo. (3) A chave do jogo é o SHA-256, não o
+SHA-1: é o hash que o app já grava em todo projeto, mostra ao abrir o jogo e
+põe no manifesto do patch. (4) Só BPS: ele confere o CRC32 do original antes
+de aplicar (IPS aplicaria em qualquer arquivo e daria lixo), e o validador lê
+do próprio BPS o tamanho e o CRC32 do original. (5) `ferramentas/conferir.py`
+(só biblioteca padrão) recusa qualquer arquivo fora da lista (é o que barra
+ROM, BIOS e o `translations.csv`, que traz o texto original), BPS corrompido,
+com original < 16 KiB ou patch > metade do original (jogo disfarçado de
+patch), > 20 MiB, manifesto incompleto, com link (`://`) ou na pasta errada, e
+perfil que usa tabela ausente. Roda no pull request (envio de fora só mexe em
+`traducoes/`) e, no main, regrava o `index.json`. (6) O site lê o índice
+direto do `raw.githubusercontent.com` (CORS aberto): envio aceito aparece sem
+republicar o site; custo zero, sem servidor.
+
+**Alternativas consideradas:** (1) catálogo dentro do repo do app — mistura
+patch de jogo comercial com o código e quebra a regra do CLAUDE.md;
+(2) índice copiado pro site a cada publicação — cada envio aceito pediria
+deploy; (3) aceitar IPS — sem conferência do original; (4) SHA-1 — seria um
+segundo hash pro mesmo fim, que o app não calcula.
+
+**Consequências:** o catálogo só funciona depois de o Rhuan criar o
+repositório (até lá a página mostra "não deu para carregar" com link). Quem
+aceita envio é o Rhuan, olhando o pull request; a checagem não prova que o
+patch é do jogo que o manifesto diz (só o CRC do BPS faz isso, na hora de
+aplicar). O app ainda não aplica patch nem avisa que o catálogo tem tradução
+pro jogo aberto.
+
+**Driver:** claude (pedido do Rhuan).

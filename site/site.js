@@ -216,4 +216,89 @@
     quadro.addEventListener("load", liga);
     liga();
   }
+
+  // Catalogo de traducoes da comunidade: le o index.json que o repositorio do
+  // catalogo regrava a cada envio aceito. A cara do cartao e os textos vem do
+  // <template> e dos data-modelo do HTML; aqui so se preenche e filtra.
+  const cat = $("[data-catalogo]");
+  if (cat) {
+    const { raw, pasta } = cat.dataset;
+    const lista = $(".catalogo", cat);
+    const molde = $("template", cat).content.firstElementChild;
+    const busca = $("input[type=search]", cat);
+    const [plataforma, idioma] = $$("select", cat);
+    const estados = $$("[data-estado]", cat);
+    const mostra = (nome, n) => {
+      for (const el of estados) el.hidden = el.dataset.estado !== nome;
+      const total = $("[data-estado=lista]", cat);
+      total.textContent = total.dataset.modelo.replace("{n}", n);
+    };
+    const nomes = new Intl.DisplayNames([root.lang], { type: "language" });
+    const lingua = (c) => {
+      try {
+        return nomes.of(c);
+      } catch {
+        return c;
+      }
+    };
+    const num = (n) => n.toLocaleString(root.lang);
+    const kb = new Intl.NumberFormat(root.lang, { style: "unit", unit: "kilobyte", maximumFractionDigits: 0 });
+    const mb = new Intl.NumberFormat(root.lang, { style: "unit", unit: "megabyte", maximumFractionDigits: 1 });
+    const tamanho = (b) => (b < 1048576 ? kb.format(Math.max(1, b / 1024)) : mb.format(b / 1048576));
+    const plano = (s) => (s ?? "").normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+
+    const cartao = (t) => {
+      const el = molde.cloneNode(true);
+      const v = {
+        titulo: t.title,
+        plataforma: $(`option[value="${t.platform}"]`, plataforma)?.textContent ?? t.platform,
+        idioma: (t.source_language ? `${lingua(t.source_language)} → ` : "") + lingua(t.target_locale),
+        autor: t.author,
+        versao: t.version,
+        codigo: t.game_code,
+        falas: { a: num(t.translated_entries), b: num(t.total_entries) },
+        conferido: t.checked,
+        "nao-conferido": t.not_checked,
+        notas: t.notes,
+        sha: t.source_sha256,
+        baixar: { tamanho: tamanho(t.patch_size) },
+      };
+      for (const n of $$("[data-campo]", el)) {
+        const x = v[n.dataset.campo];
+        if (Array.isArray(x))
+          n.replaceChildren(...x.map((s) => Object.assign(document.createElement("li"), { textContent: s })));
+        else n.textContent = n.dataset.modelo ? n.dataset.modelo.replace(/\{(\w+)\}/g, (_, k) => x[k]) : (x ?? "");
+      }
+      for (const n of $$("[data-se]", el)) n.hidden = !v[n.dataset.se]?.length;
+      $("[data-copiar]", el).dataset.copiar = t.source_sha256;
+      $("[data-link=patch]", el).href = raw + t.patch;
+      $("[data-link=pasta]", el).href = pasta + t.path;
+      return el;
+    };
+
+    let todas = [];
+    const desenha = () => {
+      const q = plano(busca.value.trim());
+      const vale = todas.filter(
+        (t) =>
+          (!plataforma.value || t.platform === plataforma.value) &&
+          (!idioma.value || t.target_locale === idioma.value) &&
+          (!q || plano([t.title, t.game_code, t.author].join(" ")).includes(q)),
+      );
+      lista.replaceChildren(...vale.map(cartao));
+      mostra(!todas.length ? "vazio" : vale.length ? "lista" : "nada", num(vale.length));
+    };
+    for (const el of [busca, plataforma, idioma]) el.addEventListener("input", desenha);
+
+    fetch(raw + "index.json", { cache: "no-cache" })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(r.status))))
+      .then((indice) => {
+        todas = indice.translations;
+        const codigos = [...new Set(todas.map((t) => t.target_locale))];
+        codigos.sort((a, b) => lingua(a).localeCompare(lingua(b), root.lang));
+        idioma.append(...codigos.map((c) => new Option(lingua(c), c)));
+        desenha();
+      })
+      .catch(() => mostra("erro", 0));
+  }
 })();
