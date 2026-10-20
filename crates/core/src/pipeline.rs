@@ -344,6 +344,7 @@ fn batch_request(
         target_language: opts.target_language.clone(),
         glossary: relevant_terms(glossary, batch),
         charset: charset.map(Charset::chars),
+        task: Default::default(),
     }
 }
 
@@ -1081,6 +1082,181 @@ fn shorter_please(item: &mut BatchItem, entry: &TextEntry, charset: Option<Chars
         Some(context) => format!("{context}\n{note}"),
         None => note,
     });
+}
+
+/// O que a passada de acentuacao fez.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccentSummary {
+    /// Frases traduzidas sem acento num conjunto que tem letra acentuada.
+    pub candidates: usize,
+    /// Textos diferentes mandados ao provider (frase repetida vai uma vez).
+    pub sent: usize,
+    /// Frases que ganharam acento.
+    pub changed: usize,
+    /// Frases que o provider devolveu iguais: nao precisavam de acento.
+    pub unchanged: usize,
+    /// Respostas recusadas: mudavam mais que os acentos (palavra, codigo,
+    /// pontuacao) ou usavam letra que a fonte nao tem. A frase fica como estava.
+    pub rejected: usize,
+    /// Textos sem resposta (chamada falhou ou o provider pulou o item).
+    pub failed: usize,
+    pub cancelled: bool,
+}
+
+/// (id, status) das entries com o mesmo texto.
+type Members = Vec<(String, TranslationStatus)>;
+
+/// O texto sem acento, cedilha e trema: o que tem que ficar igual entre a
+/// traducao e a versao acentuada.
+fn unaccented(text: &str) -> String {
+    text.chars()
+        .map(|c| crate::tbl::base_letter(c).unwrap_or(c))
+        .collect()
+}
+
+/// As letras acentuadas que a entry consegue gravar: as da tabela dela, ou as
+/// da fonte do app no texto desenhado. Vazio = nada a fazer.
+fn accented_letters(entry: &TextEntry, tables: &mut ProjectTables) -> Result<String> {
+    let letters: String = match &entry.encoding {
+        TextEncoding::Table(id) => tables.get(id)?.charset(),
+        TextEncoding::Image => crate::images::font::marked().collect(),
+        _ => String::new(),
+    };
+    Ok(letters
+        .chars()
+        .filter(|c| crate::tbl::base_letter(*c).is_some())
+        .collect())
+}
+
+/// Poe os acentos nas traducoes que foram feitas sem eles (a fonte do jogo
+/// nao tinha a letra; depois ganhou — `images::letters`). O provider recebe
+/// a traducao pronta, nao o original, e a resposta so e gravada se, sem os
+/// acentos, for identica a traducao de antes: nenhuma palavra, codigo,
+/// espaco ou pontuacao muda, e por isso o tamanho da frase e as linhas da
+/// caixa ficam iguais (letra acentuada ocupa o mesmo que a sem acento numa
+/// tabela). Frase que ja tem acento fica de fora; repetida vai uma vez.
+pub async fn run_accent_pass(
+    db: &mut ProjectDb,
+    provider: &dyn TranslationProvider,
+    opts: &TranslateOptions,
+    cancel: &AtomicBool,
+    on_progress: &(dyn Fn(Progress) + Send + Sync),
+) -> Result<AccentSummary> {
+    let mut summary = AccentSummary::default();
+    let mut tables = ProjectTables::new(db.project_dir());
+    // (texto, letras que a entry grava) -> as entries com esse texto.
+    let mut groups: std::collections::BTreeMap<(String, String), Members> = Default::default();
+    for entry in db.load_entries()? {
+        let Some(text) = entry.translated_text.clone() else {
+            continue;
+        };
+        if entry.status == TranslationStatus::Internal
+            || !text.chars().any(|c| c.is_ascii_lowercase())
+            || text.chars().any(|c| crate::tbl::base_letter(c).is_some())
+        {
+            continue;
+        }
+        let letters = accented_letters(&entry, &mut tables)?;
+        if letters.is_empty() {
+            continue;
+        }
+        summary.candidates += 1;
+        groups
+            .entry((text, letters))
+            .or_default()
+            .push((entry.id, entry.status));
+    }
+    let groups: Vec<((String, String), Members)> = groups.into_iter().collect();
+    summary.sent = groups.len();
+
+    // Um lote, um conjunto de letras; o id do item e a posicao do grupo.
+    let mut batches: Vec<Vec<usize>> = Vec::new();
+    for (i, ((_, letters), _)) in groups.iter().enumerate() {
+        match batches.last_mut() {
+            Some(batch)
+                if batch.len() < opts.batch_size.max(1) && groups[batch[0]].0 .1 == *letters =>
+            {
+                batch.push(i)
+            }
+            _ => batches.push(vec![i]),
+        }
+    }
+    let total = groups.len();
+    let mut done = 0;
+    for wave in batches.chunks(opts.parallel.max(1)) {
+        if cancel.load(Ordering::Relaxed) {
+            summary.cancelled = true;
+            break;
+        }
+        let requests: Vec<TranslationRequest> = wave
+            .iter()
+            .map(|batch| TranslationRequest {
+                items: batch
+                    .iter()
+                    .map(|&i| BatchItem {
+                        id: i.to_string(),
+                        text: groups[i].0 .0.clone(),
+                        context: None,
+                        max_bytes: None,
+                        max_chars: None,
+                        max_line: None,
+                        max_lines: None,
+                        page_code: None,
+                    })
+                    .collect(),
+                source_language: None,
+                target_language: opts.target_language.clone(),
+                glossary: Vec::new(),
+                charset: Some(groups[batch[0]].0 .1.clone()),
+                task: crate::provider::Task::Accent,
+            })
+            .collect();
+        let Some(responses) = call_together(provider, &requests, opts, cancel).await else {
+            summary.cancelled = true;
+            break;
+        };
+        for (batch, response) in wave.iter().zip(responses) {
+            let Ok(response) = response else {
+                summary.failed += batch.len();
+                continue;
+            };
+            let mut answered = HashSet::new();
+            for item in &response.translations {
+                let Some(i) = item.id.parse::<usize>().ok().filter(|i| batch.contains(i)) else {
+                    continue;
+                };
+                if !answered.insert(i) {
+                    continue;
+                }
+                let ((text, letters), members) = &groups[i];
+                let answer = item.translation.as_str();
+                if answer == text {
+                    summary.unchanged += members.len();
+                } else if unaccented(answer) != unaccented(text)
+                    || answer.chars().any(|c| c.is_control())
+                    || answer
+                        .chars()
+                        .any(|c| crate::tbl::base_letter(c).is_some() && !letters.contains(c))
+                {
+                    summary.rejected += members.len();
+                } else {
+                    for (id, status) in members {
+                        db.update_translation(id, answer, *status)?;
+                    }
+                    summary.changed += members.len();
+                }
+            }
+            summary.failed += batch.iter().filter(|i| !answered.contains(i)).count();
+        }
+        done += wave.iter().map(Vec::len).sum::<usize>();
+        on_progress(Progress {
+            done,
+            total,
+            phase: "accent",
+        });
+    }
+    Ok(summary)
 }
 
 /// Manda os pedidos ao provider ao mesmo tempo e devolve as respostas na

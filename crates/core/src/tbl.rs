@@ -578,7 +578,7 @@ pub(crate) fn plain_equivalent(ch: char) -> Option<String> {
 /// A letra sem acento de uma letra latina acentuada, pela decomposicao
 /// canonica do Unicode: letra base + marcas U+0300..U+036F. So base ASCII —
 /// 'й' -> 'и' e 'が' -> 'か' tambem sao decomposicoes, mas dao outra letra.
-fn base_letter(ch: char) -> Option<char> {
+pub(crate) fn base_letter(ch: char) -> Option<char> {
     const NFD: DecomposingNormalizerBorrowed<'static> = DecomposingNormalizerBorrowed::new_nfd();
     let mut buf = [0; 4];
     let decomposed = NFD.normalize(ch.encode_utf8(&mut buf));

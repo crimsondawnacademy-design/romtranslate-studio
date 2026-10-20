@@ -69,6 +69,7 @@ fn request() -> TranslationRequest {
         target_language: "pt-BR".to_string(),
         glossary: Vec::new(),
         charset: None,
+        task: Default::default(),
     }
 }
 

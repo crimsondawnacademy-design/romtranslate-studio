@@ -50,6 +50,17 @@ pub struct GlossaryTerm {
     pub note: Option<String>,
 }
 
+/// O que o pedido pede ao provider.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Task {
+    /// Traduzir o texto de cada item.
+    #[default]
+    Translate,
+    /// Por os acentos que faltam numa traducao ja pronta, sem mudar mais
+    /// nada: o texto de cada item ja esta no idioma de destino.
+    Accent,
+}
+
 #[derive(Debug, Clone)]
 pub struct TranslationRequest {
     pub items: Vec<BatchItem>,
@@ -61,6 +72,7 @@ pub struct TranslationRequest {
     /// os caracteres que ela escreve (`TblTable::charset`). O batch inteiro e
     /// de uma tabela so.
     pub charset: Option<String>,
+    pub task: Task,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -110,6 +122,9 @@ pub trait TranslationProvider: Send + Sync {
 pub const NOT_TEXT: &str = "<NOT_TEXT>";
 
 pub fn build_system_prompt(req: &TranslationRequest) -> String {
+    if req.task == Task::Accent {
+        return accent_prompt(req);
+    }
     let mut p = String::from("You are translating text extracted from a video game.\n");
     p.push_str(&format!("Target language: {}.\n", req.target_language));
     if let Some(src) = &req.source_language {
@@ -208,6 +223,36 @@ pub fn build_system_prompt(req: &TranslationRequest) -> String {
     p
 }
 
+/// O pedido de acentuacao: o texto ja traduzido volta com os acentos, e nada
+/// mais muda (quem confere e `pipeline::run_accent_pass`).
+fn accent_prompt(req: &TranslationRequest) -> String {
+    let mut p = format!(
+        "You are fixing text from a video game translated into {lang}.\n\
+         The text was written WITHOUT accents because the game font did not have accented \
+         letters. Now it has them.\n\
+         Rules:\n\
+         - Return each text with every accent, cedilla and diacritic that correct {lang} \
+         spelling requires (in Portuguese, for example: voce -> você, nao -> não, acao -> ação, \
+         esta -> está when it is the verb).\n\
+         - Change NOTHING else: the same words in the same order, the same spaces, the same \
+         punctuation and the same capitalization. Do not translate, rephrase, fix grammar or \
+         shorten.\n\
+         - Copy every code in square brackets exactly as it is, in the same place.\n\
+         - If a text needs no accent, return it unchanged.\n",
+        lang = req.target_language
+    );
+    if let Some(charset) = &req.charset {
+        p.push_str("- The game font has only these accented letters; use no other: ");
+        p.push_str(charset);
+        p.push('\n');
+    }
+    p.push_str(
+        "Respond with ONLY valid JSON in this exact shape, one entry per input item, same ids:\n\
+         {\"translations\":[{\"id\":\"...\",\"translation\":\"...\"}]}\n",
+    );
+    p
+}
+
 pub fn build_user_prompt(req: &TranslationRequest) -> String {
     // Serializacao direta dos items, sem espaco nem campo vazio: sao milhares
     // de frases por rodada, e cada caractere a mais conta em todas.
@@ -294,6 +339,7 @@ mod tests {
                 },
             ],
             charset: None,
+            task: Default::default(),
         }
     }
 
@@ -334,6 +380,7 @@ mod tests {
         let plain = req_with_glossary();
         let letters = TranslationRequest {
             charset: Some(" ABCabc".into()),
+            task: Default::default(),
             ..plain.clone()
         };
         let p = build_system_prompt(&letters);
@@ -351,6 +398,7 @@ mod tests {
         // avisa que nao ha espaco.
         let accented = TranslationRequest {
             charset: Some("ABCÇçé!".into()),
+            task: Default::default(),
             ..plain
         };
         let p = build_system_prompt(&accented);
@@ -363,6 +411,7 @@ mod tests {
     fn table_item_with_a_limit_gets_the_hard_rule() {
         let mut limited = TranslationRequest {
             charset: Some(" ABCabc".into()),
+            task: Default::default(),
             ..req_with_glossary()
         };
         let unlimited = build_system_prompt(&limited);

@@ -142,6 +142,19 @@ enum Command {
         #[arg(long)]
         redo_errors: bool,
     },
+    /// Poe os acentos nas traducoes feitas sem eles (a fonte do jogo ganhou as
+    /// letras depois). O provider recebe a traducao pronta; a resposta so e
+    /// gravada se, sem os acentos, for identica a de antes
+    Acentuar {
+        #[arg(value_name = "PROJETO")]
+        project: PathBuf,
+        /// Frases por chamada, de 1 a 200 [padrao: 100]
+        #[arg(long, value_name = "N")]
+        batch: Option<usize>,
+        /// Chamadas ao provider ao mesmo tempo [padrao: o das configuracoes do app]
+        #[arg(long, value_name = "N")]
+        parallel: Option<usize>,
+    },
     /// Acha as imagens com letra do arquivo e grava a folha de cada uma em
     /// <projeto>/imagens (sem IA): e nelas que se ve quais tem japones
     Pictures {
@@ -604,6 +617,17 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             opts.redo_errors = redo_errors;
             translate(&project, &opts, &cfg, &cfg_dir)
         }
+        Command::Acentuar {
+            project,
+            batch,
+            parallel,
+        } => {
+            let cfg_dir = config_dir()?;
+            let cfg = settings::load_settings(&cfg_dir);
+            let mut opts = options(load(&project)?, batch.unwrap_or(100).clamp(1, 200));
+            opts.parallel = parallel.unwrap_or(cfg.parallel);
+            accent(&project, &opts, &cfg, &cfg_dir)
+        }
         Command::Pictures {
             project,
             without_text,
@@ -915,6 +939,63 @@ fn apply(project: &Path, tsv: &Path) -> Result<Output, Failure> {
         format!("gravadas: {applied}\n{text}"),
         json!({ "applied": applied, "validation": report }),
     ))
+}
+
+fn accent(
+    project: &Path,
+    opts: &TranslateOptions,
+    cfg: &settings::AppSettings,
+    cfg_dir: &Path,
+) -> Result<Output, Failure> {
+    let (provider, model) = settings::build_provider(cfg, cfg_dir)?;
+    let mut db = ProjectDb::open(project)?;
+    eprintln!(
+        "provider: {} ({model}), {} frases por chamada, {} chamadas ao mesmo tempo",
+        cfg.provider, opts.batch_size, opts.parallel
+    );
+    let cancel = Arc::new(AtomicBool::new(false));
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+        .map_err(|e| format!("nao foi possivel iniciar a acentuacao: {e}"))?;
+    let summary = runtime.block_on(async {
+        let flag = cancel.clone();
+        tokio::spawn(async move {
+            if tokio::signal::ctrl_c().await.is_ok() {
+                eprintln!(
+                    "cancelando depois das chamadas em andamento (Ctrl-C de novo encerra agora)"
+                );
+                flag.store(true, Ordering::Relaxed);
+            }
+            if tokio::signal::ctrl_c().await.is_ok() {
+                std::process::exit(130);
+            }
+        });
+        romtranslate_core::pipeline::run_accent_pass(
+            &mut db,
+            provider.as_ref(),
+            opts,
+            &cancel,
+            &|p| eprintln!("  {} de {} ({})", p.done, p.total, p.phase),
+        )
+        .await
+    })?;
+    let mut text = format!(
+        "sem acento, numa fonte que tem acento: {} frases ({} textos diferentes)\n\
+         ganharam acento: {}, ja estavam certas: {}, recusadas (mudavam mais que o acento): {}, \
+         sem resposta: {}",
+        summary.candidates,
+        summary.sent,
+        summary.changed,
+        summary.unchanged,
+        summary.rejected,
+        summary.failed
+    );
+    if summary.cancelled {
+        text.push_str("\ncancelada: o que ja voltou esta gravado");
+    }
+    let json = serde_json::to_value(&summary).unwrap_or_default();
+    Ok(Output::new(text, json))
 }
 
 fn translate(
