@@ -2496,3 +2496,9 @@ tamanho); quebrar a fala no app (o jogo já quebra); teto pelo inglês (o
 português passa do inglês e erraria quase todo nome); fonte do app pro sinal
 (o traço da própria fonte combina com o resto do texto).
 
+## 2026-10-20 — Nome de menu: teto por lista e `;` posto pelo app
+
+**Contexto:** com teto por mensagem (o maior trecho daquele nome em qualquer idioma), 147 nomes do Dragon Quest V passavam por 1 a 3 letras e a IA, pedida de novo, não encurtou. Medido nos cinco idiomas: nenhum pedaço de nome de item passa de 16 letras, mas o nome inteiro chega a 26 — o original quebra o nome longo com `;` ("steel ;broadsword").
+
+**Decisão:** na lista cujo original usa `;`, o teto é o maior pedaço entre dois `;` da lista inteira (a janela é a mesma pra todos os nomes) e o `;` vira código `[;]` que a validação não conta; na regravação o app põe o `;` no último espaço antes do teto, no formato do original (`mpt::wrapped`). Lista sem `;` continua com o teto da mensagem. 135 erros viraram 12, todos em nomes de lugar, corrigidos à mão.
+

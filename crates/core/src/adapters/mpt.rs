@@ -20,11 +20,16 @@
 //! no lugar dele, vai pro fim do cartucho (`nds::replace_files`).
 //!
 //! Cada idioma do cartucho tem a sua pasta (`EN/`, `FR/`...): so a do idioma
-//! de origem e traduzida. As outras dao o teto de cada trecho dos nomes de
-//! menu — o maior que o jogo mostra ali em qualquer idioma. A fala (fim
-//! `@c`) o jogo quebra sozinho na caixa: sem teto.
+//! de origem e traduzida. As outras dao o teto dos nomes de menu. Na lista
+//! cujo original usa `;` (o ponto onde o nome quebra na janela estreita:
+//! "steel ;broadsword"), o teto e o maior pedaco entre dois `;` da lista
+//! inteira, em qualquer idioma — a janela e a mesma pra todos os nomes dela;
+//! medido no Dragon Quest V: 16 letras nos itens, nos cinco idiomas — e o app
+//! poe o `;` sozinho onde a traducao passa disso (`wrapped`). Nas outras, o
+//! teto e o da propria mensagem. A fala (fim `@c`) o jogo quebra sozinho na
+//! caixa: sem teto.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::Range;
 
 use crate::adapter::ApplyReport;
@@ -36,6 +41,8 @@ const HEADER: usize = 32;
 const PAD: u8 = 0xFE;
 /// A posicao no indice e u16 em unidades de 4 bytes.
 const MAX_DATA: usize = 0xFFFF * 4;
+/// O `;` dos nomes, como vai pra quem traduz: quebra que o app tira e poe.
+pub(crate) const BREAK: &str = "[;]";
 
 pub(crate) struct Message {
     pub body: Range<usize>,
@@ -170,6 +177,7 @@ pub(crate) fn unframe(text: &str) -> String {
             Some("rn") => Some("\r\n"),
             Some("n") => Some("\n"),
             Some("r") => Some("\r"),
+            Some(";") => Some(";"),
             Some(code) if !code.starts_with(['\r', '\n']) && code_len(code) == Some(code.len()) => {
                 Some(code)
             }
@@ -223,17 +231,28 @@ pub(crate) fn extract(files: &[(String, usize, &[u8])], wanted: &str) -> Vec<Tex
         .any(|(path, ..)| language(path) == Some(wanted));
 
     // Teto de cada mensagem de menu: o trecho mais longo entre dois codigos,
-    // no idioma em que ele e maior (japones fora: letra de largura dupla).
+    // no idioma em que ele e maior (japones fora: letra de largura dupla). E,
+    // por lista, o maior pedaco entre dois `;` (o `$` do alemao tambem
+    // quebra), se algum idioma da lista usa `;`.
     let mut widest: HashMap<(String, usize), usize> = HashMap::new();
+    let mut pieces: HashMap<String, usize> = HashMap::new();
+    let mut broken: HashSet<String> = HashSet::new();
     for (path, _, file, messages) in &parsed {
         for (i, m) in messages.iter().enumerate() {
             let raw = std::str::from_utf8(&file[m.body.clone()]).unwrap_or_default();
-            if crate::pipeline::has_japanese(raw) {
+            if crate::pipeline::has_japanese(raw) || raw.contains("@c") {
                 continue;
             }
-            let line = crate::adapters::bank::longest_line(&frame(raw).1);
+            let text = frame(raw).1;
+            let line = crate::adapters::bank::longest_line(&text);
             let max = widest.entry((any_language(path), i)).or_default();
             *max = (*max).max(line);
+            if text.contains(';') {
+                broken.insert(any_language(path));
+            }
+            let piece = crate::adapters::bank::longest_line(&text.replace([';', '$'], "[;]"));
+            let max = pieces.entry(any_language(path)).or_default();
+            *max = (*max).max(piece);
         }
     }
 
@@ -250,8 +269,14 @@ pub(crate) fn extract(files: &[(String, usize, &[u8])], wanted: &str) -> Vec<Tex
                 continue;
             }
             let mut meta = serde_json::json!({ "indice": i, "antes": before, "depois": after });
-            let line = widest.get(&(any_language(path), i));
-            if let (true, false, Some(&line)) = (siblings, raw.contains("@c"), line) {
+            let list = any_language(path);
+            let mut text = text;
+            if raw.contains("@c") || !siblings {
+            } else if broken.contains(&list) {
+                text = text.replace(';', BREAK);
+                meta["linha"] = pieces[&list].into();
+                meta["quebra"] = BREAK.into();
+            } else if let Some(&line) = widest.get(&(list, i)) {
                 meta["linha"] = line.into();
             }
             out.push(TextEntry {
@@ -270,6 +295,70 @@ pub(crate) fn extract(files: &[(String, usize, &[u8])], wanted: &str) -> Vec<Tex
         }
     }
     out
+}
+
+/// O `;` da entry, se a lista dela quebra nomes (o que a validacao nao conta
+/// como codigo).
+pub(crate) fn newline(entry: &TextEntry) -> Option<&'static str> {
+    entry.metadata.get("mpt")?.get("quebra")?;
+    Some(BREAK)
+}
+
+/// A traducao do nome com o `;` onde ela passa do teto: cada trecho entre
+/// dois codigos do jogo e uma linha; os `;` que a traducao ja tem ficam, e a
+/// linha que ainda passa quebra no ultimo espaco antes do teto, com o espaco
+/// antes do `;`, como no original ("steel ;broadsword"). `None` = a lista
+/// nao quebra nomes.
+pub(crate) fn wrapped(entry: &TextEntry, text: &str) -> Option<String> {
+    newline(entry)?;
+    let width = entry.metadata["mpt"].get("linha")?.as_u64()? as usize;
+    let text = text.replace(BREAK, ";");
+    let mut out = String::with_capacity(text.len() + 8);
+    let mut rest = text.as_str();
+    loop {
+        let open = rest.find('[').unwrap_or(rest.len());
+        out.push_str(&wrap_line(&rest[..open], width));
+        rest = &rest[open..];
+        match rest.find(']') {
+            Some(close) if !rest.is_empty() => {
+                out.push_str(&rest[..=close]);
+                rest = &rest[close + 1..];
+            }
+            _ => {
+                out.push_str(rest);
+                return Some(out);
+            }
+        }
+    }
+}
+
+fn wrap_line(text: &str, width: usize) -> String {
+    let lines: Vec<String> = text
+        .split(';')
+        .map(|line| {
+            let mut out = String::new();
+            let mut current = 0;
+            for (i, word) in line.split(' ').enumerate() {
+                let size = word.chars().count();
+                if i > 0 {
+                    if current + 1 + size > width && current > 0 {
+                        out.push(' ');
+                        out.push_str(BREAK);
+                        current = 0;
+                        out.push_str(word);
+                        current += size;
+                        continue;
+                    }
+                    out.push(' ');
+                    current += 1;
+                }
+                out.push_str(word);
+                current += size;
+            }
+            out
+        })
+        .collect();
+    lines.join(BREAK)
 }
 
 /// A entry e uma mensagem de arquivo MPT0.
@@ -357,7 +446,8 @@ pub(crate) fn plan(
             }
             if let Some(text) = &entry.translated_text {
                 let side = |key: &str| meta[key].as_str().unwrap_or_default().to_string();
-                texts.insert(i, side("antes") + &unframe(text) + &side("depois"));
+                let text = wrapped(entry, text).unwrap_or_else(|| text.clone());
+                texts.insert(i, side("antes") + &unframe(&text) + &side("depois"));
             }
         }
         let rebuilt = rebuild(bytes, &messages, &texts).ok_or_else(|| {
@@ -406,6 +496,34 @@ mod tests {
     }
 
     #[test]
+    fn a_long_name_gets_the_break_where_the_line_passes_the_window() {
+        let entry = TextEntry {
+            id: "n".into(),
+            resource_path: None,
+            offset: None,
+            original_bytes: Vec::new(),
+            source_text: String::new(),
+            translated_text: None,
+            context: None,
+            max_bytes: None,
+            encoding: TextEncoding::Utf8,
+            status: Default::default(),
+            metadata: serde_json::json!({ "mpt": { "linha": 10, "quebra": BREAK } }),
+        };
+        let wrap = |text: &str| wrapped(&entry, text).unwrap();
+        assert_eq!(wrap("espada do massacre"), "espada do [;]massacre");
+        // Cada trecho entre codigos e uma linha; o `;` que ja existe fica.
+        assert_eq!(
+            wrap("a [@3]uma [@4]espada do massacre[@5]as"),
+            "a [@3]uma [@4]espada do [;]massacre[@5]as"
+        );
+        assert_eq!(wrap("lança ;de bambu"), "lança [;]de bambu");
+        assert_eq!(unframe(&wrap("espada do massacre")), "espada do ;massacre");
+        // Palavra maior que a janela fica inteira (a validacao avisa).
+        assert_eq!(wrap("Megarressuscitar"), "Megarressuscitar");
+    }
+
+    #[test]
     fn parse_rejects_what_is_not_a_text_file() {
         let good = file(&["@aBob@bHi.\n@c0@", "@"]);
         assert_eq!(parse(&good).unwrap().len(), 2);
@@ -448,7 +566,9 @@ mod tests {
         assert_eq!(entries[0].source_text, "Bob[@b]Hi.");
         assert!(entries[0].metadata["mpt"].get("linha").is_none());
         assert_eq!(entries[1].source_text, "stick");
-        assert_eq!(entries[1].metadata["mpt"]["linha"], 16);
+        // A lista quebra nomes (o FR usa `;`): teto = maior pedaco, "baton de ".
+        assert_eq!(entries[1].metadata["mpt"]["linha"], 9);
+        assert_eq!(entries[1].metadata["mpt"]["quebra"], BREAK);
         assert_eq!(entries[1].id, "mpt-data/M/EN/b0.mpt-1");
         // Sem a pasta do idioma, vem tudo.
         assert_eq!(extract(&files, "PT").len(), 6);

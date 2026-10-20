@@ -270,7 +270,9 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
         source_tokens.remove(layout.soft());
         translation_tokens.remove(layout.soft());
     }
-    if let Some(newline) = crate::profile::newline(entry) {
+    if let Some(newline) =
+        crate::profile::newline(entry).or_else(|| crate::adapters::mpt::newline(entry))
+    {
         source_tokens.remove(newline);
         translation_tokens.remove(newline);
     }
@@ -397,7 +399,8 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
     // app quebra as linhas, so sobra a palavra que sozinha nao cabe.
     if let Some(width) = crate::adapters::bank::line_width(entry) {
         // A frase do perfil tambem tem as linhas quebradas pelo app.
-        let wrapped = crate::profile::wrapped(entry, translation);
+        let wrapped = crate::profile::wrapped(entry, translation)
+            .or_else(|| crate::adapters::mpt::wrapped(entry, translation));
         let line = match (&layout, &wrapped) {
             (Some(layout), _) => layout.wrap(translation).1,
             (None, Some(text)) => crate::adapters::bank::longest_line(text),
