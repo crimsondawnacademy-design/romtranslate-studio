@@ -7,6 +7,7 @@ pub(crate) mod iso9660;
 pub(crate) mod mpt;
 pub mod nds;
 pub mod nes;
+pub(crate) mod nftr;
 pub(crate) mod packed;
 pub(crate) mod pointers;
 pub mod ps1;

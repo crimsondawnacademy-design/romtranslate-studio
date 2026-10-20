@@ -215,6 +215,7 @@ fn reinsert(
             )));
         }
         let mut applied = adapter.apply_text(&base, &entries)?;
+        letters = applied.report.letters;
         applied.report.applied += profiled_report.applied;
         applied.report.kept_original += profiled_report.kept_original;
         applied.report.relocated += profiled_report.relocated;
@@ -244,7 +245,7 @@ fn reinsert(
         {
             let mut tables = ProjectTables::new(project_dir);
             let table = tables.get(crate::kuten::TABLE_ID)?;
-            letters = crate::images::letters::draw(&original, &mut applied.bytes, table);
+            letters += crate::images::letters::draw(&original, &mut applied.bytes, table);
         }
         drawn = crate::images::apply(&mut applied.bytes, &pictures);
         if policy == ErrorPolicy::Block && !drawn.left_out.is_empty() {

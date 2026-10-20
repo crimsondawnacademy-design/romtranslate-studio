@@ -12,11 +12,11 @@
 //! O binario ARM9 fica de fora (nem e extraido): ele divide a RAM principal
 //! com BSS e heap, e texto anexado nele seria zerado no boot.
 
-use super::mpt;
 use super::pointers::{
     ensure_pointers_untouched, file_relative_tables, mark_relocatable, relocate, to_file_relative,
     Relocation,
 };
+use super::{mpt, nftr};
 use crate::adapter::{
     AppliedImage, ExtractHints, Extraction, GameAdapter, GameInput, VerificationReport,
 };
@@ -361,9 +361,8 @@ fn relocate_files(data: &[u8], out: &mut Vec<u8>, relocations: &[Relocation]) ->
         consumed += mine.len();
         let relative = to_file_relative(&mine, in_file)?;
         let mut bytes = out[start..start + len].to_vec();
-        let new_start = out.len().next_multiple_of(FILE_ALIGN);
         let room = MAX_ROM_LEN
-            .checked_sub(new_start)
+            .checked_sub(out.len().next_multiple_of(FILE_ALIGN))
             .ok_or_else(|| err("ROM ja no tamanho maximo de um cartao de DS"))?;
         let left =
             relocate(&mut bytes, &relative, 0, room).map_err(|e| err(format!("{path}: {e}")))?;
@@ -373,32 +372,54 @@ fn relocate_files(data: &[u8], out: &mut Vec<u8>, relocations: &[Relocation]) ->
                  espaco que ele tem; encurte as traducoes"
             )));
         }
-        out.resize(new_start, 0xFF);
-        out.extend_from_slice(&bytes);
-        let new_end = out.len();
-        repoint_fat(out, &layout, (start, start + len), (new_start, new_end))?;
+        let new_start = append(out, &bytes)?;
+        repoint_fat(
+            out,
+            &layout,
+            (start, start + len),
+            (new_start, new_start + bytes.len()),
+        )?;
     }
     if consumed != relocations.len() {
         return Err(err(
             "string realocavel fora de qualquer arquivo do filesystem",
         ));
     }
-    set_used_size(out)
+    Ok(())
 }
 
-/// Header com o tamanho usado e a capacidade do chip de um ROM que cresceu.
-fn set_used_size(out: &mut [u8]) -> Result<()> {
-    let used = u32::try_from(out.len()).map_err(|_| err("ROM passaria de 4 GiB"))?;
+/// Grava `bytes` no fim do que o ROM usa e devolve a posicao. O cartucho
+/// costuma ter preenchimento (0xFF) depois do ultimo arquivo, ate o tamanho
+/// do chip: se dali ate o fim do arquivo e so isso, o arquivo novo vai ali e
+/// o ROM nao cresce (medido em 19/10/2026 num jogo de 128 MiB: 13,8 MiB
+/// livres). Senao, vai depois do fim. O header passa a dizer o tamanho usado
+/// e, se o ROM cresceu, a capacidade do chip.
+fn append(out: &mut Vec<u8>, bytes: &[u8]) -> Result<usize> {
+    let used = read_u32(out, USED_SIZE_OFFSET)? as usize;
+    let at = match used.next_multiple_of(FILE_ALIGN) {
+        at if at >= HEADER_LEN && at <= out.len() && out[at..].iter().all(|&b| b == 0xFF) => at,
+        _ => out.len().next_multiple_of(FILE_ALIGN),
+    };
+    let end = at + bytes.len();
+    if end > MAX_ROM_LEN {
+        return Err(err("o ROM passaria do tamanho maximo de um cartao de DS"));
+    }
+    if end > out.len() {
+        out.resize(end, 0xFF);
+    }
+    out[at..end].copy_from_slice(bytes);
+    let used = u32::try_from(end).map_err(|_| err("ROM passaria de 4 GiB"))?;
     out[USED_SIZE_OFFSET..USED_SIZE_OFFSET + 4].copy_from_slice(&used.to_le_bytes());
     while out[CAPACITY_OFFSET] < 12 && CHIP_UNIT << out[CAPACITY_OFFSET] < out.len() {
         out[CAPACITY_OFFSET] += 1;
     }
-    Ok(())
+    Ok(at)
 }
 
 /// Troca arquivos inteiros (caminho, bytes novos): o que cabe no lugar do
-/// antigo fica la; o que cresceu vai pro fim do ROM. A FAT passa a dizer o
-/// tamanho novo nos dois casos. `files` e o filesystem do ROM original.
+/// antigo fica la; o que cresceu vai pro fim do que o ROM usa (`append`). A
+/// FAT passa a dizer o tamanho novo nos dois casos. `files` e o filesystem
+/// do ROM original.
 fn replace_files(
     out: &mut Vec<u8>,
     files: &[ResourceDescriptor],
@@ -414,22 +435,13 @@ fn replace_files(
             .find(|f| f.path == path)
             .ok_or_else(|| err(format!("{path}: arquivo nao existe no filesystem")))?;
         let (start, len) = (file.offset as usize, file.size as usize);
-        let new_start = match bytes.len() <= len {
-            true => start,
-            false => out.len().next_multiple_of(FILE_ALIGN),
-        };
-        if new_start + bytes.len() > MAX_ROM_LEN {
-            return Err(err(format!(
-                "{path}: o ROM passaria do tamanho maximo de um cartao de DS"
-            )));
-        }
-        if new_start == start {
+        let new_start = if bytes.len() <= len {
             out[start..start + len].fill(0xFF);
+            out[start..start + bytes.len()].copy_from_slice(&bytes);
+            start
         } else {
-            out.resize(new_start, 0xFF);
-            out.resize(new_start + bytes.len(), 0);
-        }
-        out[new_start..new_start + bytes.len()].copy_from_slice(&bytes);
+            append(out, &bytes)?
+        };
         repoint_fat(
             out,
             &layout,
@@ -437,7 +449,7 @@ fn replace_files(
             (new_start, new_start + bytes.len()),
         )?;
     }
-    set_used_size(out)
+    Ok(())
 }
 
 /// Troca (start, end) de toda entrada da FAT que apontava pro arquivo antigo.
@@ -609,12 +621,29 @@ impl GameAdapter for NdsAdapter {
             relocate_files(data, &mut out, &plan.relocations)?;
         }
         replace_files(&mut out, &files, rebuilt)?;
+        // Letra que a fonte do jogo so tem como desenho de reserva (o "ã" de
+        // um cartucho sem portugues) e desenhada nela.
+        let used: std::collections::HashSet<char> = messages
+            .iter()
+            .chain(&entries)
+            .filter_map(|e| e.translated_text.as_deref())
+            .flat_map(str::chars)
+            .collect();
+        let mut letters = 0;
+        for f in files
+            .iter()
+            .filter(|f| data[f.offset as usize..].starts_with(b"RTFN"))
+        {
+            let (start, end) = (f.offset as usize, (f.offset + f.size) as usize);
+            letters += nftr::fill(&mut out[start..end], &used);
+        }
         // Titulo (0x00..0x0C) e os campos de tamanho mudam o CRC do header.
         let crc = crc16(&out[..HEADER_CRC_OFFSET]);
         out[HEADER_CRC_OFFSET..HEADER_CRC_OFFSET + 2].copy_from_slice(&crc.to_le_bytes());
         let mut report = plan.report;
         report.applied += mpt_report.applied;
         report.kept_original += mpt_report.kept_original;
+        report.letters += letters;
         Ok(AppliedImage { bytes: out, report })
     }
 

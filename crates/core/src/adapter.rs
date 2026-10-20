@@ -97,6 +97,9 @@ pub struct ApplyReport {
     /// espaco: o bloco remontado nao coube em lugar nenhum do arquivo, ou
     /// passou do que a tabela dele alcanca. O bloco fica como estava.
     pub no_room: usize,
+    /// Letras acentuadas que a fonte do jogo nao desenhava e o adapter
+    /// desenhou nela (`adapters::nftr`).
+    pub letters: usize,
 }
 
 /// Imagem modificada em memoria + relatorio. O caller decide onde gravar
