@@ -1,4 +1,5 @@
 pub(crate) mod bank;
+pub mod cartucho;
 pub(crate) mod cdrom;
 pub mod gamecube;
 pub mod gba;
@@ -32,7 +33,7 @@ use crate::types::{TextEncoding, TextEntry};
 /// Registry dos adapters compilados no workspace (spec: sem plugin loading
 /// dinamico no MVP). Ordem: magics fortes primeiro, heuristicos por ultimo.
 pub fn all() -> Vec<Box<dyn GameAdapter>> {
-    vec![
+    let mut adapters: Vec<Box<dyn GameAdapter>> = vec![
         Box::new(rtsf::RtsfAdapter),
         Box::new(nds::NdsAdapter),
         Box::new(gamecube::GameCubeAdapter),
@@ -44,7 +45,15 @@ pub fn all() -> Vec<Box<dyn GameAdapter>> {
         Box::new(nes::NesAdapter),
         Box::new(gba::GbaAdapter),
         Box::new(snes::SnesAdapter),
-    ]
+    ];
+    // Cartuchos com cabecalho forte antes; MSX e PC Engine (extensao) por
+    // ultimo, na ordem da ficha.
+    adapters.extend(
+        cartucho::CONSOLES
+            .iter()
+            .map(|c| Box::new(cartucho::Cartucho(c)) as Box<dyn GameAdapter>),
+    );
+    adapters
 }
 
 pub fn find(id: &str) -> Option<Box<dyn GameAdapter>> {

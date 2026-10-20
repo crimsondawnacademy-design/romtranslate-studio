@@ -94,9 +94,11 @@ Every real platform is **experimental**. Games use different engines, compressio
 | PlayStation 1 (ISO, raw BIN, `.cue`) | yes, per file | in place, sector EDC/ECC regenerated | a little, into the last sector's slack |
 | PlayStation 2 (including DVDs over 2 GiB) | yes, per file | in place | no |
 | PSP | yes, per file | in place | no |
+| Game Boy / Color, Mega Drive / Genesis (incl. Pico, 32X), Master System / Game Gear, WonderSwan / Color, Nintendo 64 (`.z64`) | yes, ASCII and Shift-JIS (new, checked with test files only) | in place, the cartridge checksum fixed when the original's was right | no |
+| PC Engine (HuCard), MSX cartridge, Famicom Disk System, Neo Geo Pocket | yes, ASCII and Shift-JIS (new, checked with test files only) | in place | no |
 | Wii, Wii U | detection only | no | no |
 
-"In place" means the translation uses the room of the original line. The full matrix, with what each column means and the known limits, is in [docs/DETALHES.md](docs/DETALHES.md) (Portuguese).
+"In place" means the translation uses the room of the original line. Which platforms the translation-request lists ask for, and what is still missing, is in [docs/PLATAFORMAS.md](docs/PLATAFORMAS.md) (Portuguese). The full matrix, with what each column means and the known limits, is in [docs/DETALHES.md](docs/DETALHES.md) (Portuguese).
 
 ## What it cannot do yet
 

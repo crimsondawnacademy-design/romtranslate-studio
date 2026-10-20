@@ -11,6 +11,15 @@ export type Platform =
   | "ps1"
   | "ps2"
   | "psp"
+  | "game_boy"
+  | "mega_drive"
+  | "master_system"
+  | "n64"
+  | "wonder_swan"
+  | "neo_geo_pocket"
+  | "fds"
+  | "msx"
+  | "pc_engine"
   | "synthetic"
   | "unknown";
 
@@ -275,6 +284,15 @@ export const PLATFORM_NAMES: Record<Platform, string> = {
   ps1: "PlayStation",
   ps2: "PlayStation 2",
   psp: "PSP",
+  game_boy: "Game Boy / Game Boy Color",
+  mega_drive: "Mega Drive / Genesis",
+  master_system: "Master System / Game Gear",
+  n64: "Nintendo 64",
+  wonder_swan: "WonderSwan / WonderSwan Color",
+  neo_geo_pocket: "Neo Geo Pocket",
+  fds: "Famicom Disk System",
+  msx: "MSX",
+  pc_engine: "PC Engine / TurboGrafx-16",
   synthetic: "Fixture sintética (RTSF)",
   unknown: "?",
 };

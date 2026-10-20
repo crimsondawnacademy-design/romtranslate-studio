@@ -94,9 +94,11 @@ Toda plataforma real é **experimental**. Jogos usam motores, compressões e tab
 | PlayStation 1 (ISO, BIN raw, `.cue`) | sim, por arquivo | no lugar, EDC/ECC do setor regenerado | pouco, na sobra do último setor |
 | PlayStation 2 (inclui DVD acima de 2 GiB) | sim, por arquivo | no lugar | não |
 | PSP | sim, por arquivo | no lugar | não |
+| Game Boy / Color, Mega Drive / Genesis (com Pico e 32X), Master System / Game Gear, WonderSwan / Color, Nintendo 64 (`.z64`) | sim, ASCII e Shift-JIS (novo, conferido só com arquivos de teste) | no lugar, com o checksum do cartucho refeito quando o do original estava certo | não |
+| PC Engine (HuCard), cartucho de MSX, Famicom Disk System, Neo Geo Pocket | sim, ASCII e Shift-JIS (novo, conferido só com arquivos de teste) | no lugar | não |
 | Wii, Wii U | só detecção | não | não |
 
-"No lugar" quer dizer que a tradução ocupa o espaço da fala original. A matriz completa, com o que cada coluna significa e os limites conhecidos, está em [docs/DETALHES.md](docs/DETALHES.md).
+"No lugar" quer dizer que a tradução ocupa o espaço da fala original. A matriz completa, com o que cada coluna significa e os limites conhecidos, está em [docs/DETALHES.md](docs/DETALHES.md). Quais plataformas as listas de pedidos de tradução pedem, e o que ainda falta, está em [docs/PLATAFORMAS.md](docs/PLATAFORMAS.md).
 
 ## O que ainda não faz
 
