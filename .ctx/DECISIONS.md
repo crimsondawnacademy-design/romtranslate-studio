@@ -2514,3 +2514,14 @@ português passa do inglês e erraria quase todo nome); fonte do app pro sinal
 
 **Alternativas descartadas:** um adapter por console copiando o NES (dez arquivos quase iguais); kuten de 16 bits em todo cartucho (padrão de um motor só, medido no GBA — entra quando um jogo real mostrar).
 
+
+## [2026-10-20] Disco sem ISO 9660 (PC Engine CD, PC-FX) = trilha como bloco; cue aceita o pregap no arquivo
+
+**Contexto:** PC Engine CD (77 pedidos) e PC-FX (18) quase nunca têm sistema de arquivos — o jogo lê a trilha por número de setor. E o Redump grava a trilha de dados deles num arquivo que começa pelos 3 s de pregap (INDEX 00 00:00:00, INDEX 01 00:03:00), layout que o `cue.rs` recusava.
+
+**Decisão:**
+- **Ficha por console, como `sega_disco`** (`adapters/nec_disco.rs`): a trilha é achada pela assinatura (setor 1 em 0x20 no PC Engine, setor 0 no PC-FX), os dois setores da partida ficam fora da extração, o resto é varrido como um bloco (ASCII + Shift-JIS) e regravado no lugar com `iso9660::apply_iso` (EDC/ECC refeito no raw).
+- **No BIN raw, frase que atravessa a divisa de setor fica de fora** (contada como descartada): o `TextEntry` tem um offset só e ali os dados não são contínuos.
+- **Cue: pregap gravado no começo do arquivo é aceito** (`CueResolution.pregap_sectors`). Quem precisa saber onde a trilha começa acha sozinho (o `nec_disco` procura a assinatura nos primeiros 750 setores); os adapters de PlayStation/Sega não procuram e não reconhecem esse layout, o que é inofensivo — nenhum disco deles vem assim do Redump.
+
+**Alternativas descartadas:** passar o pregap do cue para o adapter (o adapter só recebe bytes; mudaria a interface de todos); varrer setor a setor como o ISO 9660 (o filtro de ruído julga blocos de 64 KiB e perderia força com janelas de 2 KiB).

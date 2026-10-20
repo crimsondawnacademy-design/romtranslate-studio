@@ -43,7 +43,7 @@ pub fn inspect(path: &Path) -> Result<InspectionReport> {
         .filter(|r| r.confidence > 0.0)
         .collect();
     if let Some(cue) = cue {
-        let note = format!(
+        let mut note = format!(
             "cue sheet: track de dados {} ({}) em \"{}\"; {} track(s) de audio intactos",
             cue.data_track,
             cue.data_mode,
@@ -53,6 +53,12 @@ pub fn inspect(path: &Path) -> Result<InspectionReport> {
                 .unwrap_or_default(),
             cue.audio_tracks
         );
+        if cue.pregap_sectors > 0 {
+            note.push_str(&format!(
+                "; {} setores de pregap no comeco do arquivo",
+                cue.pregap_sectors
+            ));
+        }
         for r in &mut results {
             r.evidence.insert(0, note.clone());
         }

@@ -28,6 +28,8 @@ pub enum Platform {
     PcEngine,
     Saturn,
     MegaCd,
+    PcEngineCd,
+    PcFx,
     /// Fixture sintetica do proprio RomTranslate (formato RTSF, para demo/testes).
     Synthetic,
     Unknown,
@@ -57,6 +59,8 @@ impl Platform {
             Platform::PcEngine => "PC Engine / TurboGrafx-16",
             Platform::Saturn => "Sega Saturn",
             Platform::MegaCd => "Mega-CD / Sega CD",
+            Platform::PcEngineCd => "PC Engine CD-ROM² / TurboGrafx-CD",
+            Platform::PcFx => "PC-FX",
             Platform::Synthetic => "Fixture sintetica (RTSF)",
             Platform::Unknown => "Desconhecida",
         }

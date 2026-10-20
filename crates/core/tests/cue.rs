@@ -72,6 +72,36 @@ fn cue_resolves_to_data_track_and_project_uses_the_bin() {
     );
 }
 
+/// PC Engine CD como o Redump grava: trilha 1 de audio, trilha 2 de dados
+/// num arquivo proprio que comeca pelos 3 s de pregap (INDEX 00). O arquivo
+/// passa da janela do probe: a trilha e achada no arquivo inteiro.
+#[test]
+fn redump_pc_engine_cd_with_the_pregap_in_the_data_file_is_recognized() {
+    let tmp = TempDir::new("pce");
+    let data = tmp.0.join("Jogo (Japan) (Track 02).bin");
+    fs::write(&data, synth::make_pce_cd_bin(225)).unwrap();
+    let cue = tmp.0.join("Jogo (Japan).cue");
+    fs::write(
+        &cue,
+        "FILE \"Jogo (Japan) (Track 01).bin\" BINARY\n  TRACK 01 AUDIO\n    INDEX 01 00:00:00\nFILE \"Jogo (Japan) (Track 02).bin\" BINARY\n  TRACK 02 MODE1/2352\n    INDEX 00 00:00:00\n    INDEX 01 00:03:00\nFILE \"Jogo (Japan) (Track 03).bin\" BINARY\n  TRACK 03 AUDIO\n    INDEX 00 00:00:00\n    INDEX 01 00:02:00\n",
+    )
+    .unwrap();
+    let r = resolve_cue(&cue).unwrap();
+    assert_eq!((r.bin_path.clone(), r.data_track), (data, 2));
+    assert_eq!(r.pregap_sectors, 225);
+    let report = inspect(&cue).unwrap();
+    let best = report.best.expect("pc engine cd pelo cue");
+    assert_eq!(best.platform, Platform::PcEngineCd);
+    assert!(best.confidence >= 0.9);
+    assert!(
+        best.evidence
+            .iter()
+            .any(|e| e.contains("225 setores de pregap no comeco do arquivo")),
+        "{:?}",
+        best.evidence
+    );
+}
+
 #[test]
 fn multifile_cue_resolves_even_without_audio_files_on_disk() {
     let tmp = TempDir::new("multifile");
@@ -149,7 +179,7 @@ fn cue_errors_are_clear_and_non_cue_passes_through() {
 
     let offset = write_cue(
         "offset.cue",
-        "FILE \"a.bin\" BINARY\nTRACK 01 MODE2/2352\nINDEX 00 00:00:00\nINDEX 01 00:02:00\n",
+        "FILE \"a.bin\" BINARY\nTRACK 01 MODE2/2352\nINDEX 01 00:02:00\n",
     );
     assert!(resolve_cue(&offset)
         .unwrap_err()
