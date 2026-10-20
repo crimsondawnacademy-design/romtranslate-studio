@@ -2462,3 +2462,37 @@ Mother 3; teste fixa a saída). Til e circunflexo sobre bico de 1 ponto ainda
 encostam: não há lugar solto pra eles numa letra de 8 colunas.
 
 **Driver:** claude (pedido da sessão principal).
+
+## 2026-10-20 — Dragon Quest de DS: o formato de mensagens entra no app, a fonte ganha a letra que falta
+
+**Contexto:** pedido do Rhuan, "traduz esse game" (Dragon Quest V, DS, EUA). A
+varredura achava 100 mil sequências e nenhuma fala. O texto mora em 157
+arquivos MPT0 por idioma (6 pastas: DE, EN, ES, FR, IT, JA), e o jogo quebra a
+linha da fala sozinho.
+
+**Decisão:**
+- **Formato no adapter, não perfil.** MPT0 é estrutura (índice com tamanho e
+  posição), não banco de bytes com tabela; o mesmo formato vale pros outros
+  Dragon Quest de DS. Com MPT0 de texto no cartucho, a varredura do resto fica
+  de fora.
+- **Códigos em colchetes, pontas fora.** `@a`/`@b`/`@c0@`, os `%` e as quebras
+  viram `[..]` pra validação contar; os das pontas (e o espaço da ponta) não
+  vão pra IA — menos tokens e menos chance de erro.
+- **Teto só onde a tela tem borda fixa.** Nome de menu: o maior trecho que o
+  jogo mostra no mesmo lugar em qualquer idioma do cartucho (o francês e o
+  alemão passaram pelo controle de qualidade da editora). Fala: sem teto.
+- **Arquivo que cresce vai pro preenchimento.** O cartucho tinha 13,8 MiB de
+  0xFF depois do tamanho usado: o ROM fica em 128 MiB e o patch, pequeno.
+- **Letra de reserva desenhada com a própria fonte.** Reserva = desenho igual
+  ao de outra letra acentuada (76 caracteres no mesmo quadrado). A letra é a
+  base + o sinal de outra letra da fonte com o mesmo sinal (til do ñ/õ no a),
+  só pras letras que a tradução usa.
+- **Lote de até 100 no CLI** (a tela segue com o das configurações): no Codex,
+  3,8 M dos 5 M de tokens de envio do jogo são as instruções fixas de cada
+  chamada; com 50 seriam 7,2 M.
+
+**Alternativas descartadas:** perfil TOML com tabela (não descreve índice com
+tamanho); quebrar a fala no app (o jogo já quebra); teto pelo inglês (o
+português passa do inglês e erraria quase todo nome); fonte do app pro sinal
+(o traço da própria fonte combina com o resto do texto).
+
