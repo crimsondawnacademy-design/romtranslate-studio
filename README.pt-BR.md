@@ -97,6 +97,7 @@ Toda plataforma real é **experimental**. Jogos usam motores, compressões e tab
 | Game Boy / Color, Mega Drive / Genesis (com Pico e 32X), Master System / Game Gear, WonderSwan / Color, Nintendo 64 (`.z64`) | sim, ASCII e Shift-JIS (novo, conferido só com arquivos de teste) | no lugar, com o checksum do cartucho refeito quando o do original estava certo | não |
 | PC Engine (HuCard), cartucho de MSX, Famicom Disk System, Neo Geo Pocket | sim, ASCII e Shift-JIS (novo, conferido só com arquivos de teste) | no lugar | não |
 | Saturn, Mega-CD (ISO, BIN raw) | sim, por arquivo, ASCII e Shift-JIS (novo, conferido só com arquivos de teste) | no lugar, EDC/ECC do setor regenerado | não |
+| PC-9801/9821 (D88, FDI, HDI), PC-8801 (D88), Sharp X68000 (DIM, XDF, D88) | sim, por arquivo nos discos com FAT12/FAT16, o disco inteiro nos outros; ASCII e Shift-JIS (novo, conferido só com arquivos de teste) | no lugar; frase que atravessa dois setores do D88 é gravada nos dois pedaços | não |
 | Wii, Wii U | só detecção | não | não |
 
 "No lugar" quer dizer que a tradução ocupa o espaço da fala original. A matriz completa, com o que cada coluna significa e os limites conhecidos, está em [docs/DETALHES.md](docs/DETALHES.md). Quais plataformas as listas de pedidos de tradução pedem, e o que ainda falta, está em [docs/PLATAFORMAS.md](docs/PLATAFORMAS.md).

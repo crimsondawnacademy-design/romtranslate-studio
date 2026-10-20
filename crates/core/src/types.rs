@@ -28,6 +28,9 @@ pub enum Platform {
     PcEngine,
     Saturn,
     MegaCd,
+    Pc98,
+    Pc88,
+    X68000,
     /// Fixture sintetica do proprio RomTranslate (formato RTSF, para demo/testes).
     Synthetic,
     Unknown,
@@ -57,6 +60,9 @@ impl Platform {
             Platform::PcEngine => "PC Engine / TurboGrafx-16",
             Platform::Saturn => "Sega Saturn",
             Platform::MegaCd => "Mega-CD / Sega CD",
+            Platform::Pc98 => "PC-9801 / PC-9821",
+            Platform::Pc88 => "PC-8801",
+            Platform::X68000 => "Sharp X68000",
             Platform::Synthetic => "Fixture sintetica (RTSF)",
             Platform::Unknown => "Desconhecida",
         }

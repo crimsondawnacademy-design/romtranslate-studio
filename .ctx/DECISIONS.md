@@ -2514,3 +2514,11 @@ português passa do inglês e erraria quase todo nome); fonte do app pro sinal
 
 **Alternativas descartadas:** um adapter por console copiando o NES (dez arquivos quase iguais); kuten de 16 bits em todo cartucho (padrão de um motor só, medido no GBA — entra quando um jogo real mostrar).
 
+## 2026-10-20 — Computadores japoneses: posição lógica na entry, offset é o do arquivo
+
+**Contexto:** no D88 cada setor tem 16 bytes de cabeçalho na frente e os setores de uma trilha podem estar fora de ordem; no DIM trilha vazia some do arquivo. A frase do jogo segue a ordem lógica dos setores, não a do arquivo.
+
+**Decisão:** `adapters/computador.rs` monta cada disco como uma lista de pedaços (posição lógica → posição no arquivo). A varredura e o `plan_in_place` rodam na ordem lógica; a entry guarda `metadata.disk` e `metadata.logical`, e `offset` continua sendo o do arquivo (o primeiro byte), pra o resto do app (id `scan-<offset>`, `stray_ids`, banco) não mudar. A gravação volta pedaço por pedaço.
+
+**Alternativas descartadas:** varrer setor a setor com offset do arquivo, como o BIN 2352 do PS1 (perde toda frase que cruza setor — no PC-88, de 256 bytes, uma em cada seis ou sete); converter a imagem pra crua e de volta (o D88 guarda estado por setor, densidade, setor apagado, que a volta teria que refazer).
+

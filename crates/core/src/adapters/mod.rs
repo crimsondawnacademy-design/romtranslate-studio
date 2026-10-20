@@ -1,6 +1,7 @@
 pub(crate) mod bank;
 pub mod cartucho;
 pub(crate) mod cdrom;
+pub mod computador;
 pub mod gamecube;
 pub mod gba;
 pub(crate) mod inplace;
@@ -49,6 +50,13 @@ pub fn all() -> Vec<Box<dyn GameAdapter>> {
         Box::new(gba::GbaAdapter),
         Box::new(snes::SnesAdapter),
     ];
+    // Computadores japoneses: o formato da imagem (D88, FDI, HDI, DIM, XDF)
+    // fecha pelo tamanho, antes dos cartuchos que so a extensao reconhece.
+    adapters.extend(
+        computador::MACHINES
+            .iter()
+            .map(|m| Box::new(computador::Computador(m)) as Box<dyn GameAdapter>),
+    );
     // Cartuchos com cabecalho forte antes; MSX e PC Engine (extensao) por
     // ultimo, na ordem da ficha.
     adapters.extend(

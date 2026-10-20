@@ -624,6 +624,257 @@ pub fn make_mega_cd_iso() -> Vec<u8> {
     sega_disc(b"SEGADISCSYSTEM  ", "SEGADISCSYSTEM")
 }
 
+// --- Computadores japoneses (PC-98, PC-88, X68000) -------------------------
+
+pub const DISK_ASCII: &str = "PRESS RETURN KEY TO START";
+pub const DISK_JAPANESE: &str = "ぼうけんの たびに でかけよう！";
+pub const DISK_SUBDIR_LINE: &str = "THE KING AWAITS YOUR RETURN";
+
+/// `GAME.DAT` (a frase japonesa atravessa o fim do primeiro KiB, um setor do
+/// 2HD) e `MSG/TEXT.DAT`.
+fn disk_files() -> Vec<(&'static str, Vec<u8>)> {
+    let mut game = vec![0u8; 3000];
+    plant(&mut game, 0x40, DISK_ASCII.as_bytes());
+    plant_sjis(&mut game, 1012, DISK_JAPANESE);
+    let mut text = vec![0u8; 600];
+    plant(&mut text, 0x20, DISK_SUBDIR_LINE.as_bytes());
+    vec![("GAME.DAT", game), ("MSG/TEXT.DAT", text)]
+}
+
+#[derive(Clone, Copy)]
+struct FatShape {
+    bps: usize,
+    spc: usize,
+    root: usize,
+    total: usize,
+    spf: usize,
+    fat16: bool,
+}
+
+/// 2HD de 1.232 setores de 1 KiB (PC-98 e X68000).
+const FAT_2HD: FatShape = FatShape {
+    bps: 1024,
+    spc: 1,
+    root: 192,
+    total: 1232,
+    spf: 2,
+    fat16: false,
+};
+
+/// Setor de boot do MS-DOS: salto x86 (o BPB vai junto).
+const DOS_BOOT: &[u8] = b"\xEB\x3C\x90SYNTH   ";
+/// Setor de boot de 68000 (BRA), sem BPB do MS-DOS.
+const X68K_BOOT: &[u8] = b"\x60\x3CSYNTH68K";
+
+fn dirent(name: &str, attr: u8, cluster: usize, size: usize) -> [u8; 32] {
+    let mut e = [0u8; 32];
+    e[..11].fill(b' ');
+    let (base, ext) = name.split_once('.').unwrap_or((name, ""));
+    e[..base.len()].copy_from_slice(base.as_bytes());
+    e[8..8 + ext.len()].copy_from_slice(ext.as_bytes());
+    e[11] = attr;
+    e[0x1A..0x1C].copy_from_slice(&(cluster as u16).to_le_bytes());
+    e[0x1C..0x20].copy_from_slice(&(size as u32).to_le_bytes());
+    e
+}
+
+/// Volume FAT12/16 com 1 setor reservado e 2 FATs: `boot` no comeco (com
+/// 0xEB leva o BPB), os arquivos em clusters seguidos a partir do 2, a pasta
+/// de "PASTA/ARQ" num cluster com "." e "..".
+fn fat_volume(shape: FatShape, boot: &[u8], files: &[(&str, Vec<u8>)]) -> Vec<u8> {
+    let FatShape {
+        bps,
+        spc,
+        root,
+        total,
+        spf,
+        fat16,
+    } = shape;
+    let mut v = vec![0u8; total * bps];
+    plant(&mut v, 0, boot);
+    let media: u8 = if fat16 { 0xF8 } else { 0xFE };
+    if boot[0] == 0xEB {
+        plant(&mut v, 0x0B, &(bps as u16).to_le_bytes());
+        v[0x0D] = spc as u8;
+        plant(&mut v, 0x0E, &1u16.to_le_bytes());
+        v[0x10] = 2;
+        plant(&mut v, 0x11, &(root as u16).to_le_bytes());
+        plant(&mut v, 0x13, &(total as u16).to_le_bytes());
+        v[0x15] = media;
+        plant(&mut v, 0x16, &(spf as u16).to_le_bytes());
+    }
+    let fat_at = bps;
+    let root_at = fat_at + 2 * spf * bps;
+    let data_at = root_at + (root * 32).div_ceil(bps) * bps;
+    let cluster = spc * bps;
+    let end = if fat16 { 0xFFFF } else { 0xFFF };
+    let mut fat = vec![(end & !0xFF) | media as usize, end];
+    let alloc = |v: &mut Vec<u8>, fat: &mut Vec<usize>, bytes: &[u8]| {
+        let first = fat.len();
+        let n = bytes.len().div_ceil(cluster).max(1);
+        fat.extend((1..=n).map(|k| if k == n { end } else { first + k }));
+        plant(v, data_at + (first - 2) * cluster, bytes);
+        first
+    };
+    let mut listing = Vec::new();
+    let mut placed = Vec::new();
+    for (path, bytes) in files {
+        placed.push((*path, alloc(&mut v, &mut fat, bytes), bytes.len()));
+    }
+    for (path, c, size) in &placed {
+        if !path.contains('/') {
+            listing.push(dirent(path, 0x20, *c, *size));
+        }
+    }
+    let mut dirs: Vec<&str> = placed
+        .iter()
+        .filter_map(|p| Some(p.0.split_once('/')?.0))
+        .collect();
+    dirs.dedup();
+    for dir in dirs {
+        let me = fat.len();
+        let mut dot = dirent("X", 0x10, me, 0);
+        dot[0] = b'.';
+        let mut dotdot = dirent("XX", 0x10, 0, 0);
+        dotdot[..2].copy_from_slice(b"..");
+        let mut content = [dot, dotdot].concat();
+        for (path, c, size) in &placed {
+            if let Some(name) = path.strip_prefix(dir).and_then(|p| p.strip_prefix('/')) {
+                content.extend(dirent(name, 0x20, *c, *size));
+            }
+        }
+        listing.push(dirent(dir, 0x10, alloc(&mut v, &mut fat, &content), 0));
+    }
+    for (i, e) in listing.iter().enumerate() {
+        plant(&mut v, root_at + i * 32, e);
+    }
+    for base in [fat_at, fat_at + spf * bps] {
+        for (c, &val) in fat.iter().enumerate() {
+            if fat16 {
+                plant(&mut v, base + 2 * c, &(val as u16).to_le_bytes());
+                continue;
+            }
+            let at = base + c * 3 / 2;
+            if c % 2 == 0 {
+                v[at] = val as u8;
+                v[at + 1] = (v[at + 1] & 0xF0) | (val >> 8) as u8;
+            } else {
+                v[at] = (v[at] & 0x0F) | ((val as u8 & 0x0F) << 4);
+                v[at + 1] = (val >> 4) as u8;
+            }
+        }
+    }
+    v
+}
+
+/// D88: `logical` em trilhas de `spt` setores de `size` bytes, cada setor com
+/// o cabecalho de 16 bytes e os de uma trilha gravados intercalados (R 1, 3,
+/// 5... e depois 2, 4, 6...), como num disquete formatado assim.
+fn d88(logical: &[u8], media: u8, size: usize, spt: usize) -> Vec<u8> {
+    let track = spt * size;
+    let mut out = vec![0u8; 0x2B0];
+    plant(&mut out, 0, b"SYNTHDISK");
+    out[0x1B] = media;
+    for t in 0..logical.len() / track {
+        let at = out.len() as u32;
+        plant(&mut out, 0x20 + 4 * t, &at.to_le_bytes());
+        for r in (0..spt).step_by(2).chain((1..spt).step_by(2)) {
+            let mut header = [0u8; 16];
+            header[..4].copy_from_slice(&[
+                (t / 2) as u8,
+                (t % 2) as u8,
+                r as u8 + 1,
+                (size / 128).trailing_zeros() as u8,
+            ]);
+            header[4..6].copy_from_slice(&(spt as u16).to_le_bytes());
+            header[14..16].copy_from_slice(&(size as u16).to_le_bytes());
+            out.extend_from_slice(&header);
+            out.extend_from_slice(&logical[t * track + r * size..][..size]);
+        }
+    }
+    let total = out.len() as u32;
+    plant(&mut out, 0x1C, &total.to_le_bytes());
+    out
+}
+
+/// Cabecalho de 32 bytes do Anex86 (FDI/HDI) em 4 KiB, e a imagem crua.
+fn anex86(body: &[u8], sector: usize, spt: usize, heads: usize, cylinders: usize) -> Vec<u8> {
+    let mut out = vec![0u8; 4096];
+    for (i, v) in [0, 0, 4096, body.len(), sector, spt, heads, cylinders]
+        .into_iter()
+        .enumerate()
+    {
+        plant(&mut out, i * 4, &(v as u32).to_le_bytes());
+    }
+    out.extend_from_slice(body);
+    out
+}
+
+/// PC-98: disquete 2HD em D88 com MS-DOS (FAT12).
+pub fn make_pc98_d88() -> Vec<u8> {
+    d88(&fat_volume(FAT_2HD, DOS_BOOT, &disk_files()), 0x20, 1024, 8)
+}
+
+/// PC-98: o mesmo disquete em FDI do Anex86.
+pub fn make_pc98_fdi() -> Vec<u8> {
+    anex86(
+        &fat_volume(FAT_2HD, DOS_BOOT, &disk_files()),
+        1024,
+        8,
+        2,
+        77,
+    )
+}
+
+/// PC-98: HD em HDI do Anex86, 8 cabecas x 17 setores de 512. O cilindro 0
+/// e do IPL e da tabela de particoes; o volume FAT16 comeca no cilindro 1.
+pub fn make_pc98_hdi() -> Vec<u8> {
+    const CYLINDER: usize = 8 * 17 * 512;
+    let shape = FatShape {
+        bps: 512,
+        spc: 1,
+        root: 512,
+        total: 9000,
+        spf: 36,
+        fat16: true,
+    };
+    let volume = fat_volume(shape, DOS_BOOT, &disk_files());
+    let cylinders = (CYLINDER + volume.len()).div_ceil(CYLINDER);
+    let mut hd = vec![0u8; cylinders * CYLINDER];
+    plant(&mut hd, 0, b"\xEB\x0AIPL1");
+    plant(&mut hd, CYLINDER, &volume);
+    anex86(&hd, 512, 17, 8, cylinders)
+}
+
+/// PC-88: disquete 2D em D88 (40 cilindros, 2 lados, 16 setores de 256),
+/// sem FAT. A frase japonesa atravessa o fim de um setor.
+pub fn make_pc88_d88() -> Vec<u8> {
+    let mut v = vec![0u8; 80 * 16 * 256];
+    plant(&mut v, 0, &[0xF3, 0x31, 0x00, 0xC0]); // Z80: DI; LD SP,C000h
+    plant(&mut v, 0x1040, DISK_ASCII.as_bytes());
+    plant_sjis(&mut v, 0x2000 - 12, DISK_JAPANESE);
+    d88(&v, 0x00, 256, 16)
+}
+
+/// X68000: 2HD cru (XDF) com boot de 68000 e FAT12 do Human68k.
+pub fn make_x68k_xdf() -> Vec<u8> {
+    fat_volume(FAT_2HD, X68K_BOOT, &disk_files())
+}
+
+/// X68000: o mesmo disquete em DIM, com as trilhas 140 a 153 vazias e fora
+/// do arquivo (marca 0 no cabecalho).
+pub fn make_x68k_dim() -> Vec<u8> {
+    const TRACK: usize = 8 * 1024;
+    let volume = make_x68k_xdf();
+    let mut out = vec![0u8; 0x100];
+    plant(&mut out, 0xAB, b"DIFC HEADER  ");
+    for t in 0..140 {
+        out[1 + t] = 1;
+        out.extend_from_slice(&volume[t * TRACK..(t + 1) * TRACK]);
+    }
+    out
+}
+
 /// PARAM.SFO minimo (psdevwiki): magic \\0PSF + index de entries de 16 bytes.
 fn build_sfo(pairs: &[(&str, &str)]) -> Vec<u8> {
     let mut keys = Vec::new();

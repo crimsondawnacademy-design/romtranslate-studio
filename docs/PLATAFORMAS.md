@@ -17,7 +17,7 @@ Quase todos são **japoneses que nunca saíram traduzidos** — é esse o gargal
 | Nintendo DS | 106 | extrai, arquivo cresce; MPT0 (Dragon Quest) | UTF-16, UTF-8 |
 | Game Boy / Color | 104 | **novo (20/10)**: extrai, checksum refeito | Shift-JIS; kana por tabela/perfil |
 | Game Boy Advance | 98 | extrai, ponteiros, LZ77, bancos | Shift-JIS e 16 bits na ordem JIS; fonte ganha acento |
-| PC-9801/9821 | 80 | — | — |
+| PC-9801/9821 | 80 | **novo (20/10)**: D88, FDI, HDI; por arquivo com FAT12/FAT16, regrava no lugar | Shift-JIS |
 | PC Engine CD | 77 | — | — |
 | Mega Drive / Genesis (+ Pico 24) | 91 | **novo (20/10)**: extrai, checksum refeito | Shift-JIS; kana por tabela/perfil |
 | PC (Windows/DOS/Mac) | 65 | fora do escopo (não é ROM) | — |
@@ -31,9 +31,9 @@ Quase todos são **japoneses que nunca saíram traduzidos** — é esse o gargal
 | PC Engine (HuCard) | 29 | **novo (20/10)**: extrai (reconhece pela extensão) | Shift-JIS; tabela/perfil |
 | Wii | 28 | só detecta | — |
 | N64 | 26 | **novo (20/10)**: extrai, CRC refeito (.z64) | Shift-JIS; tabela/perfil |
-| X68000 | 26 | — | — |
+| X68000 | 26 | **novo (20/10)**: DIM, XDF, D88; por arquivo na FAT do Human68k, regrava no lugar | Shift-JIS |
 | GameCube | 25 | extrai, regrava no lugar | Shift-JIS |
-| PC-8801 | 23 | — | — |
+| PC-8801 | 23 | **novo (20/10)**: D88; disco inteiro como um bloco (sem FAT), regrava no lugar | Shift-JIS de 2 bytes; kana de meia largura não |
 | MSX | 21 | **novo (20/10)**: cartucho | Shift-JIS; tabela/perfil |
 | PC-FX | 18 | — | — |
 | FM Towns | 16 | — | — |
@@ -46,7 +46,7 @@ Quase todos são **japoneses que nunca saíram traduzidos** — é esse o gargal
 | Neo Geo Pocket | 3 | **novo (20/10)**: extrai | tabela/perfil |
 | Outras (Amiga, Atari ST, CD-i, Neo Geo, celular) | 12 | — | — |
 
-Antes de 20/10 o app cobria ~1.220 dos ~2.300 pedidos (53%). Com os cartuchos novos, o Saturn e o Mega-CD, ~1.730 (75%) — **todos experimentais**: o que entrou em 20/10 foi conferido só com arquivos sintéticos; nenhum jogo real dessas plataformas passou pelo app ainda.
+Antes de 20/10 o app cobria ~1.220 dos ~2.300 pedidos (53%). Com os cartuchos novos, o Saturn e o Mega-CD, ~1.730 (75%); com PC-98, PC-88 e X68000, ~1.860 (81%) — **todos experimentais**: o que entrou em 20/10 foi conferido só com arquivos sintéticos; nenhum jogo real dessas plataformas passou pelo app ainda.
 
 ## O gargalo do japonês, por etapa
 
@@ -59,6 +59,6 @@ Antes de 20/10 o app cobria ~1.220 dos ~2.300 pedidos (53%). Com os cartuchos no
 
 1. **Jogo real** de cada plataforma nova pelo app (detecção, extração, regravação, emulador) — falta o arquivo.
 2. **PC Engine CD (77) e PC-FX (18):** trilha de dados crua, sem ISO 9660 na maioria; perfil do jogo por cima da trilha.
-3. **PC-9801 (80), PC-8801 (23), X68000 (26):** imagens de disquete e HD (D88, FDI, HDI, DIM, XDF) com FAT12 por dentro.
+3. **PC-98, PC-88 e X68000, o que ficou de fora em 20/10:** o kana de meia largura (1 byte, comum no PC-88) não é lido como japonês; o sistema de arquivos do N88-BASIC não é lido (o disco vira um bloco); num HD do PC-98 só a primeira partição FAT; nome longo do Human68k cortado em 8+3; frase que atravessa dois clusters fora de ordem num arquivo fragmentado não sai. Como o app acha onde os setores moram está em `crates/core/src/adapters/computador.rs`.
 4. **Dreamcast (48):** GDI/CDI, ISO 9660 na área de alta densidade.
 5. **Plataformas criptografadas (3DS, PS3, Vita, Xbox 360, Wii U — 149):** o app não leva chave nenhuma. Só dá para trabalhar sobre arquivos que a pessoa já decriptou do próprio console.

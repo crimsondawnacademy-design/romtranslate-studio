@@ -22,6 +22,9 @@ export type Platform =
   | "pc_engine"
   | "saturn"
   | "mega_cd"
+  | "pc98"
+  | "pc88"
+  | "x68000"
   | "synthetic"
   | "unknown";
 
@@ -297,6 +300,9 @@ export const PLATFORM_NAMES: Record<Platform, string> = {
   pc_engine: "PC Engine / TurboGrafx-16",
   saturn: "Sega Saturn",
   mega_cd: "Mega-CD / Sega CD",
+  pc98: "PC-9801 / PC-9821",
+  pc88: "PC-8801",
+  x68000: "Sharp X68000",
   synthetic: "Fixture sintética (RTSF)",
   unknown: "?",
 };
