@@ -83,6 +83,13 @@ de cancelar ou de a IA parar, o botão vira "Retomar" e manda só o que falta),
 das que não cabem ficam no painel "Provedor de IA" (configuração do app,
 que a CLI também lê).
 
+**Acento depois.** Se a tradução foi feita antes de a fonte do jogo ganhar as
+letras acentuadas (a extração desenha as que faltam em códigos vazios da
+fonte), `romtranslate acentuar jogo.rtsproj` manda à IA a tradução pronta e
+grava só a resposta que, sem os acentos, é idêntica à de antes: nenhuma
+palavra, código ou linha muda. A frase com erro de grafia de propósito
+costuma ser recusada (a IA "corrige"): acentue essas à mão, por TSV.
+
 Regras que a validação cobra: os códigos do jogo (`[FFxx]`, `[FFxx:pppp]`)
 ficam todos; letra acentuada só onde a tabela a tem — com a fonte entendida
 (seção 1), o pedido à IA lista as letras e o TSV pode ter acento; a letra
