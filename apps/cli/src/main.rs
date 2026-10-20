@@ -624,7 +624,10 @@ fn run(cli: Cli) -> Result<Output, Failure> {
         } => {
             let cfg_dir = config_dir()?;
             let cfg = settings::load_settings(&cfg_dir);
-            let mut opts = options(load(&project)?, batch.unwrap_or(100).clamp(1, 200));
+            let mut opts = options(load(&project)?, 50);
+            // A acentuacao devolve o mesmo texto: lote maior que o da traducao
+            // (`options` corta em 50) e menos chamadas.
+            opts.batch_size = batch.unwrap_or(100).clamp(1, 200);
             opts.parallel = parallel.unwrap_or(cfg.parallel);
             accent(&project, &opts, &cfg, &cfg_dir)
         }
