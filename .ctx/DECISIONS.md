@@ -2532,3 +2532,19 @@ português passa do inglês e erraria quase todo nome); fonte do app pro sinal
 - **Cue: pregap gravado no começo do arquivo é aceito** (`CueResolution.pregap_sectors`). Quem precisa saber onde a trilha começa acha sozinho (o `nec_disco` procura a assinatura nos primeiros 750 setores); os adapters de PlayStation/Sega não procuram e não reconhecem esse layout, o que é inofensivo — nenhum disco deles vem assim do Redump.
 
 **Alternativas descartadas:** passar o pregap do cue para o adapter (o adapter só recebe bytes; mudaria a interface de todos); varrer setor a setor como o ISO 9660 (o filtro de ruído julga blocos de 64 KiB e perderia força com janelas de 2 KiB).
+
+## [2026-10-20] Pares de letras (DTE de fonte): só onde cabem em todas as fontes, com a letra da própria fonte
+
+**Contexto:** japonês diz em 1 código de 2 bytes o que o português diz em 2–3 letras. O feedback do Tokimeki Memorial sugeria ~300 pares + maiúsculas + 52 com espaço. No Mother 3, duas fontes dividem a ordem (16x10 e 8x8): o código do par aparece nas duas, e a grande só tem 9 colunas de tinta (o jogo anda 10 pontos, não 16).
+
+**Decisão:**
+- **Lista pela frequência no texto já traduzido** (≥20 usos, até 640), maiúscula e espaço contados como vierem; guardada em `tables/jis16.pares.json`. Os códigos são escolhidos pela extração (como as letras acentuadas), não guardados: kanji que nenhum texto achado no original usa, ou desenho vazio, até `kuten::reach`.
+- **Par só entra se cabe em TODAS as fontes da mesma ordem** — em vez de "pares só nas mensagens da fonte grande", que exigiria saber qual texto usa qual fonte. Na pequena cabem os com espaço e os de letra estreita.
+- **Desenho com as letras da própria fonte, tirando só coluna repetida.** Sem limiar fixo de largura (os ~12 pontos sugeridos): a medida é se as duas letras cabem na caixa de tinta.
+- **Codificação gulosa mantida:** com pares de 2 letras ela já é ótima (escolha de intervalos de mesmo tamanho). Exceções: letra sozinha depois de comando com parâmetro e em trecho alinhado com 2 espaços.
+- **Teto da IA pela taxa medida** (`# pares: L letras em C codigos`), não pelo pior caso; a validação confere e a repergunta escala pelo que a resposta ocupou.
+
+**Alternativas descartadas:** remoção de coluna "que menos muda" (v, x, m ilegíveis a 4 pontos); desligar os pares quando duas fontes dividem a ordem (o Mother 3 ficaria sem nada); programação dinâmica (sem ganho); lista 3× maior (<1% a mais, 3× mais kanji trocados).
+
+**Driver:** claude (ponytail).
+

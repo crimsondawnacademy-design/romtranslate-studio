@@ -138,6 +138,12 @@ pub struct ExtractHints {
     /// Idioma de origem do projeto (`en-US`): no cartucho com uma pasta por
     /// idioma, e a que se traduz.
     pub source_language: Option<String>,
+    /// Pares de letras pra desenhar na fonte do jogo, o mais usado primeiro
+    /// (`crate::pairs`, `tables/jis16.pares.json`).
+    pub pairs: Vec<String>,
+    /// Pares ja desenhados no arquivo lido, codigo -> letras: a copia de
+    /// trabalho relida pela auditoria (`crate::pairs::drawn`).
+    pub drawn_pairs: std::collections::HashMap<u16, String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

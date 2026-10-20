@@ -35,6 +35,8 @@ pub struct ReinsertOutcome {
     pub pictures: crate::images::Applied,
     /// Letras acentuadas desenhadas na fonte do jogo (`images::letters`).
     pub letters: usize,
+    /// Pares de letras desenhados na fonte do jogo (`images::letters`).
+    pub pairs: usize,
 }
 
 /// O que fazer com a traducao que a validacao reprovou.
@@ -178,7 +180,7 @@ fn reinsert(
         })?),
     };
     let mut drawn = crate::images::Applied::default();
-    let mut letters = 0;
+    let (mut letters, mut pairs) = (0, 0);
 
     encode_table_entries(project_dir, &mut entries)?;
 
@@ -236,8 +238,8 @@ fn reinsert(
                 applied.report.packed_left_out
             )));
         }
-        // A letra acentuada que a tabela do japones de 16 bits poe num codigo
-        // vazio da fonte e desenhada nela.
+        // A letra acentuada e o par de letras que a tabela do japones de 16
+        // bits poe em codigos novos da fonte sao desenhados nela.
         if project_dir
             .join(crate::tbl::TABLES_DIR)
             .join(format!("{}.tbl", crate::kuten::TABLE_ID))
@@ -245,7 +247,10 @@ fn reinsert(
         {
             let mut tables = ProjectTables::new(project_dir);
             let table = tables.get(crate::kuten::TABLE_ID)?;
-            letters += crate::images::letters::draw(&original, &mut applied.bytes, table);
+            let (drawn_letters, drawn_pairs) =
+                crate::images::letters::draw(&original, &mut applied.bytes, table);
+            letters += drawn_letters;
+            pairs = drawn_pairs;
         }
         drawn = crate::images::apply(&mut applied.bytes, &pictures);
         if policy == ErrorPolicy::Block && !drawn.left_out.is_empty() {
@@ -303,6 +308,7 @@ fn reinsert(
         skipped_errors,
         pictures: drawn,
         letters,
+        pairs,
     })
 }
 
@@ -317,13 +323,13 @@ fn encode_table_entries(project_dir: &Path, entries: &mut [TextEntry]) -> Result
         else {
             continue;
         };
+        let table = tables.get(id)?;
         // Mensagem de banco com a caixa medida: as linhas sao quebradas aqui.
         let text = match crate::adapters::bank::Layout::of(entry) {
-            Some(layout) => std::borrow::Cow::Owned(layout.wrap(text).0),
+            Some(layout) => std::borrow::Cow::Owned(layout.wrap(text, Some(table)).0),
             None => std::borrow::Cow::Borrowed(text.as_str()),
         };
-        let bytes = tables
-            .get(id)?
+        let bytes = table
             .encode_slot_with(
                 &text,
                 entry.original_bytes.len(),

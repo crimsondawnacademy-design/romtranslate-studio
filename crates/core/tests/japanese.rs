@@ -645,9 +645,12 @@ mod jis16 {
             assert!(out.tables.is_empty());
             assert!(!out.entries.iter().any(|e| e.encoding == table_encoding()));
         }
-        assert!(
-            kuten::extract(&synth::make_gba_rom_japanese(), &Default::default(), &[]).is_none()
-        );
+        assert!(kuten::extract(
+            &synth::make_gba_rom_japanese(),
+            &Default::default(),
+            &Default::default()
+        )
+        .is_none());
     }
 
     #[test]
@@ -948,6 +951,165 @@ fn accented_letters_are_drawn_in_the_game_font_and_written_with_it() {
     // O desenho vazio do espaco do jogo continua vazio.
     let space = synth::JIS16_SPACE as usize;
     assert!(blank(&glyph(&rom, 0, space)) && blank(&glyph(&working, 0, space)));
+}
+
+/// Colunas de tinta do desenho `k` da fonte `font` de
+/// `make_gba_rom_jis16_wide_font` (2 bytes por linha; a primeira com o bit
+/// mais alto a esquerda, a segunda com o mais baixo), da esquerda pra direita:
+/// o bit `y` de cada uma e a linha `y`.
+fn wide_columns(rom: &[u8], font: usize, k: usize) -> Vec<u32> {
+    let (at, stride) = synth::JIS16_WIDE_FONTS[font];
+    let glyph = &rom[at + k * stride + 2..at + (k + 1) * stride];
+    let ink = |x: usize, y: usize| {
+        let byte = glyph[y * 2 + x / 8];
+        let bit = if font == 0 { 7 - x % 8 } else { x % 8 };
+        byte >> bit & 1 == 1
+    };
+    let columns: Vec<u32> = (0..16)
+        .map(|x| (0..10).fold(0, |col, y| col | u32::from(ink(x, y)) << y))
+        .collect();
+    let first = columns.iter().position(|&col| col != 0);
+    let last = columns.iter().rposition(|&col| col != 0);
+    match (first, last) {
+        (Some(first), Some(last)) => columns[first..=last].to_vec(),
+        _ => Vec::new(),
+    }
+}
+
+/// Sem as colunas repetidas seguidas: o desenho da letra, so mais estreito.
+fn without_repeats(mut columns: Vec<u32>) -> Vec<u32> {
+    columns.dedup();
+    columns
+}
+
+/// Pares de letras na fonte do jogo (`pairs`): a lista sai do texto ja
+/// traduzido, a extracao poe cada par num codigo de kanji que nenhum texto do
+/// jogo usa, a frase que nao cabia no espaco do japones passa a caber, a
+/// reinsercao desenha o par nas duas fontes com as letras da propria fonte
+/// lado a lado.
+#[test]
+fn letter_pairs_fit_more_text_and_are_drawn_with_the_letters_of_the_font() {
+    use romtranslate_core::kuten;
+    use romtranslate_core::reinsert::{reinsert_project_with, ErrorPolicy};
+    use romtranslate_core::tbl::TblTable;
+    let tmp = TempDir::new("pairs");
+    let rom = synth::make_gba_rom_jis16_wide_font();
+    let source = tmp.0.join("game.gba");
+    fs::write(&source, &rom).unwrap();
+    let dir = tmp.0.join("game.rtsproj");
+    create_project(CreateProjectArgs {
+        source_path: source.clone(),
+        platform: Platform::Gba,
+        adapter_id: GbaAdapter.id().to_string(),
+        source_language: Some("ja".to_string()),
+        target_language: "pt-BR".to_string(),
+        project_dir: dir.clone(),
+    })
+    .unwrap();
+    extract_project(&dir).unwrap();
+    let load_table = || TblTable::load(&dir.join("tables").join("jis16.tbl")).unwrap();
+    assert!(!load_table().has_pairs(), "sem lista, nenhum par");
+
+    // 31 letras pra no maximo 26 codigos: sem pares, nao cabe em nenhuma.
+    let text = "◆Gente da vila[FF01]trabalha de dia.";
+    let messages: Vec<String> = (0..20).map(synth::jis16_message).collect();
+    let pairs: Vec<(&str, &str)> = messages.iter().map(|m| (m.as_str(), text)).collect();
+    set_translations(&dir, &pairs);
+    let overflow = |dir: &Path| {
+        validate_project_db(&mut ProjectDb::open(dir).unwrap())
+            .unwrap()
+            .issues
+            .iter()
+            .filter(|i| i.kind == IssueKind::ByteOverflow && i.severity == Severity::Error)
+            .count()
+    };
+    assert_eq!(overflow(&dir), 20);
+
+    let outcome = romtranslate_core::pairs::make(&dir).unwrap();
+    assert!(outcome.in_table > 0 && outcome.in_table <= outcome.wanted);
+    assert!(outcome.with.bytes < outcome.without.bytes);
+    assert!(outcome.rate_x100 > 100);
+    let table = load_table();
+    assert!(table.has_pairs());
+    assert_eq!(overflow(&dir), 0, "com os pares cabe");
+    // A leitura do original nao muda: nenhum texto do jogo usa codigo de par.
+    let entries = ProjectDb::open(&dir).unwrap().load_entries().unwrap();
+    for (i, message) in messages.iter().enumerate() {
+        assert!(entries.iter().any(|e| &e.source_text == message), "{i}");
+    }
+    // O par "de" mora num codigo de kanji (um quadrado na fonte inventada).
+    let de = u16::from_le_bytes(table.encode("de").unwrap().try_into().unwrap()) as usize;
+    assert!(kuten::decode(de as u16).is_none_or(romtranslate_core::sjis::is_kanji));
+    assert!(
+        !wide_columns(&rom, 0, de).is_empty(),
+        "o original tinha o kanji"
+    );
+
+    let outcome = reinsert_project_with(&dir, ErrorPolicy::Block).unwrap();
+    assert_eq!(outcome.pairs, romtranslate_core::pairs::drawn(&table).len());
+    assert_eq!(fs::read(&source).unwrap(), rom, "o original nao muda");
+    let working = fs::read(&outcome.working_path).unwrap();
+    let written = table.encode(text).unwrap();
+    assert!(working.windows(written.len()).any(|w| w == written));
+    // Nas duas fontes, "de" e o "ｄ" e o "ｅ" da propria fonte, so mais
+    // estreitos, com uma coluna vazia entre eles.
+    let letter = |font: usize, c: char| {
+        let k = kuten::encode(c).unwrap() as usize;
+        without_repeats(wide_columns(&rom, font, k))
+    };
+    for font in 0..2 {
+        let drawn = wide_columns(&working, font, de);
+        let gap = drawn.iter().position(|&col| col == 0).unwrap();
+        assert_eq!(without_repeats(drawn[..gap].to_vec()), letter(font, 'ｄ'));
+        assert_eq!(
+            without_repeats(drawn[gap + 1..].to_vec()),
+            letter(font, 'ｅ')
+        );
+        assert!(drawn.len() <= 10, "dentro da caixa de tinta da fonte");
+    }
+}
+
+/// A fonte pequena, na mesma ordem da grande, nao comporta 2 letras (a de
+/// 8x8 do jogo medido): o codigo do par apareceria nela, entao so entra o par
+/// que cabe nas duas — o de letra com espaco ou com ponto.
+#[test]
+fn a_font_too_narrow_for_two_letters_keeps_only_the_pairs_with_a_space_or_a_dot() {
+    let tmp = TempDir::new("pairs-narrow");
+    let rom = synth::make_gba_rom_jis16_wide_and_narrow_font();
+    let source = tmp.0.join("game.gba");
+    fs::write(&source, &rom).unwrap();
+    let dir = tmp.0.join("game.rtsproj");
+    create_project(CreateProjectArgs {
+        source_path: source,
+        platform: Platform::Gba,
+        adapter_id: GbaAdapter.id().to_string(),
+        source_language: Some("ja".to_string()),
+        target_language: "pt-BR".to_string(),
+        project_dir: dir.clone(),
+    })
+    .unwrap();
+    extract_project(&dir).unwrap();
+    let messages: Vec<String> = (0..20).map(synth::jis16_message).collect();
+    let pairs: Vec<(&str, &str)> = messages
+        .iter()
+        .map(|m| (m.as_str(), "◆Gente da vila[FF01]de dia."))
+        .collect();
+    set_translations(&dir, &pairs);
+    let outcome = romtranslate_core::pairs::make(&dir).unwrap();
+    let wanted = romtranslate_core::pairs::wanted(&dir).unwrap();
+    assert!(wanted.iter().any(|p| p == "de"));
+    let table =
+        romtranslate_core::tbl::TblTable::load(&dir.join("tables").join("jis16.tbl")).unwrap();
+    let drawn = romtranslate_core::pairs::drawn(&table);
+    assert!(outcome.in_table > 0 && drawn.len() == outcome.in_table);
+    // Duas letras nao cabem na pequena: "de" fica de fora; "a ", "a." entram.
+    assert!(
+        drawn
+            .values()
+            .all(|pair| !pair.chars().all(char::is_alphabetic)),
+        "{drawn:?}"
+    );
+    assert!(drawn.values().any(|pair| pair == "a "));
 }
 
 mod bank {

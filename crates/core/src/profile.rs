@@ -320,7 +320,7 @@ fn lines<'a>(text: &'a str, newline: &str) -> impl Iterator<Item = usize> + 'a {
     text.split(newline.as_str())
         // A mesma conta da validacao: o trecho entre dois codigos, espaco
         // do fim incluso.
-        .map(crate::adapters::bank::longest_line)
+        .map(|line| crate::adapters::bank::longest_line(line, None))
         .collect::<Vec<_>>()
         .into_iter()
 }

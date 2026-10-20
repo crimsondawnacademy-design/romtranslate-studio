@@ -37,6 +37,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::adapter::ApplyReport;
 use crate::error::{CoreError, Result};
+use crate::tbl::TblTable;
 use crate::types::TextEntry;
 
 const END: u16 = 0xFFFF;
@@ -599,12 +600,12 @@ pub(crate) fn is_banked(entry: &TextEntry) -> bool {
 
 /// Uma peca do texto de uma entry: trecho de texto ou codigo em colchetes.
 #[derive(Debug, Clone, Copy, PartialEq)]
-enum Piece<'a> {
+pub(crate) enum Piece<'a> {
     Text(&'a str),
     Code(&'a str),
 }
 
-fn pieces(text: &str) -> Vec<Piece<'_>> {
+pub(crate) fn pieces(text: &str) -> Vec<Piece<'_>> {
     let mut out = Vec::new();
     let mut at = 0;
     while at < text.len() {
@@ -639,12 +640,21 @@ fn is_mark(c: char) -> bool {
     matches!(c, '\u{2190}'..='\u{27BF}' | '\u{203B}')
 }
 
-/// O tamanho do trecho mais longo de `text` entre dois codigos em colchetes.
-pub(crate) fn longest_line(text: &str) -> usize {
+/// Quantos codigos `text` ocupa na linha: os da tabela (2 letras num par,
+/// `TblTable::cells`) ou, sem ela, um por caractere.
+fn cells(text: &str, table: Option<&TblTable>) -> usize {
+    table
+        .and_then(|table| table.cells(text))
+        .unwrap_or_else(|| text.chars().count())
+}
+
+/// O tamanho do trecho mais longo de `text` entre dois codigos em colchetes,
+/// em codigos (`cells`).
+pub(crate) fn longest_line(text: &str, table: Option<&TblTable>) -> usize {
     pieces(text)
         .iter()
         .map(|piece| match piece {
-            Piece::Text(text) => text.chars().count(),
+            Piece::Text(text) => cells(text, table),
             Piece::Code(_) => 0,
         })
         .max()
@@ -950,9 +960,15 @@ impl Layout {
     /// ponytail: a conta comeca do zero no inicio da entry; mensagem que abre
     /// com um comando que escreve (um nome) antes do texto tem a primeira
     /// linha contada a menos. Corrigir = levar a largura desse comando pra ca.
-    pub(crate) fn wrap(&self, text: &str) -> (String, usize) {
+    ///
+    /// A largura da caixa e em codigos: com `table`, cada palavra conta os
+    /// codigos que ocupa (um par de letras e um so, `TblTable::cells`). O
+    /// espaco entre as palavras conta inteiro, mesmo quando entra num par
+    /// ("a ") — a linha sai do tamanho medido ou menor.
+    pub(crate) fn wrap(&self, text: &str, table: Option<&TblTable>) -> (String, usize) {
         let mut line = Line {
             layout: self,
+            table,
             out: String::with_capacity(text.len() + 16),
             col: 0,
             before: self.lead,
@@ -962,29 +978,37 @@ impl Layout {
             gap: 0,
             word: String::new(),
             word_width: 0,
+            run: String::new(),
+            after_params: false,
+            aligned: false,
         };
         for piece in pieces(text) {
             match piece {
                 Piece::Text(text) => {
+                    // Trecho alinhado com espacos: as letras vao sozinhas.
+                    line.aligned = text.contains("  ");
                     for c in text.chars() {
                         if c == ' ' {
                             line.place();
                             line.gap += 1;
                         } else {
                             line.word.push(c);
-                            line.word_width += 1;
+                            line.run.push(c);
                         }
                     }
                 }
                 Piece::Code(code) => match self.inline(code) {
                     Some(width) => {
+                        line.measure();
                         line.word.push_str(code);
                         line.word_width += width;
+                        line.after_params = code.contains(':');
                     }
                     None => {
                         line.place();
                         line.out.push_str(code);
                         (line.fresh, line.lead, line.gap) = (true, false, 0);
+                        line.after_params = code.contains(':');
                     }
                 },
             }
@@ -997,6 +1021,7 @@ impl Layout {
 /// A linha que `Layout::wrap` esta montando.
 struct Line<'a> {
     layout: &'a Layout,
+    table: Option<&'a TblTable>,
     out: String,
     /// Largura ja usada na linha, e a maior que uma linha chegou a ter.
     col: usize,
@@ -1012,11 +1037,31 @@ struct Line<'a> {
     gap: usize,
     word: String,
     word_width: usize,
+    /// As letras da palavra desde o ultimo codigo dela, ainda nao medidas.
+    run: String,
+    /// O codigo antes de `run` leva parametro: a primeira letra vai sozinha
+    /// (`TblTable::encode`).
+    after_params: bool,
+    /// O trecho de `run` tem 2 espacos seguidos: todas vao sozinhas.
+    aligned: bool,
 }
 
 impl Line<'_> {
+    /// Soma `run` na largura da palavra.
+    fn measure(&mut self) {
+        let run = std::mem::take(&mut self.run);
+        let mut chars = run.chars();
+        let table = self.table.filter(|_| !self.aligned);
+        self.word_width += match (self.after_params, chars.next()) {
+            (true, Some(_)) => 1 + cells(chars.as_str(), table),
+            _ => cells(&run, table),
+        };
+        self.after_params = false;
+    }
+
     /// Poe a palavra que chegou na linha, ou na de baixo se ela nao cabe.
     fn place(&mut self) {
+        self.measure();
         if self.word.is_empty() {
             return;
         }
@@ -1779,9 +1824,9 @@ mod tests {
 
     #[test]
     fn the_longest_line_ignores_the_codes() {
-        assert_eq!(longest_line("abc[FF01]defgh[FF03][FF00]ij"), 5);
-        assert_eq!(longest_line("[FF01]"), 0);
-        assert_eq!(longest_line("sem codigo"), 10);
+        assert_eq!(longest_line("abc[FF01]defgh[FF03][FF00]ij", None), 5);
+        assert_eq!(longest_line("[FF01]", None), 0);
+        assert_eq!(longest_line("sem codigo", None), 10);
     }
 
     fn layout() -> Layout {
@@ -1821,7 +1866,10 @@ mod tests {
         let layout = layout();
         // Com marca: as linhas de baixo levam o recuo. Depois do codigo que
         // fecha a linha a conta recomeca, e o espaco do comeco fica.
-        let (text, widest) = layout.wrap("◆um dois tres quatro cinco[FF03][FF00] seis sete oito");
+        let (text, widest) = layout.wrap(
+            "◆um dois tres quatro cinco[FF03][FF00] seis sete oito",
+            None,
+        );
         assert_eq!(
             text,
             "◆um dois[FF01] tres quatro[FF01] cinco[FF03][FF00] seis sete[FF01] oito"
@@ -1829,26 +1877,26 @@ mod tests {
         assert_eq!(widest, 12);
         // Sem marca nem espaco no comeco, sem recuo.
         assert_eq!(
-            layout.wrap("um dois tres quatro").0,
+            layout.wrap("um dois tres quatro", None).0,
             "um dois tres[FF01]quatro"
         );
         // O codigo que escreve um nome ocupa a largura dele; a pausa, nada.
         assert_eq!(
-            layout.wrap("◆oi [FF23:0002], tudo[FF04:001E] bem?").0,
+            layout.wrap("◆oi [FF23:0002], tudo[FF04:001E] bem?", None).0,
             "◆oi [FF23:0002],[FF01] tudo[FF04:001E] bem?"
         );
         // A quebra que a traducao ja tem fica, com o que vem depois dela; a
         // palavra maior que a caixa fica inteira e aparece na conta.
         assert_eq!(
-            layout.wrap("◆um[FF01] dois tres quatro[FF01]cinco").0,
+            layout.wrap("◆um[FF01] dois tres quatro[FF01]cinco", None).0,
             "◆um[FF01] dois tres[FF01] quatro[FF01]cinco"
         );
-        let (text, widest) = layout.wrap("◆paralelepipedos sim");
+        let (text, widest) = layout.wrap("◆paralelepipedos sim", None);
         assert_eq!((text.as_str(), widest), ("◆paralelepipedos[FF01] sim", 16));
-        assert_eq!(layout.wrap("").0, "");
+        assert_eq!(layout.wrap("", None).0, "");
         // A fila de espacos entre as opcoes de um menu fica, se cabe.
         assert_eq!(
-            layout.wrap("[FF04]Sim   [FF04]Nao").0,
+            layout.wrap("[FF04]Sim   [FF04]Nao", None).0,
             "[FF04]Sim   [FF04]Nao"
         );
         // O nome que o jogo escreve antes da entry ocupa a primeira linha.
@@ -1858,9 +1906,37 @@ mod tests {
             ..layout
         };
         assert_eq!(
-            named.wrap(" levou um dano fatal!").0,
+            named.wrap(" levou um dano fatal!", None).0,
             " levou[FF01]um dano[FF01]fatal!"
         );
+    }
+
+    /// A largura da caixa e em codigos: com pares de letras na tabela, a
+    /// palavra conta os codigos que ocupa e a linha cabe mais letras. O
+    /// trecho alinhado com espacos conta letra a letra (vai sem pares).
+    #[test]
+    fn with_letter_pairs_a_line_holds_more_letters() {
+        let mut text = String::from("0100= \n01FF=[FF01]\n04FF=[FF04]\n");
+        for (k, c) in "◆abdeimostu".chars().enumerate() {
+            text.push_str(&format!("{:02X}01={c}\n", 0x10 + k));
+        }
+        for (k, pair) in ["um", "do", "is", "tr", "es", "qu", "at", "ro"]
+            .iter()
+            .enumerate()
+        {
+            text.push_str(&format!("{:02X}02={pair}\n", 0x10 + k));
+        }
+        let table = TblTable::parse(&text).unwrap();
+        let layout = layout();
+        let plain = "◆um dois tres quatro";
+        // Letra a letra: 12 por linha.
+        assert_eq!(layout.wrap(plain, None).0, "◆um dois[FF01] tres quatro");
+        // Com pares: 1+1 +1+2 +1+2 +1+3 = 12 codigos, uma linha so.
+        assert_eq!(layout.wrap(plain, Some(&table)), (plain.to_string(), 12));
+        assert_eq!(longest_line("◆um dois[FF01]x", Some(&table)), 5);
+        // Opcoes de menu alinhadas: sem pares, como a tabela grava.
+        let menu = "[FF04]  um   dois   tres";
+        assert_eq!(layout.wrap(menu, Some(&table)), layout.wrap(menu, None));
     }
 
     #[test]

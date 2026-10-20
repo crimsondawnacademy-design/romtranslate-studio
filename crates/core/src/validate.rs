@@ -402,9 +402,9 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
         let wrapped = crate::profile::wrapped(entry, translation)
             .or_else(|| crate::adapters::mpt::wrapped(entry, translation));
         let line = match (&layout, &wrapped) {
-            (Some(layout), _) => layout.wrap(translation).1,
-            (None, Some(text)) => crate::adapters::bank::longest_line(text),
-            (None, None) => crate::adapters::bank::longest_line(translation),
+            (Some(layout), _) => layout.wrap(translation, table).1,
+            (None, Some(text)) => crate::adapters::bank::longest_line(text, None),
+            (None, None) => crate::adapters::bank::longest_line(translation, table),
         };
         if line > width && (layout.is_some() || wrapped.is_some()) {
             push(

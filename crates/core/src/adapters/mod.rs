@@ -116,6 +116,7 @@ pub fn hints(project_dir: &Path) -> Result<crate::adapter::ExtractHints> {
             .and_then(|project| project.source_language),
         ..Default::default()
     };
+    hints.pairs = crate::pairs::wanted(project_dir)?;
     let dir = project_dir.join(crate::tbl::TABLES_DIR);
     let Ok(list) = std::fs::read_dir(&dir) else {
         return Ok(hints);
@@ -223,8 +224,12 @@ pub fn extract_project(project_dir: &Path) -> Result<ExtractOutcome> {
         Some(profile) => crate::profile::extract(project_dir, &data, profile)?,
         None => adapter.extract_with(&data, &hints(project_dir)?)?,
     };
+    let jis16 = crate::types::TextEncoding::Table(crate::kuten::TABLE_ID.to_string());
+    let mut db = ProjectDb::open(project_dir)?;
+    let loaded = db.load_entries()?;
     // A tabela de antes fica a mao: e com ela que as traducoes ja feitas
-    // foram escritas.
+    // foram escritas. A com pares de letras leva a conta de quantas letras
+    // do texto traduzido cabem por codigo (`pairs::with_rate`).
     let mut older = HashMap::new();
     for (id, text) in &extraction.tables {
         let path = project_dir
@@ -233,15 +238,11 @@ pub fn extract_project(project_dir: &Path) -> Result<ExtractOutcome> {
         if let Ok(table) = TblTable::load(&path) {
             older.insert(id.clone(), table);
         }
-        crate::tbl::ensure_table(project_dir, id, text)?;
+        let text = crate::pairs::with_rate(text, &crate::pairs::translations(&loaded, id));
+        crate::tbl::ensure_table(project_dir, id, &text)?;
     }
-    let jis16 = crate::types::TextEncoding::Table(crate::kuten::TABLE_ID.to_string());
-    let mut db = ProjectDb::open(project_dir)?;
-    let before: HashMap<String, TextEntry> = db
-        .load_entries()?
-        .into_iter()
-        .map(|e| (e.id.clone(), e))
-        .collect();
+    let before: HashMap<String, TextEntry> =
+        loaded.into_iter().map(|e| (e.id.clone(), e)).collect();
     let saved = db.upsert_entries(&extraction.entries)?;
     // O original que mudou so na forma dos comandos (agora a leitura sabe que
     // um deles leva parametro) leva junto a traducao que ja tinha: os mesmos

@@ -46,6 +46,11 @@ fn stand_ins(ch: char) -> impl Iterator<Item = char> {
     wide_form(ch).into_iter().chain(quote)
 }
 
+/// A linha que diz quantas letras do texto traduzido do projeto couberam em
+/// quantos codigos com os pares da tabela: `# pares: 1432 letras em 1000
+/// codigos`. Gravada na extracao (`crate::pairs::with_rate`), lida no parse.
+pub const PAIR_RATE: &str = "# pares: ";
+
 #[derive(Debug, Clone)]
 pub struct TblTable {
     entries: HashMap<Vec<u8>, String>,
@@ -55,14 +60,49 @@ pub struct TblTable {
     reverse: HashMap<String, Vec<u8>>,
     /// Maior texto de uma entrada, em caracteres.
     max_text_chars: usize,
+    /// (letras, codigos) da linha `PAIR_RATE`, se a tabela tem.
+    pair_rate: Option<(usize, usize)>,
+}
+
+/// `text` e um par de letras ("de", "a "), e nao um caractere ou um codigo
+/// de controle (`[FIM]`).
+pub fn is_pair(text: &str) -> bool {
+    let mut chars = text.chars();
+    matches!((chars.next(), chars.next(), chars.next()), (Some(a), Some(_), None) if a != '[')
+}
+
+/// O comando com parametro (`[FF26:0003:0003]`): a letra que vem logo
+/// depois dele pode ser o ultimo parametro (`kuten`, o nome esticado), e um
+/// par ali entregaria ao comando o codigo do par.
+fn takes_params(text: &str) -> bool {
+    text.starts_with('[') && text.contains(':')
+}
+
+/// O trecho de texto que comeca em `rest` (ate o proximo colchete) e
+/// alinhado com espacos: tem 2 seguidos, como as opcoes de um menu
+/// ("[FF06:0002]   Sim   Não", 1.126 frases no jogo medido em 20/10/2026).
+/// Ali cada letra vai sozinha, e cada opcao fica na coluna em que a
+/// traducao a pos.
+fn aligned(rest: &str) -> bool {
+    rest[..rest.find('[').unwrap_or(rest.len())].contains("  ")
 }
 
 impl TblTable {
     pub fn parse(text: &str) -> Result<Self> {
         let mut entries = HashMap::new();
         let mut max_key_len = 0;
+        let mut pair_rate = None;
         for (idx, raw) in text.lines().enumerate() {
             let line = raw.trim_end_matches('\r');
+            if let Some(rate) = line.strip_prefix(PAIR_RATE) {
+                let numbers: Vec<usize> = rate
+                    .split_whitespace()
+                    .filter_map(|word| word.parse().ok())
+                    .collect();
+                if let [letters, codes] = numbers[..] {
+                    pair_rate = (codes > 0 && letters >= codes).then_some((letters, codes));
+                }
+            }
             if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
                 continue;
             }
@@ -98,6 +138,7 @@ impl TblTable {
             max_key_len,
             reverse,
             max_text_chars,
+            pair_rate,
         })
     }
 
@@ -124,6 +165,14 @@ impl TblTable {
     // existem (sem "c"), "abc" da erro mesmo cabendo como "a"+"bc". Tabela
     // real traz os caracteres avulsos; programacao dinamica se aparecer uma
     // que nao traga.
+    ///
+    /// Com pares de letras (todos de 2 caracteres) e as letras avulsas na
+    /// tabela, o guloso ja usa o menor numero de codigos: escolher pares sem
+    /// sobreposicao e escolher intervalos de mesmo tamanho, e pegar o que
+    /// termina primeiro (o da esquerda) e o otimo. Programacao dinamica nao
+    /// ganharia um codigo. Logo depois de um comando com parametro, a letra
+    /// vai sozinha (`takes_params`), e no trecho alinhado com espacos, todas
+    /// (`aligned`).
     ///
     /// Tabela japonesa nao tem a letra "a": tem "ａ", a de largura inteira.
     /// O caractere ASCII que falta e gravado nessa forma (`wide_form`), e e
@@ -156,17 +205,34 @@ impl TblTable {
     /// existe em largura inteira, nessa forma), sem conferir a leitura de
     /// volta.
     fn encode_unchecked(&self, text: &str) -> Result<(Vec<u8>, String)> {
+        self.encode_counting(text)
+            .map(|(out, written, _)| (out, written))
+    }
+
+    /// `encode_unchecked` e quantas entradas da tabela o texto ocupou.
+    fn encode_counting(&self, text: &str) -> Result<(Vec<u8>, String, usize)> {
         let mut out = Vec::new();
         // O texto como a tabela vai le-lo de volta.
         let mut written = String::with_capacity(text.len());
         let mut rest = text;
+        let mut cells = 0;
+        // Par vale aqui? Nao depois de comando com parametro nem em trecho
+        // alinhado (`aligned`), que vai ate o proximo codigo.
+        let (mut after_params, mut in_aligned) = (false, aligned(text));
         while let Some(ch) = rest.chars().next() {
-            if let Some((end, bytes)) = self.longest_text(rest) {
+            cells += 1;
+            if let Some((end, bytes)) = self.longest_text(rest, !after_params && !in_aligned) {
                 out.extend_from_slice(bytes);
                 written.push_str(&rest[..end]);
+                let piece = &rest[..end];
                 rest = &rest[end..];
+                after_params = takes_params(piece);
+                if piece.starts_with('[') && piece.chars().count() > 1 {
+                    in_aligned = aligned(rest);
+                }
                 continue;
             }
+            after_params = false;
             let wide =
                 stand_ins(ch).find_map(|w| Some((w, self.reverse.get(w.to_string().as_str())?)));
             let Some((wide, bytes)) = wide else {
@@ -179,7 +245,7 @@ impl TblTable {
             written.push(wide);
             rest = &rest[ch.len_utf8()..];
         }
-        Ok((out, written))
+        Ok((out, written, cells))
     }
 
     /// A tabela escreve `ch`, como ele e ou por um substituto (`stand_ins`).
@@ -194,9 +260,20 @@ impl TblTable {
         self.reverse.contains_key(text)
     }
 
+    /// Quantos codigos (entradas da tabela) `text` ocupa gravado: a largura
+    /// dele na tela, numa fonte de largura fixa. `None` = nao da pra gravar.
+    pub fn cells(&self, text: &str) -> Option<usize> {
+        self.encode_counting(text).ok().map(|(_, _, cells)| cells)
+    }
+
+    /// A tabela tem pares de letras (`is_pair`).
+    pub fn has_pairs(&self) -> bool {
+        self.reverse.keys().any(|text| is_pair(text))
+    }
+
     /// A maior entrada da tabela no comeco de `rest`: onde ela termina e os
-    /// bytes dela.
-    fn longest_text(&self, rest: &str) -> Option<(usize, &Vec<u8>)> {
+    /// bytes dela. Sem `pairs`, par de letras nao vale.
+    fn longest_text(&self, rest: &str, pairs: bool) -> Option<(usize, &Vec<u8>)> {
         // Onde terminam os prefixos de 1 a `max_text_chars` caracteres.
         let ends: Vec<usize> = rest
             .char_indices()
@@ -207,6 +284,7 @@ impl TblTable {
             .collect();
         ends.iter()
             .rev()
+            .filter(|&&end| pairs || !is_pair(&rest[..end]))
             .find_map(|&end| self.reverse.get(&rest[..end]).map(|bytes| (end, bytes)))
     }
 
@@ -263,12 +341,30 @@ impl TblTable {
     // 1 byte e kanji de 2 na mesma tabela, o prompt diz a metade do que cabe
     // em letras; medir so os caracteres do idioma de destino se aparecer um
     // jogo assim.
+    ///
+    /// Tabela com pares de letras e a conta medida no texto ja traduzido
+    /// (`PAIR_RATE`): o numero e o do texto tipico, letras por codigo como
+    /// nele. Ai ele pode prometer mais do que um texto sem nenhum par cabe —
+    /// e a validacao que confere, e a repergunta (`pipeline`) encurta pelo
+    /// que a resposta anterior ocupou.
     pub fn chars_that_fit(&self, slot: usize) -> usize {
-        self.reverse
+        let worst = self
+            .reverse
             .iter()
             .map(|(text, key)| slot.saturating_mul(text.chars().count()) / key.len())
             .min()
-            .unwrap_or(0)
+            .unwrap_or(0);
+        self.letters_in(worst)
+    }
+
+    /// Quantas letras do texto tipico cabem em `cells` codigos: `cells`, ou,
+    /// com pares de letras e a conta medida (`PAIR_RATE`), na proporcao dela.
+    /// O teto de uma linha da caixa de texto no pedido a IA.
+    pub fn letters_in(&self, cells: usize) -> usize {
+        match self.pair_rate {
+            Some((letters, codes)) => cells.saturating_mul(letters) / codes,
+            None => cells,
+        }
     }
 
     /// `chars_that_fit` pra uma traducao obrigada a copiar `kept` do original
@@ -287,6 +383,29 @@ impl TblTable {
         self.chars_that_fit(slot.saturating_sub(bytes)) + chars
     }
 
+    /// O teto da repergunta depois de `previous` nao caber em `slot`:
+    /// `chars_that_fit_keeping` e, com pares de letras (onde o teto e o do
+    /// texto tipico e a resposta pode ter ficado abaixo dele), no maximo as
+    /// letras de `previous` na proporcao do espaco, fora os codigos copiados.
+    pub fn chars_that_fit_after(&self, slot: usize, kept: &[String], previous: &str) -> usize {
+        let room = self.chars_that_fit_keeping(slot, kept);
+        let Some(len) = self
+            .encode(previous)
+            .ok()
+            .map(|bytes| bytes.len())
+            .filter(|&len| len > slot && self.has_pairs())
+        else {
+            return room;
+        };
+        let (code_bytes, code_chars) = kept
+            .iter()
+            .filter_map(|token| Some((self.encode(token).ok()?.len(), token.chars().count())))
+            .fold((0, 0), |(b, c), (bytes, chars)| (b + bytes, c + chars));
+        let letters = previous.chars().count().saturating_sub(code_chars);
+        let fit = letters * slot.saturating_sub(code_bytes) / len.saturating_sub(code_bytes).max(1);
+        room.min(fit + code_chars)
+    }
+
     /// `text` com cada caractere que a tabela nao escreve trocado pelo
     /// equivalente simples dele (`plain_equivalent`: 'ç' -> 'c', 'É' -> 'E',
     /// '”' -> '"') — so quando a tabela escreve o equivalente. `None` = nada a
@@ -300,7 +419,7 @@ impl TblTable {
         let mut rest = text;
         while let Some(ch) = rest.chars().next() {
             // O que a tabela escreve passa inteiro, entrada longa inclusive.
-            if let Some((end, _)) = self.longest_text(rest) {
+            if let Some((end, _)) = self.longest_text(rest, true) {
                 out.push_str(&rest[..end]);
                 rest = &rest[end..];
                 continue;
@@ -520,9 +639,17 @@ pub fn ensure_table(project_dir: &Path, id: &str, text: &str) -> Result<()> {
 /// parametro, desenho proprio), nem o caractere da ordem JIS padrao naquele
 /// codigo (a tabela de antes de a extracao ler a ordem da fonte do jogo,
 /// `kuten::font_order`), nem uma letra acentuada que a gerada de agora poe em
-/// outro codigo (`images::letters::choose`) — essas sao de uma geracao velha.
+/// outro codigo (`images::letters::choose`), nem um par de letras ou o que o
+/// codigo de um par da gerada de agora tinha antes (`crate::pairs`) — essas
+/// sao de uma geracao velha.
 fn hand_lines<'a>(old: &'a str, generated: &str) -> Vec<&'a str> {
     let fresh: std::collections::HashSet<&str> = generated.lines().collect();
+    let paired: std::collections::HashSet<&str> = generated
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .filter(|(_, value)| is_pair(value))
+        .map(|(hex, _)| hex)
+        .collect();
     let drawn: std::collections::HashSet<&str> = generated
         .lines()
         .filter_map(|line| line.split_once('=').map(|(_, value)| value))
@@ -554,6 +681,8 @@ fn hand_lines<'a>(old: &'a str, generated: &str) -> Vec<&'a str> {
                 generator_value(hex).as_deref() != Some(value)
                     && standard(hex).as_deref() != Some(value)
                     && !drawn.contains(value)
+                    && !is_pair(value)
+                    && !paired.contains(hex)
             })
         })
         .collect()
@@ -652,6 +781,16 @@ mod tests {
         let written = fs::read_to_string(dir.join(TABLES_DIR).join("jis16.tbl")).unwrap();
         assert!(!written.contains("0D0F=á") && !written.contains("0E0F=á"));
         assert!(written.contains("\n9900=ñ\n"), "{written}");
+        // O par de letras e da geracao: a extracao que tira o par (ou o poe
+        // em outro codigo) nao o deixa como linha da pessoa, nem o kanji que
+        // o codigo do par tinha antes.
+        ensure_table(&dir, "jis16", &format!("{new}0E0F=弌\n")).unwrap();
+        ensure_table(&dir, "jis16", &format!("{new}0E0F=de\n")).unwrap();
+        let written = fs::read_to_string(dir.join(TABLES_DIR).join("jis16.tbl")).unwrap();
+        assert!(!written.contains("=弌") && written.contains("\n0E0F=de\n"));
+        ensure_table(&dir, "jis16", new).unwrap();
+        let written = fs::read_to_string(dir.join(TABLES_DIR).join("jis16.tbl")).unwrap();
+        assert!(!written.contains("=de"), "{written}");
         fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -715,6 +854,119 @@ mod tests {
         for text in ["the", "he t", "t[FIM]h"] {
             assert_eq!(table.decode(&table.encode(text).unwrap()).unwrap(), text);
         }
+    }
+
+    /// Tabela como a do japones de 16 bits com pares: letras avulsas, o
+    /// espaco, comandos e os pares, 2 bytes cada.
+    fn paired() -> TblTable {
+        let mut text = String::from("0100= \n02FF=[FF02]\n23FF0200=[FF23:0002]\n");
+        for (k, c) in "abcdeor.!".chars().enumerate() {
+            text.push_str(&format!("{:02X}01={c}\n", 0x10 + k));
+        }
+        for (k, pair) in ["de", "a ", " o", "or", "ra", "ab", "bc", "cd"]
+            .iter()
+            .enumerate()
+        {
+            text.push_str(&format!("{:02X}02={pair}\n", 0x10 + k));
+        }
+        TblTable::parse(&text).unwrap()
+    }
+
+    #[test]
+    fn pairs_are_written_and_read_back_and_count_one_cell() {
+        let table = paired();
+        assert!(table.has_pairs() && is_pair("de") && is_pair("a ") && !is_pair("[FIM]"));
+        let bytes = table.encode("ora de").unwrap();
+        // "or" "a " "de": 3 codigos pra 6 letras.
+        assert_eq!(bytes, [0x13, 0x02, 0x11, 0x02, 0x10, 0x02]);
+        assert_eq!(table.decode(&bytes).as_deref(), Some("ora de"));
+        assert_eq!(table.cells("ora de"), Some(3));
+        assert_eq!(table.cells("ora dex"), None);
+        // Depois de comando com parametro a letra vai sozinha: ela pode ser
+        // o ultimo parametro dele.
+        assert_eq!(table.cells("[FF23:0002]de"), Some(3));
+        assert_eq!(table.cells("[FF02]de"), Some(2));
+        // Trecho alinhado com espacos (as opcoes de um menu): sem pares ate o
+        // proximo codigo, e as colunas ficam onde a traducao as pos.
+        assert_eq!(table.cells("[FF02]  ora  de"), Some(1 + 9));
+        assert_eq!(table.cells("  de[FF02]de"), Some(4 + 1 + 1));
+    }
+
+    /// O guloso (o par mais a esquerda) ja usa o menor numero de codigos com
+    /// pares de 2 letras: igual a programacao dinamica, em textos sorteados.
+    #[test]
+    fn the_greedy_encoding_uses_the_fewest_codes() {
+        let table = paired();
+        let letters: Vec<char> = "abcdor ".chars().collect();
+        let fewest = |text: &[char]| -> usize {
+            let mut best = vec![0usize; text.len() + 1];
+            for i in (0..text.len()).rev() {
+                best[i] = 1 + best[i + 1];
+                let two: String = text[i..(i + 2).min(text.len())].iter().collect();
+                if two.chars().count() == 2 && table.has_entry(&two) {
+                    best[i] = best[i].min(1 + best[i + 2]);
+                }
+            }
+            best[0]
+        };
+        let mut seed = 7u32;
+        for _ in 0..2000 {
+            let text: Vec<char> = (0..12)
+                .map(|_| {
+                    seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                    letters[(seed >> 16) as usize % letters.len()]
+                })
+                .collect();
+            let joined: String = text.iter().collect();
+            if joined.contains("  ") {
+                continue;
+            }
+            assert_eq!(table.cells(&joined), Some(fewest(&text)), "{joined:?}");
+        }
+    }
+
+    /// A conta medida no texto traduzido (`PAIR_RATE`) poe no teto as letras
+    /// que os pares deixam caber; sem ela, o teto de sempre.
+    #[test]
+    fn the_measured_rate_raises_the_ceiling() {
+        let plain = paired();
+        assert_eq!(plain.chars_that_fit(20), 10);
+        assert_eq!(plain.letters_in(10), 10);
+        let text = "# pares: 150 letras em 100 codigos (texto traduzido do projeto)\n0100= \n1001=a\n1002=de\n";
+        let rated = TblTable::parse(text).unwrap();
+        assert_eq!(rated.chars_that_fit(20), 15);
+        assert_eq!(rated.letters_in(10), 15);
+        // Conta sem sentido (menos letras que codigos) nao vale.
+        let odd = TblTable::parse("# pares: 50 letras em 100 codigos\n1001=a\n").unwrap();
+        assert_eq!(odd.chars_that_fit(20), 10);
+    }
+
+    /// A repergunta com pares: o teto e o das letras da resposta que nao
+    /// coube, na proporcao do espaco; sem pares, o de sempre.
+    #[test]
+    fn the_shorter_retry_scales_the_answer_that_did_not_fit() {
+        let rated = format!(
+            "{PAIR_RATE}200 letras em 100 codigos\n0100= \n1001=a\n1101=b\n1002=ab\n02FF=[FF02]\n"
+        );
+        let table = TblTable::parse(&rated).unwrap();
+        let kept = vec!["[FF02]".to_string()];
+        // Teto do texto tipico: (10 - 2) / 2 * 2 + 6 = 14.
+        assert_eq!(table.chars_that_fit_keeping(10, &kept), 14);
+        // "aaaaaaaa" nao tem par: 8 codigos, 16 bytes + 2 do codigo. As 8
+        // letras em 18 bytes viram 4 em 10.
+        assert_eq!(
+            table.chars_that_fit_after(10, &kept, "aaaaaaaa[FF02]"),
+            4 + 6
+        );
+        // Resposta que cabe nao muda o teto.
+        assert_eq!(table.chars_that_fit_after(10, &kept, "abab[FF02]"), 14);
+        // Sem pares, o teto de sempre, mesmo com o codigo longo.
+        let plain = TblTable::parse("0100= \n1001=a\n02FF=[FF02]\n").unwrap();
+        assert_eq!(
+            plain.chars_that_fit_after(10, &kept, "aaaaaaaa[FF02]"),
+            4 + 6
+        );
+        assert_eq!(plain.chars_that_fit_after(4, &kept, "a[FF02]"), 1 + 6);
     }
 
     #[test]

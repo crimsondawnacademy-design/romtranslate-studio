@@ -1472,11 +1472,47 @@ pub const JIS16_DRAWN_FONTS: [(usize, usize); 2] = [(0x20000, 22), (0x40000, 10)
 /// da fonte do app (`images::font`), a partir da coluna 1; o resto do que a
 /// tabela padrao tem e um quadrado; codigo vazio na tabela tem desenho vazio.
 pub fn make_gba_rom_jis16_drawn_font() -> Vec<u8> {
+    jis16_drawn([(2, true, 1), (1, false, 1)])
+}
+
+/// Onde comecam as duas fontes de `make_gba_rom_jis16_wide_font`.
+pub const JIS16_WIDE_FONTS: [(usize, usize); 2] = [(0x20000, 22), (0x40000, 22)];
+
+/// O `make_gba_rom_jis16_drawn_font` com as DUAS fontes de 16x10 (a segunda
+/// com o bit mais baixo a esquerda) e as letras com cada coluna dobrada: 10
+/// pontos de largura, como as letras de largura inteira de uma fonte de jogo,
+/// onde cabem 2 letras estreitadas (`images::letters`, pares de letras).
+pub fn make_gba_rom_jis16_wide_font() -> Vec<u8> {
+    jis16_drawn([(2, true, 2), (2, false, 2)])
+}
+
+/// As duas fontes do jogo medido, na mesma ordem: a de 16x10 com as letras
+/// largas de `make_gba_rom_jis16_wide_font` e a de 8x8 estreita de
+/// `make_gba_rom_jis16_drawn_font`, onde 2 letras nao cabem.
+pub fn make_gba_rom_jis16_wide_and_narrow_font() -> Vec<u8> {
+    jis16_drawn([(2, true, 2), (1, false, 1)])
+}
+
+/// As fontes de `make_gba_rom_jis16_drawn_font`: pra cada uma, bytes por
+/// linha, bit mais alto a esquerda e quantas vezes cada coluna da letra se
+/// repete. Com 2 bytes por linha, a fonte mora em `JIS16_WIDE_FONTS` quando
+/// as duas tem 2 (desenhos de 22 bytes).
+fn jis16_drawn(fonts: [(usize, bool, usize); 2]) -> Vec<u8> {
     let mut rom = make_gba_rom_jis16();
     rom.resize(512 * 1024, 0);
-    for (n, (at, stride)) in JIS16_DRAWN_FONTS.into_iter().enumerate() {
-        let (row_bytes, msb) = if n == 0 { (2, true) } else { (1, false) };
+    let places = if fonts[1].0 == 2 {
+        JIS16_WIDE_FONTS
+    } else {
+        JIS16_DRAWN_FONTS
+    };
+    for ((at, stride), (row_bytes, msb, widen)) in places.into_iter().zip(fonts) {
         let rows = (stride - 2) / row_bytes;
+        let wide = |bits: u8| -> u32 {
+            (0..8)
+                .filter(|x| bits >> x & 1 == 1)
+                .flat_map(|x| (0..widen).map(move |k| x * widen + k))
+                .fold(0, |out, x| out | 1 << x)
+        };
         let mut font = Vec::new();
         for (row, col) in jis16_font_cells() {
             let standard = ((row - 1) * 94 + col - 1) as u16;
@@ -1488,7 +1524,7 @@ pub fn make_gba_rom_jis16_drawn_font() -> Vec<u8> {
                     match ascii.and_then(crate::images::font::glyph) {
                         // A partir da linha da maiuscula, uma coluna pra dentro.
                         Some(glyph) => (0..rows)
-                            .map(|y| u32::from(glyph.rows.get(y + 2).copied().unwrap_or(0)) << 1)
+                            .map(|y| wide(glyph.rows.get(y + 2).copied().unwrap_or(0)) << 1)
                             .collect(),
                         None => (0..rows - 1)
                             .map(|y| if y == 0 || y == rows - 2 { 0x7E } else { 0x42 })

@@ -169,7 +169,15 @@ pub fn audit_project(project_dir: &Path) -> Result<AuditReport> {
     let data = crate::fileio::read_view(&working_path)?;
     let again = match crate::profile::load(project_dir)? {
         Some(profile) => crate::profile::reread(project_dir, &data, &profile)?,
-        None => adapter.extract_with(&data, &adapters::hints(project_dir)?)?,
+        // O par de letras desenhado e lido como as letras dele, nao como o
+        // kanji que o codigo tinha.
+        None => adapter.extract_with(
+            &data,
+            &crate::adapter::ExtractHints {
+                drawn_pairs: crate::pairs::drawn_in(project_dir)?,
+                ..adapters::hints(project_dir)?
+            },
+        )?,
     }
     .entries;
     let stray: HashSet<String> = crate::scan::stray_ids(&again).into_iter().collect();

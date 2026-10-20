@@ -16,6 +16,7 @@ pub mod hash;
 pub mod images;
 pub mod kuten;
 pub mod lz77;
+pub mod pairs;
 pub mod patch;
 pub mod pipeline;
 pub mod profile;

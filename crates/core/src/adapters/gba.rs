@@ -126,9 +126,7 @@ fn extract_capped(data: &[u8], cap: usize, hints: &ExtractHints) -> Result<Extra
     // (o teto corta o fim) e nenhuma outra leitura fica com os bytes dele.
     let mut tables = Vec::new();
     let banks = bank::find(data);
-    if let Some(mut found) =
-        crate::kuten::extract(data, &bank::message_starts(&banks), &hints.alphabets)
-    {
+    if let Some(mut found) = crate::kuten::extract(data, &bank::message_starts(&banks), hints) {
         // Mensagem dentro de um banco em blocos pode crescer.
         bank::tag(&mut found.entries, &banks);
         discarded += packed::drop_overlapping(&mut entries, &found.spans);

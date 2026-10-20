@@ -263,6 +263,14 @@ struct Dialect {
     /// do jogo (`images::letters::choose`): entram na tabela no lugar do
     /// `[xxxx]` do codigo.
     letters: HashMap<u16, char>,
+    /// Pares de letras que a reinsercao desenha em codigos que o texto do
+    /// jogo nao usa (`images::letters::choose_pairs`): entram na tabela no
+    /// lugar do kanji (ou do `[xxxx]`) do codigo.
+    pairs: HashMap<u16, String>,
+    /// Pares que a copia lida ja tem desenhados (a de trabalho, na
+    /// auditoria): lidos como as 2 letras, nao como o kanji que o codigo
+    /// Shift-JIS da fonte ainda diz.
+    drawn_pairs: HashMap<u16, String>,
     /// Onde cada um vale: (unidade do comando, unidade do fim da mensagem),
     /// em ordem. So dentro de mensagem de banco (`honored`): fora dela o
     /// comando e um numero qualquer, e os numeros pequenos depois dele
@@ -274,8 +282,12 @@ struct Dialect {
 }
 
 impl Dialect {
-    /// O caractere do codigo `code` neste jogo.
+    /// O caractere do codigo `code` neste jogo. O par desenhado
+    /// (`drawn_pairs`) conta como uma letra; o texto dele e o de `text_of`.
     fn decode(&self, code: u16) -> Option<char> {
+        if self.drawn_pairs.contains_key(&code) {
+            return Some('ａ');
+        }
         match &self.font {
             Some(font) => font
                 .get(code as usize)
@@ -364,10 +376,21 @@ fn table_with(dialect: &Dialect, commands: &BTreeSet<Vec<u16>>) -> String {
          # Pode ser completada a mao: a extracao regrava o arquivo e poe no fim as\n\
          # linhas que voce mudou, que valem por cima das geradas.\n",
     );
+    if !dialect.pairs.is_empty() {
+        out.push_str(
+            "# Pares de letras (\"de\", \"a \"): desenhados pela reinsercao em codigos que\n\
+             # o texto do jogo nao usa, 2 letras por codigo. A lista vem de\n\
+             # tables/jis16.pares.json (romtranslate pares).\n",
+        );
+    }
     let space = space.unwrap_or(0);
     let _ = writeln!(out, "{}= ", key(space));
     for code in 1..dialect.glyphs() {
         if code == space {
+            continue;
+        }
+        if let Some(pair) = dialect.pairs.get(&code) {
+            let _ = writeln!(out, "{}={pair}", key(code));
             continue;
         }
         match dialect.letters.get(&code).copied().or(dialect.decode(code)) {
@@ -769,12 +792,39 @@ impl Dialect {
 
     fn text_of(&self, codes: &[u16], i: usize) -> String {
         match self.piece(codes, i) {
+            (Piece::Char(_), 1) if self.drawn_pairs.contains_key(&codes[i]) => {
+                self.drawn_pairs[&codes[i]].clone()
+            }
             (Piece::Char(c), _) => c.to_string(),
             (Piece::Switch, _) => String::new(),
             (Piece::Control, len) => token_of(&codes[i..i + len]),
             _ => token_of(&codes[i..=i]),
         }
     }
+}
+
+/// Um salto maior que isto entre dois codigos que o texto mostra separa o
+/// que fica fora da curva (`reach`).
+const OUTLIER_GAP: u16 = 1024;
+
+/// Ate onde o texto do jogo mostra codigos sem nenhum fora da curva: o maior
+/// codigo de `shown` antes do primeiro salto de `OUTLIER_GAP` ou mais. Medido
+/// em 20/10/2026 no RPG japones de 32 MiB: o texto mostra os codigos ate o
+/// 3.798, quase sem buraco, e um kanji raro no 6.912 (6 usos); a fala so
+/// alcanca os 4.096 primeiros desenhos, e os pares postos acima do 6.900
+/// sairam como o kanji 4.096 posicoes antes. 0 = nenhum codigo.
+// ponytail: as letras acentuadas (`images::letters::choose`) ainda usam o
+// maior codigo sem esse corte; no jogo medido nao havia desenho vazio acima
+// do 3.853, e elas ficaram onde a fala alcanca.
+fn reach(shown: &BTreeSet<u16>) -> u16 {
+    let mut last = 0;
+    for &code in shown {
+        if last > 0 && code - last >= OUTLIER_GAP {
+            break;
+        }
+        last = code;
+    }
+    last
 }
 
 /// Uma sequencia de pecas que pode ser uma mensagem: de `begin` a `end` (em
@@ -1047,16 +1097,18 @@ fn missed_records(
 ///
 /// `starts` = posicoes (em bytes) onde se sabe que uma mensagem comeca, de
 /// quem conhece a estrutura em volta do texto (`adapters::bank`). Pode vir
-/// vazio.
+/// vazio. De `hints` valem os alfabetos depois de um comando, os pares de
+/// letras que o projeto quer na fonte do jogo e os que a copia lida ja tem
+/// desenhados (`ExtractHints`).
 pub fn extract(
     data: &[u8],
     starts: &HashSet<usize>,
-    alphabets: &[(u16, HashMap<u16, char>)],
+    hints: &crate::adapter::ExtractHints,
 ) -> Option<Kuten16> {
     let starts: HashSet<usize> = starts.iter().map(|at| at / 2).collect();
     let starts = &starts;
     let codes = units(data);
-    let switches: HashMap<u16, HashMap<u16, char>> = alphabets.iter().cloned().collect();
+    let switches: HashMap<u16, HashMap<u16, char>> = hints.alphabets.iter().cloned().collect();
     let fonts = fonts(data);
     let mut dialect = Dialect {
         space: find_space(&codes),
@@ -1064,6 +1116,7 @@ pub fn extract(
         shifted: honored(&codes, starts, &switches),
         switches,
         known: messages(&codes, starts),
+        drawn_pairs: hints.drawn_pairs.clone(),
         ..Dialect::default()
     };
     let first = scan(&codes, &dialect, starts);
@@ -1091,8 +1144,10 @@ pub fn extract(
     let mut commands = BTreeSet::new();
     let mut group = 0;
     // O maior codigo de caractere que o texto guardado mostra: e ate onde o
-    // jogo desenha com certeza.
+    // jogo desenha com certeza. E todos eles, pra achar o que fica fora da
+    // curva (`reach`).
     let mut shown = 0;
+    let mut shown_codes = BTreeSet::new();
     for i in 0..found.len() {
         let last = found
             .get(i + 1)
@@ -1117,6 +1172,7 @@ pub fn extract(
                 };
                 if drawn {
                     shown = shown.max(codes[at]);
+                    shown_codes.insert(codes[at]);
                 }
                 if matches!(piece, Piece::Control) && len > 1 {
                     commands.insert(codes[at..at + len].to_vec());
@@ -1202,6 +1258,21 @@ pub fn extract(
         dialect.letters = crate::images::letters::choose(data, &fonts, order, &used, shown)
             .into_iter()
             .collect();
+        // Nem o codigo que ganhou letra acentuada.
+        let used: HashSet<u16> = used
+            .into_iter()
+            .chain(dialect.letters.keys().copied())
+            .collect();
+        dialect.pairs = crate::images::letters::choose_pairs(
+            data,
+            &fonts,
+            order,
+            &used,
+            reach(&shown_codes),
+            &hints.pairs,
+        )
+        .into_iter()
+        .collect();
     }
 
     (sentences >= MIN_SENTENCES).then(|| Kuten16 {
@@ -1279,7 +1350,7 @@ mod tests {
             codes.extend([0xFF03, 0xFF00, END]);
         }
         let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
-        let found = extract(&data, &HashSet::new(), &[])?;
+        let found = extract(&data, &HashSet::new(), &Default::default())?;
         Some(found.entries[60].source_text.clone())
     }
 
@@ -1307,7 +1378,11 @@ mod tests {
             Vec::new()
         };
         let starts = if banked { starts } else { HashSet::new() };
-        let found = extract(&data, &starts, &alphabets).unwrap();
+        let hints = crate::adapter::ExtractHints {
+            alphabets,
+            ..Default::default()
+        };
+        let found = extract(&data, &starts, &hints).unwrap();
         found.entries[60].source_text.clone()
     }
 
@@ -1345,7 +1420,7 @@ mod tests {
             }
         }
         let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
-        let found = extract(&data, &HashSet::new(), &[]).unwrap();
+        let found = extract(&data, &HashSet::new(), &Default::default()).unwrap();
         let name = found
             .entries
             .iter()
@@ -1391,7 +1466,7 @@ mod tests {
         }
         codes.extend([0, 0, 0, 0]);
         let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
-        let found = extract(&data, &HashSet::new(), &[]).unwrap();
+        let found = extract(&data, &HashSet::new(), &Default::default()).unwrap();
         let entry = |name: &str| {
             found
                 .entries
@@ -1445,7 +1520,7 @@ mod tests {
         }
         codes.extend([0, 0, 0, 0]);
         let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
-        let found = extract(&data, &HashSet::new(), &[]).unwrap();
+        let found = extract(&data, &HashSet::new(), &Default::default()).unwrap();
         let first = found
             .entries
             .iter()
@@ -1477,7 +1552,7 @@ mod tests {
             codes.push(END);
         }
         let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
-        let found = extract(&data, &HashSet::new(), &[]).unwrap();
+        let found = extract(&data, &HashSet::new(), &Default::default()).unwrap();
         let texts: Vec<&str> = found
             .entries
             .iter()
@@ -1528,7 +1603,7 @@ mod tests {
             codes.extend([0xFF03, 0xFF00, END]);
         }
         let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
-        let found = extract(&data, &HashSet::new(), &[]).unwrap();
+        let found = extract(&data, &HashSet::new(), &Default::default()).unwrap();
         let text = &found.entries[60].source_text;
         assert!(text.contains("ひとは[FF23]のきょうも"), "{text}");
         let text = &found.entries[59].source_text;
@@ -1550,7 +1625,7 @@ mod tests {
             codes.extend([0xFF03, 0xFF00, END]);
         }
         let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
-        let found = extract(&data, &HashSet::new(), &[]).unwrap();
+        let found = extract(&data, &HashSet::new(), &Default::default()).unwrap();
         let entry = &found.entries[60];
         assert!(
             entry
@@ -1579,21 +1654,74 @@ mod tests {
             codes.extend([0xFF03, 0xFF00, END]);
         }
         let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
-        let found = extract(&data, &HashSet::new(), &[]).unwrap();
+        let found = extract(&data, &HashSet::new(), &Default::default()).unwrap();
         let entry = &found.entries[60];
         assert!(entry.source_text.starts_with('は'), "{}", entry.source_text);
         assert_eq!(entry.metadata["names_before"], 1);
     }
 
+    /// A copia de trabalho relida (auditoria): o codigo de kanji que virou
+    /// par de letras e lido como as letras, nao como o kanji do JIS. Um
+    /// codigo de par que nao esta no texto nao muda nada.
+    #[test]
+    fn a_drawn_pair_reads_as_its_letters() {
+        let kana = |text: &str| text.chars().map(|c| encode(c).unwrap()).collect::<Vec<_>>();
+        let (father, tea) = (encode('父').unwrap(), encode('茶').unwrap());
+        let mut codes = Vec::new();
+        for _ in 0..120 {
+            codes.push(encode('◆').unwrap());
+            codes.extend(kana("むらの"));
+            codes.push(father);
+            codes.extend(kana("は"));
+            codes.push(0xFF01);
+            codes.extend(kana("げんきにはたらいている。"));
+            codes.extend([0xFF03, 0xFF00, END]);
+        }
+        let data: Vec<u8> = codes.iter().flat_map(|c| c.to_le_bytes()).collect();
+        let read = |drawn: &[(u16, &str)]| {
+            let hints = crate::adapter::ExtractHints {
+                drawn_pairs: drawn.iter().map(|&(k, p)| (k, p.to_string())).collect(),
+                ..Default::default()
+            };
+            extract(&data, &HashSet::new(), &hints).unwrap().entries[60]
+                .source_text
+                .clone()
+        };
+        assert!(read(&[]).contains('父'));
+        let paired = read(&[(father, "de")]);
+        assert!(paired.starts_with("◆むらのdeは"), "{paired}");
+        assert!(!paired.chars().any(is_kanji));
+        assert_eq!(read(&[(tea, "de")]), read(&[]));
+    }
+
+    /// O codigo fora da curva (um kanji raro muito acima do resto) nao
+    /// conta: no jogo medido, o 6.912 contra o resto ate o 3.798.
+    #[test]
+    fn the_reach_of_the_text_leaves_out_a_code_far_above_the_rest() {
+        let codes = |list: &[u16]| list.iter().copied().collect::<BTreeSet<u16>>();
+        assert_eq!(
+            reach(&codes(&[94, 300, 1200, 2000, 2900, 3798, 6912])),
+            3798
+        );
+        assert_eq!(reach(&codes(&[94, 300, 900])), 900);
+        assert_eq!(reach(&codes(&[94, 2000])), 94);
+        assert_eq!(reach(&BTreeSet::new()), 0);
+    }
+
     #[test]
     fn noise_and_small_numbers_are_not_text() {
-        assert!(extract(&make_random(1 << 20, 5), &HashSet::new(), &[]).is_none());
+        assert!(extract(
+            &make_random(1 << 20, 5),
+            &HashSet::new(),
+            &Default::default()
+        )
+        .is_none());
         // Rampa de valores pequenos, como um mapa de tiles: cai nos kana.
         let ramp: Vec<u8> = (0..40_000u32)
             .flat_map(|i| ((280 + i % 90) as u16).to_le_bytes())
             .collect();
-        assert!(extract(&ramp, &HashSet::new(), &[]).is_none());
-        assert!(extract(&[], &HashSet::new(), &[]).is_none());
-        assert!(extract(&[0x1B], &HashSet::new(), &[]).is_none());
+        assert!(extract(&ramp, &HashSet::new(), &Default::default()).is_none());
+        assert!(extract(&[], &HashSet::new(), &Default::default()).is_none());
+        assert!(extract(&[0x1B], &HashSet::new(), &Default::default()).is_none());
     }
 }

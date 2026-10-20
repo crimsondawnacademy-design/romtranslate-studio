@@ -90,6 +90,12 @@ grava só a resposta que, sem os acentos, é idêntica à de antes: nenhuma
 palavra, código ou linha muda. A frase com erro de grafia de propósito
 costuma ser recusada (a IA "corrige"): acentue essas à mão, por TSV.
 
+**Pares de letras depois.** Com a tradução feita, `romtranslate pares
+jogo.rtsproj` desenha na fonte do jogo os pares de letras mais usados ("de",
+"a "), em kanji que nenhum texto do jogo usa: 2 letras por código. No jogo
+medido, o texto traduzido encolheu 31% e as falas, 23% das linhas. Como
+funciona e os limites: `docs/PARES-DE-LETRAS.md`.
+
 Regras que a validação cobra: os códigos do jogo (`[FFxx]`, `[FFxx:pppp]`)
 ficam todos; letra acentuada só onde a tabela a tem — com a fonte entendida
 (seção 1), o pedido à IA lista as letras e o TSV pode ter acento; a letra
@@ -181,7 +187,9 @@ estado mostra os desenhos da versão em que ele foi gravado.
   texto do jogo mostra. Fonte de largura variável, de 2 ou 4 bits por ponto,
   ou sem o código Shift-JIS na frente de cada desenho, fica sem acento.
 - **Campos de espaço fixo** (nomes de inimigo, item, PSI): a tradução cabe no
-  espaço do maior nome da tabela; sai abreviada.
+  espaço do maior nome da tabela; sai abreviada. Com os pares de letras
+  (`docs/PARES-DE-LETRAS.md`) o espaço comporta ~1,4 vez mais letras, mas o
+  nome já gravado só cresce numa rodada nova da IA.
 - **Tradução em inglês ou abreviada** de rodadas antigas: procure no banco do
   projeto e refaça (no jogo medido, um lote inteiro do roteiro tinha voltado
   em inglês).

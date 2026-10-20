@@ -174,6 +174,15 @@ enum Command {
         #[arg(long, value_name = "N")]
         parallel: Option<usize>,
     },
+    /// Pares de letras na fonte do jogo japones ("de", "a "): escolhe pelo texto
+    /// ja traduzido os pares mais usados, grava a lista em
+    /// tables/jis16.pares.json, extrai de novo (a tabela ganha os que cabem nas
+    /// fontes do jogo, em codigos que o texto dele nao usa) e mede o texto
+    /// gravado sem e com eles. A reinsercao seguinte desenha os pares
+    Pares {
+        #[arg(value_name = "PROJETO")]
+        project: PathBuf,
+    },
     /// Acha as imagens com letra do arquivo e grava a folha de cada uma em
     /// <projeto>/imagens (sem IA): e nelas que se ve quais tem japones
     Pictures {
@@ -678,6 +687,44 @@ fn run(cli: Cli) -> Result<Output, Failure> {
             opts.parallel = parallel.unwrap_or(cfg.parallel);
             accent(&project, &opts, &cfg, &cfg_dir)
         }
+        Command::Pares { project } => {
+            load(&project)?;
+            let outcome = romtranslate_core::pairs::make(&project)?;
+            let (without, with) = (&outcome.without, &outcome.with);
+            let top: Vec<String> = outcome
+                .top
+                .iter()
+                .map(|(pair, uses)| format!("\"{pair}\" {uses}"))
+                .collect();
+            let text = format!(
+                "pares na lista: {}, na tabela (cabem nas fontes do jogo): {}\n\
+                 letras por codigo no texto traduzido: {},{:02}\n\
+                 mais usados: {}\n\
+                 sem pares -> com pares:\n\
+                 bytes do texto traduzido: {} -> {}\n\
+                 linhas das mensagens que o app quebra: {} -> {} (com mais linhas que o japones: {} -> {})\n\
+                 frases de espaco fixo que ocupam o espaco inteiro: {} -> {} (teto do pedido a IA, somado: {} -> {} letras)\n\
+                 traducoes que nao cabem ou a tabela nao grava: {} -> {}",
+                outcome.wanted,
+                outcome.in_table,
+                outcome.rate_x100 / 100,
+                outcome.rate_x100 % 100,
+                top.join(", "),
+                without.bytes,
+                with.bytes,
+                without.lines,
+                with.lines,
+                without.longer_than_original,
+                with.longer_than_original,
+                without.full_slots,
+                with.full_slots,
+                without.slot_letters,
+                with.slot_letters,
+                without.not_fitting,
+                with.not_fitting,
+            );
+            Ok(Output::new(text, serde_json::to_value(&outcome)?))
+        }
         Command::Pictures {
             project,
             without_text,
@@ -821,6 +868,13 @@ fn run(cli: Cli) -> Result<Output, Failure> {
                     text,
                     "\nletras acentuadas desenhadas na fonte do jogo: {}",
                     outcome.letters
+                );
+            }
+            if outcome.pairs > 0 {
+                let _ = write!(
+                    text,
+                    "\npares de letras desenhados na fonte do jogo: {}",
+                    outcome.pairs
                 );
             }
             if outcome.pictures.pictures > 0 || !outcome.pictures.left_out.is_empty() {

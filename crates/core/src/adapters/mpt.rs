@@ -244,13 +244,13 @@ pub(crate) fn extract(files: &[(String, usize, &[u8])], wanted: &str) -> Vec<Tex
                 continue;
             }
             let text = frame(raw).1;
-            let line = crate::adapters::bank::longest_line(&text);
+            let line = crate::adapters::bank::longest_line(&text, None);
             let max = widest.entry((any_language(path), i)).or_default();
             *max = (*max).max(line);
             if text.contains(';') {
                 broken.insert(any_language(path));
             }
-            let piece = crate::adapters::bank::longest_line(&text.replace([';', '$'], "[;]"));
+            let piece = crate::adapters::bank::longest_line(&text.replace([';', '$'], "[;]"), None);
             let max = pieces.entry(any_language(path)).or_default();
             *max = (*max).max(piece);
         }

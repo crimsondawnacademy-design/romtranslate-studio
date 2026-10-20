@@ -351,7 +351,10 @@ fn batch_request(
                         crate::images::place_of(e)
                             .map(|(_, block)| crate::images::chars_that_fit(&block))
                     }),
-                max_line: crate::adapters::bank::line_width(e).filter(|_| layout.is_none()),
+                // Com pares de letras, a linha cabe mais letras que codigos.
+                max_line: crate::adapters::bank::line_width(e)
+                    .filter(|_| layout.is_none())
+                    .map(|width| table.map_or(width, |table| table.letters_in(width))),
                 max_lines: page.as_ref().map(|(_, lines)| lines.clone()),
                 page_code: page.map(|(code, _)| code),
             })
@@ -1090,13 +1093,13 @@ fn shorter_please(item: &mut BatchItem, entry: &TextEntry, charset: Option<Chars
     };
     let room = match charset {
         Charset::Ascii => entry.max_bytes.unwrap_or(entry.original_bytes.len()),
-        Charset::Table(table) => table.chars_that_fit_keeping(
-            entry
+        Charset::Table(table) => {
+            let slot = entry
                 .max_bytes
                 .filter(|_| crate::profile::is_profile(entry))
-                .unwrap_or(entry.original_bytes.len()),
-            &extract_tokens(&entry.source_text),
-        ),
+                .unwrap_or(entry.original_bytes.len());
+            table.chars_that_fit_after(slot, &extract_tokens(&entry.source_text), previous)
+        }
         Charset::Image => match crate::images::place_of(entry) {
             Some((_, block)) => crate::images::chars_that_fit(&block),
             None => return,

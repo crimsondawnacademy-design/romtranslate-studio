@@ -440,43 +440,230 @@ pub(crate) fn choose(
     free.zip(letters).collect()
 }
 
+// ---- Pares de letras (DTE de fonte) ----
+//
+// Japones diz em um codigo de 2 bytes o que o portugues diz em 2 ou 3
+// letras, e cada letra traduzida ocupa um codigo. O par ("de", "a ", "ão")
+// desenhado num codigo que o texto do jogo nao usa poe 2 letras em cada
+// codigo. Medido em 20/10/2026 no RPG japones de 32 MiB: a fonte grande
+// guarda 16 colunas por desenho, mas o jogo anda 10 pontos por codigo (um
+// desenho cheio, posto no lugar do "ｏ", cobre a letra seguinte) e as letras
+// tem tinta nas colunas 1 a 9; na fonte pequena, 1 a 7. O par cabe na caixa
+// de tinta da fonte (`Area`), nunca no desenho inteiro.
+
+/// Colunas que o espaco ocupa num par ("a ", " o"): a folga entre as
+/// palavras.
+const PAIR_SPACE: usize = 3;
+
+/// As colunas de tinta de `rows`, da esquerda: o bit `y` de cada uma e a
+/// linha `y`.
+fn columns(rows: &[u32]) -> Vec<u32> {
+    let all = rows.iter().fold(0, |all, row| all | row);
+    if all == 0 {
+        return Vec::new();
+    }
+    (all.trailing_zeros()..32 - all.leading_zeros())
+        .map(|x| {
+            rows.iter()
+                .enumerate()
+                .fold(0, |column, (y, row)| column | (row >> x & 1) << y)
+        })
+        .collect()
+}
+
+/// `columns` com `width` colunas: sai a coluna igual a da esquerda dela, a
+/// mais perto do meio primeiro (o traco de cima do "ａ" e 5 colunas iguais).
+/// A letra fica com o desenho da fonte, so mais estreita. `None` = nao ha
+/// coluna repetida pra tirar: letra de diagonal ("v", "x") ou redonda
+/// demais. Medido em 20/10/2026: tirar a coluna que menos muda (como
+/// `squash` faz com as linhas) deixava o "v" e o "m" ilegiveis com 4 pontos.
+fn narrow(mut cols: Vec<u32>, width: usize) -> Option<Vec<u32>> {
+    while cols.len() > width {
+        let middle = cols.len() / 2;
+        let k = (1..cols.len())
+            .filter(|&k| cols[k] == cols[k - 1])
+            .min_by_key(|k| k.abs_diff(middle))?;
+        cols.remove(k);
+    }
+    Some(cols)
+}
+
+/// O par de letras `first` e `second` (colunas de `columns`; `None` = o
+/// espaco) numa celula de `area`, com `rows` linhas: as duas lado a lado, 1
+/// coluna entre elas, centradas; cada uma estreitada (`narrow`) so o que
+/// falta pra caber, a mais larga primeiro. Com o espaco, a letra fica no
+/// lado dela e o espaco leva `PAIR_SPACE` colunas. `None` = nao cabe.
+fn pair(
+    first: Option<Vec<u32>>,
+    second: Option<Vec<u32>>,
+    area: Area,
+    rows: usize,
+) -> Option<Vec<u32>> {
+    let room = (area.right + 1).checked_sub(area.left)?;
+    let (placed, x) = match (first, second) {
+        (Some(a), Some(b)) => {
+            let (mut wa, mut wb) = (a.len(), b.len());
+            while wa + 1 + wb > room {
+                let a_first = wa >= wb;
+                let shrunk = |cols: &Vec<u32>, w: usize| narrow(cols.clone(), w - 1).is_some();
+                match (shrunk(&a, wa), shrunk(&b, wb)) {
+                    (true, true) if a_first => wa -= 1,
+                    (true, true) => wb -= 1,
+                    (true, false) => wa -= 1,
+                    (false, true) => wb -= 1,
+                    (false, false) => return None,
+                }
+            }
+            let mut cols = narrow(a, wa)?;
+            cols.push(0);
+            cols.extend(narrow(b, wb)?);
+            let x = area.left + (room - cols.len()) / 2;
+            (cols, x)
+        }
+        (Some(a), None) => (narrow(a, room.checked_sub(PAIR_SPACE)?)?, area.left),
+        (None, Some(b)) => {
+            let cols = narrow(b, room.checked_sub(PAIR_SPACE)?)?;
+            let x = area.right + 1 - cols.len();
+            (cols, x)
+        }
+        (None, None) => return None,
+    };
+    let mut out = vec![0u32; rows];
+    for (dx, column) in placed.iter().enumerate() {
+        for (y, row) in out.iter_mut().enumerate() {
+            *row |= (column >> y & 1) << (x + dx);
+        }
+    }
+    Some(out)
+}
+
+/// O desenho que a letra `c` tem (ou vai ter) na fonte `drawable`: a de
+/// largura inteira da propria fonte ("ａ" pra "a") ou a acentuada que
+/// `letter` compoe. `None` = a fonte nao tem.
+fn letter_of(data: &[u8], drawable: &Drawable, order: &[u16], c: char) -> Option<Vec<u32>> {
+    if font::mark(c).is_some() {
+        return letter(data, drawable, order, c);
+    }
+    let wide = char::from_u32(c as u32 + 0xFEE0).filter(|_| c.is_ascii_graphic())?;
+    let glyph = drawable.table.glyph(data, position(order, wide)?)?;
+    (!blank(glyph)).then(|| read(drawable.layout, glyph))
+}
+
+/// O par `text` (2 caracteres, letra ou espaco) desenhado pra `drawable`.
+fn pair_of(data: &[u8], drawable: &Drawable, order: &[u16], text: &str) -> Option<Vec<u32>> {
+    let mut chars = text.chars();
+    let (Some(a), Some(b), None) = (chars.next(), chars.next(), chars.next()) else {
+        return None;
+    };
+    let side = |c: char| -> Option<Option<Vec<u32>>> {
+        if c == ' ' {
+            return Some(None);
+        }
+        Some(Some(columns(&letter_of(data, drawable, order, c)?)))
+    };
+    pair(side(a)?, side(b)?, drawable.area, drawable.layout.rows)
+}
+
+/// O codigo `code` pode virar par: desenho vazio em todas as fontes, ou um
+/// kanji (o que a traducao tira do texto). Kana, letra, sinal e numero ficam:
+/// o teclado da tela de nomes, por exemplo, mostra kana que nenhum texto tem.
+fn reusable(data: &[u8], drawable: &[Drawable], order: &[u16], code: u16) -> bool {
+    let kanji = order
+        .get(code as usize)
+        .and_then(|&unit| char::from_u32(unit.into()))
+        .is_some_and(crate::sjis::is_kanji);
+    kanji
+        || drawable
+            .iter()
+            .all(|d| d.table.glyph(data, code as usize).is_some_and(blank))
+}
+
+/// Codigo -> par de letras que a reinsercao vai desenhar: cada par de
+/// `wanted` (na ordem, o mais usado primeiro) que cabe na celula de TODAS as
+/// fontes na ordem do texto (`pair`) — uma fonte que nao comporta o par
+/// mostraria o kanji de antes no lugar dele —, num codigo que nenhum texto do
+/// jogo usa (`used`, traduzido ou nao), que pode virar par (`reusable`) e que
+/// nao passa de `shown`, ate onde o texto mostra codigos (`kuten::reach`: a
+/// fala pode nao alcancar acima dele). Os codigos vem de `shown` pra tras.
+pub(crate) fn choose_pairs(
+    data: &[u8],
+    fonts: &[FontTable],
+    order: &[u16],
+    used: &HashSet<u16>,
+    shown: u16,
+    wanted: &[String],
+) -> Vec<(u16, String)> {
+    let drawable = drawable(data, fonts, order);
+    if drawable.is_empty() {
+        return Vec::new();
+    }
+    let free = (1..=shown)
+        .rev()
+        .filter(|code| !used.contains(code))
+        .filter(|&code| reusable(data, &drawable, order, code));
+    let pairs = wanted
+        .iter()
+        .filter(|text| {
+            drawable
+                .iter()
+                .all(|d| pair_of(data, d, order, text).is_some())
+        })
+        .cloned();
+    free.zip(pairs).collect()
+}
+
 /// Desenha em `out` (a copia de trabalho, com a fonte nos mesmos lugares que
-/// em `original`) cada letra acentuada que `table` (a tabela `kuten`) poe num
-/// codigo de desenho vazio: em todas as fontes na ordem do texto. Codigo que
-/// ja tem desenho no original nao muda. Devolve quantas letras desenhou.
-pub fn draw(original: &[u8], out: &mut [u8], table: &TblTable) -> usize {
+/// em `original`) o que `table` (a tabela `kuten`) poe em codigos novos da
+/// fonte, em todas as fontes na ordem do texto: cada letra acentuada num
+/// codigo de desenho vazio (desenho que o original tem nao muda) e cada par
+/// de letras num codigo que pode virar par (`reusable`). Devolve quantas
+/// letras e quantos pares desenhou.
+pub fn draw(original: &[u8], out: &mut [u8], table: &TblTable) -> (usize, usize) {
     let fonts = kuten::fonts(original);
     let Some(order) = kuten::font_order(original, &fonts) else {
-        return 0;
+        return (0, 0);
     };
     let drawable = drawable(original, &fonts, &order);
-    let mut drawn = 0;
+    let (mut letters, mut pairs) = (0, 0);
     for (key, text) in table.entries() {
+        let Ok(key) = <[u8; 2]>::try_from(key) else {
+            continue;
+        };
+        let k = u16::from_le_bytes(key);
         let mut chars = text.chars();
-        let (Ok(pair), Some(c), None) = (<[u8; 2]>::try_from(key), chars.next(), chars.next())
-        else {
+        let drawn: Option<Vec<Vec<u32>>> = match (chars.next(), chars.next(), chars.next()) {
+            (Some(c), None, _) => drawable
+                .iter()
+                .map(|d| {
+                    let empty = d.table.glyph(original, k as usize).is_some_and(blank);
+                    empty.then(|| letter(original, d, &order, c)).flatten()
+                })
+                .collect(),
+            (Some(_), Some(_), None)
+                if !text.starts_with('[') && reusable(original, &drawable, &order, k) =>
+            {
+                drawable
+                    .iter()
+                    .map(|d| pair_of(original, d, &order, text))
+                    .collect()
+            }
+            _ => None,
+        };
+        let Some(drawn) = drawn.filter(|drawn| !drawn.is_empty()) else {
             continue;
         };
-        let k = u16::from_le_bytes(pair) as usize;
-        let letters: Option<Vec<Vec<u32>>> = drawable
-            .iter()
-            .map(|d| {
-                let empty = d.table.glyph(original, k).is_some_and(blank);
-                empty.then(|| letter(original, d, &order, c)).flatten()
-            })
-            .collect();
-        let Some(letters) = letters.filter(|letters| !letters.is_empty()) else {
-            continue;
-        };
-        for (d, rows) in drawable.iter().zip(letters) {
-            let at = d.table.start + k * d.table.stride + 2;
+        for (d, rows) in drawable.iter().zip(drawn) {
+            let at = d.table.start + k as usize * d.table.stride + 2;
             if let Some(glyph) = out.get_mut(at..at + d.table.stride - 2) {
                 store(d.layout, &rows, glyph);
             }
         }
-        drawn += 1;
+        match text.chars().count() {
+            1 => letters += 1,
+            _ => pairs += 1,
+        }
     }
-    drawn
+    (letters, pairs)
 }
 
 #[cfg(test)]
@@ -600,6 +787,58 @@ mod tests {
         );
     }
 
+    /// So sai coluna repetida, a do meio primeiro: a letra fica com o
+    /// desenho dela. A de diagonal nao estreita.
+    #[test]
+    fn a_letter_narrows_only_by_its_repeated_columns() {
+        let a = columns(&rows(
+            "..#####../.#.....#./.......#./..######./.#.....#./..######.",
+        ));
+        assert_eq!(a.len(), 7);
+        // O traco de cima e o de baixo ocupam 5 colunas iguais.
+        assert_eq!(narrow(a.clone(), 3).unwrap(), [a[0], a[1], a[6]]);
+        assert_eq!(narrow(a.clone(), 2), None);
+        let v = columns(&rows("#.....#/.#...#./..#.#../...#..."));
+        assert_eq!(narrow(v.clone(), 7), Some(v.clone()));
+        assert_eq!(narrow(v, 6), None);
+    }
+
+    /// Duas letras lado a lado com uma coluna entre elas, centradas na caixa
+    /// de tinta; com o espaco, a letra no lado dela; o que nao cabe, `None`.
+    #[test]
+    fn a_pair_fits_in_the_ink_box_of_the_font() {
+        let area = Area {
+            top: 0,
+            bottom: 3,
+            left: 1,
+            right: 9,
+        };
+        let i = columns(&rows("#/#/#/#"));
+        let o = columns(&rows(".##./#..#/#..#/.##."));
+        let drawn = pair(Some(i.clone()), Some(o.clone()), area, 4).unwrap();
+        // 1 + 1 + 4 = 6 colunas, centradas em 9: comecam na coluna 2.
+        assert_eq!(columns(&drawn), [i[0], 0, o[0], o[1], o[2], o[3]]);
+        assert_eq!(
+            drawn.iter().fold(0, |all, row| all | row).trailing_zeros(),
+            2
+        );
+        // "o ": a letra encostada na esquerda; " i": na direita.
+        let left = pair(Some(o.clone()), None, area, 4).unwrap();
+        assert_eq!(
+            left.iter().fold(0, |all, row| all | row).trailing_zeros(),
+            1
+        );
+        let right = pair(None, Some(i.clone()), area, 4).unwrap();
+        assert_eq!(right.iter().fold(0, |all, row| all | row), 1 << 9);
+        // Letra que nao estreita e nao cabe com a outra.
+        let wide = columns(&rows("#.#.#.#"));
+        assert!(pair(Some(wide.clone()), Some(o), area, 4).is_none());
+        assert!(pair(Some(wide.clone()), Some(i), area, 4).is_some());
+        // Com o espaco, sobram `PAIR_SPACE` colunas.
+        assert!(pair(Some(wide), None, area, 4).is_none());
+        assert!(pair(None, None, area, 4).is_none());
+    }
+
     #[test]
     fn the_bar_tells_the_row_width() {
         assert!(is_bar(&rows("...#/...#/...#/...#")));
@@ -628,7 +867,7 @@ mod tests {
         for data in [Vec::new(), vec![0x81, 0x40], vec![0xFF; 4096]] {
             assert!(choose(&data, &kuten::fonts(&data), &[], &HashSet::new(), 100).is_empty());
             let mut out = data.clone();
-            assert_eq!(draw(&data, &mut out, &table), 0);
+            assert_eq!(draw(&data, &mut out, &table), (0, 0));
             assert_eq!(out, data);
         }
     }
