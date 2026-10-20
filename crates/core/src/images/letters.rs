@@ -24,6 +24,12 @@ const ROW_BYTES: [usize; 3] = [1, 2, 4];
 const STEMMED: &str = "ＢＤＥＦＫＬＰＲｂｈｋ";
 /// O corpo da letra nao fica com menos linhas que isto pra caber o sinal.
 const MIN_BODY: usize = 3;
+/// Corpo mais baixo que isto (3 vezes o sinal) e letra pequena: o acento
+/// sobre ponta fina nao encosta nem na diagonal, se cabe. Medido em
+/// 19/10/2026: na fonte de 8x8 do jogo a maiuscula achatada fica com 5 linhas
+/// e o sinal encostado se emenda nela; na de 16x10, com 7, o sinal encostado
+/// na diagonal le bem.
+const LOOSE_BELOW: usize = 3 * MARK_ROWS;
 
 /// Como os pontos de um desenho estao guardados: 1 bit por ponto, `row_bytes`
 /// bytes por linha (o primeiro byte a esquerda) e, com `msb`, o bit mais alto
@@ -203,19 +209,92 @@ fn drawable(data: &[u8], fonts: &[FontTable], order: &[u16]) -> Vec<Drawable> {
     found.unwrap_or_default()
 }
 
+/// Pedacos de tinta (vizinhos ate na diagonal) e buracos (fundo cercado de
+/// tinta, como o miolo do A e do O) do desenho.
+fn shape(rows: &[u32]) -> (usize, usize) {
+    // Uma volta de fundo em torno: o fundo que chega nela nao e buraco.
+    let (w, h) = (34, rows.len() + 2);
+    let ink = |x: usize, y: usize| {
+        (1..=32).contains(&x) && (1..=rows.len()).contains(&y) && rows[y - 1] >> (x - 1) & 1 == 1
+    };
+    let (mut seen, mut pieces, mut holes) = (vec![false; w * h], 0, 0);
+    for start in 0..w * h {
+        if seen[start] {
+            continue;
+        }
+        let on = ink(start % w, start / w);
+        let (mut stack, mut open) = (vec![start], false);
+        seen[start] = true;
+        while let Some(p) = stack.pop() {
+            let (x, y) = (p % w, p / w);
+            open |= x == 0 || y == 0 || x == w - 1 || y == h - 1;
+            for (dx, dy) in (-1..=1).flat_map(|dy| (-1..=1).map(move |dx| (dx, dy))) {
+                // Tinta liga na diagonal; o fundo, so de lado.
+                if (dx, dy) == (0, 0) || !on && dx != 0 && dy != 0 {
+                    continue;
+                }
+                let (Some(nx), Some(ny)) = (x.checked_add_signed(dx), y.checked_add_signed(dy))
+                else {
+                    continue;
+                };
+                if nx < w && ny < h && !seen[ny * w + nx] && ink(nx, ny) == on {
+                    seen[ny * w + nx] = true;
+                    stack.push(ny * w + nx);
+                }
+            }
+        }
+        if on {
+            pieces += 1;
+        } else if !open {
+            holes += 1;
+        }
+    }
+    (pieces, holes)
+}
+
+/// Quantas linhas iguais seguidas abrem e fecham o desenho: as pontas (o
+/// topo do A, o pe dele).
+fn ends(rows: &[u32]) -> (usize, usize) {
+    let head = rows
+        .iter()
+        .take_while(|&row| Some(row) == rows.first())
+        .count();
+    let foot = rows
+        .iter()
+        .rev()
+        .take_while(|&row| Some(row) == rows.last())
+        .count();
+    (head, foot)
+}
+
 /// Tira `n` linhas do corpo da letra (de `top` a `bottom`) e o encosta embaixo
-/// (`keep_bottom`) ou em cima. Sai primeiro a linha igual a de cima, a mais
-/// perto do meio; sem uma igual, a que menos muda. `None` = o corpo ficaria
-/// baixo demais.
+/// (`keep_bottom`) ou em cima, sem desfazer a letra: ela fica com os mesmos
+/// pedacos e buracos (a barra do A, o O fechado), e as pontas de cima e de
+/// baixo (`ends`) com 2 linhas se tinham 2. Sai primeiro a linha igual a de
+/// cima, a mais perto do meio; sem uma igual, a que menos muda. Medido em
+/// 19/10/2026 na fonte de 8x8 do jogo: tirando as linhas repetidas sem essa
+/// regra, saia a segunda linha do pe do A, e a barra virava a base de um
+/// triangulo ("ESTᐃ", "NᐃO"). Sem linha que se possa tirar assim, tira como
+/// antes. `None` = o corpo ficaria baixo demais.
 fn squash(rows: &mut [u32], top: usize, bottom: usize, n: usize, keep_bottom: bool) -> Option<()> {
     let mut body = rows[top..=bottom].to_vec();
     if body.len() < n + MIN_BODY {
         return None;
     }
+    let (form, (head, foot)) = (shape(&body), ends(&body));
     for _ in 0..n {
         let middle = body.len() / 2;
+        let change = |&k: &usize| ((body[k] ^ body[k - 1]).count_ones(), k.abs_diff(middle));
+        let keeps = |&k: &usize| {
+            let mut rest = body.clone();
+            rest.remove(k);
+            let (h, f) = ends(&rest);
+            shape(&rest) == form && h >= head.min(2) && f >= foot.min(2)
+        };
         let k = (1..body.len())
-            .min_by_key(|&k| ((body[k] ^ body[k - 1]).count_ones(), k.abs_diff(middle)))?;
+            .filter(keeps)
+            .min_by_key(change)
+            .or_else(|| (1..body.len()).min_by_key(change))?;
         body.remove(k);
     }
     rows[top..=bottom].fill(0);
@@ -279,17 +358,31 @@ fn compose(c: char, base: &[u32], area: Area) -> Option<Vec<u32>> {
         .min((area.right + 1).saturating_sub(width))
         .max(area.left);
     // O sinal que pousa em cima do traco some nele (o "i" de uma haste so):
-    // anda uma coluna pro lado se isso o descola.
+    // anda uma coluna pro lado se isso o descola. Na letra pequena
+    // (`LOOSE_BELOW`), o acento sobre ponta fina (o bico do A, a haste do I)
+    // se emenda nela ate na diagonal (o do Á continuava o bico): ali ele
+    // tenta antes, ate 2 colunas, nao encostar nem assim.
     let (near, edge) = if below {
         (mark[0], rows[first - 1])
     } else {
         (mark[MARK_ROWS - 1], rows[first + MARK_ROWS])
     };
-    let touches = |x: usize| (near >> shift << x) & edge != 0;
-    let x = [Some(x), Some(x + 1), x.checked_sub(1)]
+    let clear = |x: usize, reach: u32| {
+        x >= area.left && x + width <= area.right + 1 && (near >> shift << x) & reach == 0
+    };
+    let point = !below && bottom + 1 - top < LOOSE_BELOW && edge & edge << 1 == 0;
+    let loose = [0, 1, -1, 2, -2]
         .into_iter()
-        .flatten()
-        .find(|&x| x >= area.left && x + width <= area.right + 1 && !touches(x))
+        .filter(|_| point)
+        .filter_map(|d| x.checked_add_signed(d))
+        .find(|&x| clear(x, edge | edge << 1 | edge >> 1));
+    let x = loose
+        .or_else(|| {
+            [Some(x), Some(x + 1), x.checked_sub(1)]
+                .into_iter()
+                .flatten()
+                .find(|&x| clear(x, edge))
+        })
         .unwrap_or(x);
     for (y, bits) in mark.iter().enumerate() {
         *rows.get_mut(first + y)? |= bits >> shift << x;
@@ -419,9 +512,14 @@ mod tests {
         // acento entra em cima, com o pe da letra no mesmo lugar.
         let big = rows("....#...../....#...../...#.#..../...#.#..../..#...#.../..#####.../.#.....#../.#.....#../.#.....#../..........");
         let capital = compose('Á', &big, AREA).unwrap();
-        assert_eq!(capital[8], big[8]);
-        assert_eq!(capital[2], big[0], "o topo da letra desce 2 linhas");
-        assert!(capital[0] != 0 && capital[1] != 0);
+        assert_eq!(
+            capital[2..9],
+            [big[0], big[1], big[2], big[4], big[5], big[6], big[8]],
+            "o topo desce 2 linhas; sai uma da diagonal e uma do pe"
+        );
+        // O corpo tem 7 linhas: o acento encosta na diagonal e fica (a fonte
+        // de 16x10 do jogo medido, que ja lia bem).
+        assert_eq!(capital[..2], [1 << 6, 1 << 5]);
         // O pingo do "i" sai e o acento entra no lugar dele.
         let i = rows("...#....../........../..##....../...#....../...#....../...#....../...#....../...#....../..###...../..........");
         assert_eq!(compose('í', &i, AREA).unwrap()[2..], i[2..]);
@@ -430,6 +528,76 @@ mod tests {
         let cedilla = compose('ç', &c, AREA).unwrap();
         assert_eq!(cedilla[2], c[2], "o topo fica");
         assert!(cedilla[7] != 0 && cedilla[8] != 0);
+    }
+
+    /// Fonte inventada de 8x8 como a pequena do jogo medido: a maiuscula
+    /// ocupa as 7 linhas que a fonte usa, sem nenhuma livre pro sinal, e o A
+    /// tem bico de 1 ponto e pe de 2 linhas.
+    const SMALL: Area = Area {
+        top: 0,
+        bottom: 6,
+        left: 0,
+        right: 7,
+    };
+    const SMALL_CAPITALS: [(char, &str); 6] = [
+        (
+            'A',
+            "...#.../..#.#../..#.#../.#...#./.#####./#.....#/#.....#",
+        ),
+        (
+            'E',
+            "#####../#....../#....../####.../#....../#....../#####..",
+        ),
+        (
+            'I',
+            "...#.../...#.../...#.../...#.../...#.../...#.../...#...",
+        ),
+        (
+            'O',
+            ".###.../#...#../#...#../#...#../#...#../#...#../.###...",
+        ),
+        (
+            'U',
+            "#...#../#...#../#...#../#...#../#...#../#...#../.###...",
+        ),
+        (
+            'C',
+            ".###.../#...#../#....../#....../#....../#...#../.###...",
+        ),
+    ];
+
+    /// A maiuscula achatada continua a letra: so perdeu linhas (nada
+    /// inventado), tem os mesmos pedacos e buracos, a linha de cima e a de
+    /// baixo de antes, e o pe com 2 linhas se tinha 2. Medido em 19/10/2026:
+    /// sem isso, o A perdia a segunda linha do pe e virava triangulo.
+    #[test]
+    fn a_capital_squashed_in_a_small_font_is_still_the_letter() {
+        for c in "ÁÀÂÃÉÊÍÓÔÕÚÇ".chars() {
+            let (base, _, below) = font::mark(c).unwrap();
+            let (_, art) = SMALL_CAPITALS.iter().find(|(b, _)| *b == base).unwrap();
+            let base = rows(art);
+            let drawn = compose(c, &base, SMALL).unwrap();
+            let body = if below { &drawn[..5] } else { &drawn[2..] };
+            let mut rest = base.iter();
+            assert!(
+                body.iter().all(|row| rest.any(|b| b == row)),
+                "{c}: so tirou linhas"
+            );
+            assert_eq!(shape(body), shape(&base), "{c}: pedacos e buracos");
+            assert_eq!((body[0], body[4]), (base[0], base[6]), "{c}: topo e base");
+            assert!(ends(body).1 >= ends(&base).1.min(2), "{c}: o pe");
+            // Sobre o bico do A e a haste do I, o acento fica solto: um
+            // pedaco a mais.
+            if "ÁÀÍ".contains(c) {
+                assert_eq!(shape(&drawn).0, shape(body).0 + 1, "{c}: acento solto");
+            }
+        }
+        // O A: bico, a diagonal de cima, a barra e o pe inteiro.
+        let a = rows(SMALL_CAPITALS[0].1);
+        assert_eq!(
+            compose('Ã', &a, SMALL).unwrap()[2..],
+            [a[0], a[1], a[4], a[5], a[6]]
+        );
     }
 
     #[test]

@@ -2437,3 +2437,28 @@ aplicar). O app ainda não aplica patch nem avisa que o catálogo tem tradução
 pro jogo aberto.
 
 **Driver:** claude (pedido do Rhuan).
+
+## 2026-10-19 — Letra acentuada achatada sem desfazer a letra; sinal solto na letra pequena [refina a de 18/10]
+
+**Contexto:** a decisão de 18/10 achatava a letra sem linha livre "tirando
+linha repetida". Na fonte de 8x8 do Mother 3 (maiúscula de 7 linhas em 7) a
+linha repetida tirada era a segunda do pé do A: "ESTÁ", "NÃO" apareciam com
+um triângulo ("ESTᐃ", "NᐃO"), e o acento emendava no bico.
+
+**Decisão:** o achatamento só tira linha que mantém os pedaços e os buracos
+da letra (a barra do A, o O fechado, o c aberto) e as pontas de cima e de
+baixo com 2 linhas se tinham 2; dentro disso, a mesma preferência de antes
+(linha repetida, mais perto do meio). Na letra pequena (corpo com menos de 3
+vezes a altura do sinal) o acento sobre ponta fina não encosta nem na
+diagonal, se acha lugar até 2 colunas ao lado; a cedilha continua encostada.
+
+**Alternativas consideradas:** forma da minúscula acentuada no lugar da
+maiúscula (o "ã" achatado na 8x8 parecia "g"); sinal de 1 linha (acento,
+crase e til ficam iguais); linha livre entre sinal e letra (o corpo de 4
+linhas vira borrão). Comparadas desenhadas nas palavras do jogo.
+
+**Consequências:** a fonte de 16x10 não muda (conferido byte a byte no
+Mother 3; teste fixa a saída). Til e circunflexo sobre bico de 1 ponto ainda
+encostam: não há lugar solto pra eles numa letra de 8 colunas.
+
+**Driver:** claude (pedido da sessão principal).
