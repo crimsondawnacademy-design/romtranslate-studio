@@ -1151,8 +1151,13 @@ fn tag_group(entries: &mut [TextEntry], bank: &Bank, inside: Vec<(usize, usize)>
 pub(crate) fn line_width(entry: &TextEntry) -> Option<usize> {
     let line = match entry.metadata.get("bank") {
         Some(bank) => bank.get("line")?,
-        // Frase do perfil do jogo com quebra de linha declarada.
-        None => entry.metadata.get("perfil")?.get("linha")?,
+        // Frase do perfil do jogo com quebra de linha declarada, ou nome de
+        // menu de arquivo MPT0.
+        None => entry
+            .metadata
+            .get("perfil")
+            .or_else(|| entry.metadata.get("mpt"))?
+            .get("linha")?,
     };
     Some(line.as_u64()? as usize)
 }

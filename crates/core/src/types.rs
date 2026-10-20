@@ -227,6 +227,7 @@ impl TextEntry {
         !self.pointers().is_empty()
             || self.metadata.get("bank").is_some_and(|v| v.is_object())
             || crate::profile::is_profile(self)
+            || crate::adapters::mpt::is_mpt(self)
     }
 
     /// So as posicoes dos ponteiros, de qualquer largura.

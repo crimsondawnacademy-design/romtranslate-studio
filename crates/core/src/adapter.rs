@@ -132,6 +132,9 @@ pub struct ExtractHints {
     /// (comando, codigo -> caractere). No jogo medido, as falas dos Sr.
     /// Saturno sao escritas com `FF0B` e uma fonte propria de 66 desenhos.
     pub alphabets: Vec<(u16, std::collections::HashMap<u16, char>)>,
+    /// Idioma de origem do projeto (`en-US`): no cartucho com uma pasta por
+    /// idioma, e a que se traduz.
+    pub source_language: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

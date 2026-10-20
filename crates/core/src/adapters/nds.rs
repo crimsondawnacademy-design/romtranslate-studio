@@ -12,11 +12,14 @@
 //! O binario ARM9 fica de fora (nem e extraido): ele divide a RAM principal
 //! com BSS e heap, e texto anexado nele seria zerado no boot.
 
+use super::mpt;
 use super::pointers::{
     ensure_pointers_untouched, file_relative_tables, mark_relocatable, relocate, to_file_relative,
     Relocation,
 };
-use crate::adapter::{AppliedImage, Extraction, GameAdapter, GameInput, VerificationReport};
+use crate::adapter::{
+    AppliedImage, ExtractHints, Extraction, GameAdapter, GameInput, VerificationReport,
+};
 use crate::error::{CoreError, Result};
 use crate::scan::{keep_text, scan_bytes, ScanConfig, ScanEncoding, MAX_ENTRIES};
 use crate::types::{
@@ -380,13 +383,61 @@ fn relocate_files(data: &[u8], out: &mut Vec<u8>, relocations: &[Relocation]) ->
             "string realocavel fora de qualquer arquivo do filesystem",
         ));
     }
+    set_used_size(out)
+}
 
+/// Header com o tamanho usado e a capacidade do chip de um ROM que cresceu.
+fn set_used_size(out: &mut [u8]) -> Result<()> {
     let used = u32::try_from(out.len()).map_err(|_| err("ROM passaria de 4 GiB"))?;
     out[USED_SIZE_OFFSET..USED_SIZE_OFFSET + 4].copy_from_slice(&used.to_le_bytes());
     while out[CAPACITY_OFFSET] < 12 && CHIP_UNIT << out[CAPACITY_OFFSET] < out.len() {
         out[CAPACITY_OFFSET] += 1;
     }
     Ok(())
+}
+
+/// Troca arquivos inteiros (caminho, bytes novos): o que cabe no lugar do
+/// antigo fica la; o que cresceu vai pro fim do ROM. A FAT passa a dizer o
+/// tamanho novo nos dois casos. `files` e o filesystem do ROM original.
+fn replace_files(
+    out: &mut Vec<u8>,
+    files: &[ResourceDescriptor],
+    replaced: Vec<(String, Vec<u8>)>,
+) -> Result<()> {
+    if replaced.is_empty() {
+        return Ok(());
+    }
+    let layout = fs_layout(out)?;
+    for (path, bytes) in replaced {
+        let file = files
+            .iter()
+            .find(|f| f.path == path)
+            .ok_or_else(|| err(format!("{path}: arquivo nao existe no filesystem")))?;
+        let (start, len) = (file.offset as usize, file.size as usize);
+        let new_start = match bytes.len() <= len {
+            true => start,
+            false => out.len().next_multiple_of(FILE_ALIGN),
+        };
+        if new_start + bytes.len() > MAX_ROM_LEN {
+            return Err(err(format!(
+                "{path}: o ROM passaria do tamanho maximo de um cartao de DS"
+            )));
+        }
+        if new_start == start {
+            out[start..start + len].fill(0xFF);
+        } else {
+            out.resize(new_start, 0xFF);
+            out.resize(new_start + bytes.len(), 0);
+        }
+        out[new_start..new_start + bytes.len()].copy_from_slice(&bytes);
+        repoint_fat(
+            out,
+            &layout,
+            (start, start + len),
+            (new_start, new_start + bytes.len()),
+        )?;
+    }
+    set_used_size(out)
 }
 
 /// Troca (start, end) de toda entrada da FAT que apontava pro arquivo antigo.
@@ -504,113 +555,67 @@ impl GameAdapter for NdsAdapter {
         walk_filesystem(data, &layout)
     }
 
-    /// Scanner ASCII + UTF-16LE por arquivo do filesystem (e no header, onde
-    /// vive o titulo), com `resource_path` dizendo de onde cada string veio.
-    ///
-    /// Por arquivo: desempate das duas leituras, ponteiros, e so entao o
-    /// filtro de "parece texto". Filtrar antes do desempate traria o lixo de
-    /// volta — sem a leitura ASCII pra cobrir o trecho, a leitura UTF-16
-    /// falsa do mesmo lixo ("CJK") ganharia. E string com ponteiro em tabela
-    /// nao e descartada.
-    // ponytail: o teto corta as sequencias CRUAS de cada arquivo (as
-    // TextEntry dele existem antes do filtro); arquivo que passa disso sai
-    // marcado `truncated`. E a regra nao separa UTF-16 falso de kanji: os
-    // dois sao "letra". Falta um ROM real de DS pra calibrar isso.
     fn extract(&self, data: &[u8]) -> Result<Extraction> {
-        let files = self.list_resources(data)?;
-        let mut regions: Vec<(String, u64, u64)> =
-            vec![("header".to_string(), 0, HEADER_LEN as u64)];
-        regions.extend(
-            files
-                .iter()
-                .filter(|f| f.size > 0)
-                .map(|f| (f.path.clone(), f.offset, f.offset + f.size)),
-        );
+        self.extract_with(data, &ExtractHints::default())
+    }
 
-        let mut out = Extraction::default();
-        for (path, start, end) in regions {
-            let remaining = MAX_ENTRIES - out.entries.len();
-            let mut cut = false;
-            let mut scan = |encoding| {
-                let outcome = scan_bytes(
-                    data,
-                    &ScanConfig {
-                        encoding,
-                        japanese: true,
-                        region_start: Some(start),
-                        region_end: Some(end),
-                        max_entries: remaining,
-                        ..ScanConfig::default()
-                    },
-                )?;
-                cut |= outcome.truncated;
-                Ok::<_, CoreError>(outcome.entries)
-            };
-            let mut found =
-                resolve_encoding_overlaps(scan(ScanEncoding::Ascii)?, scan(ScanEncoding::Utf16Le)?);
-            // Som, modelo, video: o que a varredura leu ali e descartado, com
-            // ponteiro ou sem.
-            if path != "header" && binary_format(&data[start as usize..end as usize]) {
-                out.discarded += found.len();
-                continue;
-            }
-            for e in found.iter_mut() {
-                e.resource_path = Some(path.clone());
-                e.max_bytes = Some(e.original_bytes.len());
-                e.context = Some("in-place: traducao limitada ao espaco original".to_string());
-            }
-            // O header nao e arquivo da FAT e nao reloca.
-            if path != "header" {
-                let (start, len) = (start as usize, (end - start) as usize);
-                let tables = file_relative_tables(
-                    &data[start..start + len],
-                    &found,
-                    |abs| abs.checked_sub(start).filter(|&r| r < len),
-                    |rel| (rel < len).then_some(start + rel),
-                );
-                for (i, pointers) in tables {
-                    let e = &mut found[i];
-                    if mark_relocatable(e, &pointers) {
-                        e.max_bytes = None;
-                        e.context = Some(format!(
-                            "realocavel: {} ponteiro(s) em tabela no arquivo — se nao couber, o \
-                             arquivo cresce",
-                            pointers.len()
-                        ));
-                    }
-                }
-            }
-            out.discarded += keep_text(&mut found);
-            out.truncated |= cut || found.len() >= remaining;
-            found.truncate(remaining);
-            out.entries.append(&mut found);
-            if out.entries.len() >= MAX_ENTRIES {
-                break;
-            }
+    /// Com arquivos de mensagens MPT0 (Dragon Quest), o texto e o deles, na
+    /// pasta do idioma de origem; a varredura so traria grafico lido como
+    /// frase. Sem eles, a varredura de cada arquivo (`scan_files`).
+    fn extract_with(&self, data: &[u8], hints: &ExtractHints) -> Result<Extraction> {
+        let files = self.list_resources(data)?;
+        let wanted = hints
+            .source_language
+            .as_deref()
+            .and_then(|lang| lang.get(..2))
+            .unwrap_or("en")
+            .to_ascii_uppercase();
+        let messages: Vec<(String, usize, &[u8])> = files
+            .iter()
+            .map(|f| (f.path.clone(), f.offset as usize, f.size as usize))
+            .filter(|(_, at, _)| data[*at..].starts_with(b"MPT0"))
+            .map(|(path, at, len)| (path, at, &data[at..at + len]))
+            .collect();
+        let entries = mpt::extract(&messages, &wanted);
+        if !entries.is_empty() {
+            return Ok(Extraction {
+                entries,
+                ..Extraction::default()
+            });
         }
-        Ok(out)
+        scan_files(data, files)
     }
 
     fn apply_text(&self, data: &[u8], entries: &[TextEntry]) -> Result<AppliedImage> {
         if data.len() < HEADER_LEN {
             return Err(err("arquivo menor que o header NDS"));
         }
-        let plan = super::inplace::plan_in_place(data, entries, true)?;
+        let files = self.list_resources(data)?;
+        let (messages, entries): (Vec<TextEntry>, Vec<TextEntry>) =
+            entries.iter().cloned().partition(mpt::is_mpt);
+        let (rebuilt, mpt_report) = mpt::plan(data, &messages, |path| {
+            files
+                .iter()
+                .find(|f| f.path == path)
+                .map(|f| (f.offset as usize, f.size as usize))
+        })?;
+        let plan = super::inplace::plan_in_place(data, &entries, true)?;
         let mut out = data.to_vec();
         for (offset, patch) in &plan.writes {
             out[*offset..offset + patch.len()].copy_from_slice(patch);
         }
-        ensure_pointers_untouched(data, &out, entries)?;
+        ensure_pointers_untouched(data, &out, &entries)?;
         if !plan.relocations.is_empty() {
             relocate_files(data, &mut out, &plan.relocations)?;
         }
+        replace_files(&mut out, &files, rebuilt)?;
         // Titulo (0x00..0x0C) e os campos de tamanho mudam o CRC do header.
         let crc = crc16(&out[..HEADER_CRC_OFFSET]);
         out[HEADER_CRC_OFFSET..HEADER_CRC_OFFSET + 2].copy_from_slice(&crc.to_le_bytes());
-        Ok(AppliedImage {
-            bytes: out,
-            report: plan.report,
-        })
+        let mut report = plan.report;
+        report.applied += mpt_report.applied;
+        report.kept_original += mpt_report.kept_original;
+        Ok(AppliedImage { bytes: out, report })
     }
 
     fn verify(&self, data: &[u8]) -> Result<VerificationReport> {
@@ -641,6 +646,91 @@ impl GameAdapter for NdsAdapter {
             problems,
         })
     }
+}
+
+/// Scanner ASCII + UTF-16LE por arquivo do filesystem (e no header, onde
+/// vive o titulo), com `resource_path` dizendo de onde cada string veio.
+///
+/// Por arquivo: desempate das duas leituras, ponteiros, e so entao o
+/// filtro de "parece texto". Filtrar antes do desempate traria o lixo de
+/// volta — sem a leitura ASCII pra cobrir o trecho, a leitura UTF-16
+/// falsa do mesmo lixo ("CJK") ganharia. E string com ponteiro em tabela
+/// nao e descartada.
+// ponytail: o teto corta as sequencias CRUAS de cada arquivo (as
+// TextEntry dele existem antes do filtro); arquivo que passa disso sai
+// marcado `truncated`. E a regra nao separa UTF-16 falso de kanji: os
+// dois sao "letra". Falta um ROM real de DS pra calibrar isso.
+fn scan_files(data: &[u8], files: Vec<ResourceDescriptor>) -> Result<Extraction> {
+    let mut regions: Vec<(String, u64, u64)> = vec![("header".to_string(), 0, HEADER_LEN as u64)];
+    regions.extend(
+        files
+            .iter()
+            .filter(|f| f.size > 0)
+            .map(|f| (f.path.clone(), f.offset, f.offset + f.size)),
+    );
+
+    let mut out = Extraction::default();
+    for (path, start, end) in regions {
+        let remaining = MAX_ENTRIES - out.entries.len();
+        let mut cut = false;
+        let mut scan = |encoding| {
+            let outcome = scan_bytes(
+                data,
+                &ScanConfig {
+                    encoding,
+                    japanese: true,
+                    region_start: Some(start),
+                    region_end: Some(end),
+                    max_entries: remaining,
+                    ..ScanConfig::default()
+                },
+            )?;
+            cut |= outcome.truncated;
+            Ok::<_, CoreError>(outcome.entries)
+        };
+        let mut found =
+            resolve_encoding_overlaps(scan(ScanEncoding::Ascii)?, scan(ScanEncoding::Utf16Le)?);
+        // Som, modelo, video: o que a varredura leu ali e descartado, com
+        // ponteiro ou sem.
+        if path != "header" && binary_format(&data[start as usize..end as usize]) {
+            out.discarded += found.len();
+            continue;
+        }
+        for e in found.iter_mut() {
+            e.resource_path = Some(path.clone());
+            e.max_bytes = Some(e.original_bytes.len());
+            e.context = Some("in-place: traducao limitada ao espaco original".to_string());
+        }
+        // O header nao e arquivo da FAT e nao reloca.
+        if path != "header" {
+            let (start, len) = (start as usize, (end - start) as usize);
+            let tables = file_relative_tables(
+                &data[start..start + len],
+                &found,
+                |abs| abs.checked_sub(start).filter(|&r| r < len),
+                |rel| (rel < len).then_some(start + rel),
+            );
+            for (i, pointers) in tables {
+                let e = &mut found[i];
+                if mark_relocatable(e, &pointers) {
+                    e.max_bytes = None;
+                    e.context = Some(format!(
+                        "realocavel: {} ponteiro(s) em tabela no arquivo — se nao couber, o \
+                         arquivo cresce",
+                        pointers.len()
+                    ));
+                }
+            }
+        }
+        out.discarded += keep_text(&mut found);
+        out.truncated |= cut || found.len() >= remaining;
+        found.truncate(remaining);
+        out.entries.append(&mut found);
+        if out.entries.len() >= MAX_ENTRIES {
+            break;
+        }
+    }
+    Ok(out)
 }
 
 #[cfg(test)]

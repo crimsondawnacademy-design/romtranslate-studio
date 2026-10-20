@@ -145,10 +145,22 @@ pub fn translation_requests(
     db: &ProjectDb,
     opts: &TranslateOptions,
 ) -> Result<Vec<TranslationRequest>> {
+    requests_for(db, opts, false)
+}
+
+/// `unique`: a frase repetida fica de fora, como na traducao (que a manda uma
+/// vez so). Os lotes pra traduzir fora do app levam todas: o `apply` grava
+/// por id.
+fn requests_for(
+    db: &ProjectDb,
+    opts: &TranslateOptions,
+    unique: bool,
+) -> Result<Vec<TranslationRequest>> {
+    let mut seen = HashSet::new();
     let mut pending: Vec<TextEntry> = db
         .load_entries()?
         .into_iter()
-        .filter(|e| wanted(e, opts))
+        .filter(|e| wanted(e, opts) && (!unique || seen.insert(repeat_key(e))))
         .collect();
     let mut tables = ProjectTables::new(db.project_dir());
     let glossary = db.glossary_list()?;
@@ -192,7 +204,7 @@ pub fn estimate_translation(
     db: &ProjectDb,
     opts: &TranslateOptions,
 ) -> Result<(TranslationEstimate, Option<TranslationRequest>)> {
-    let requests = translation_requests(db, opts)?;
+    let requests = requests_for(db, opts, true)?;
     let mut estimate = TranslationEstimate {
         entries: requests.iter().map(|r| r.items.len()).sum(),
         batches: requests.len(),
@@ -462,18 +474,11 @@ pub async fn run_translation(
     // vale pras outras. Medido em 13/10/2026 num jogo real: 8.717 textos
     // distintos em 11.161 frases — uma em cada cinco chamadas era repeticao.
     // "A mesma" = mesmo texto, mesmo conjunto de caracteres e mesmo espaco.
-    let mut first_of: HashMap<(u8, String, String, usize, bool), String> = HashMap::new();
+    let mut first_of: HashMap<RepeatKey, String> = HashMap::new();
     let mut copies: Vec<(TextEntry, String)> = Vec::new();
     let mut unique: Vec<TextEntry> = Vec::with_capacity(remaining.len());
     for entry in remaining {
-        let (kind, table_id) = charset_group(&entry);
-        let key = (
-            kind,
-            table_id.to_string(),
-            entry.source_text.clone(),
-            entry.max_bytes.unwrap_or(entry.original_bytes.len()),
-            entry.pointer_offsets().is_empty(),
-        );
+        let key = repeat_key(&entry);
         match first_of.get(&key) {
             Some(first) => copies.push((entry, first.clone())),
             None => {
@@ -874,6 +879,21 @@ impl<'a> Charset<'a> {
 /// Entries do mesmo grupo escrevem com o mesmo conjunto de caracteres e
 /// podem dividir um batch: sem restricao (UTF-8, UTF-16), ASCII, e cada
 /// tabela. Os mesmos casos de `Charset::of`.
+/// O que faz duas frases serem "a mesma" pra traducao: so a primeira vai ao
+/// provider (`run_translation`).
+type RepeatKey = (u8, String, String, usize, bool);
+
+fn repeat_key(entry: &TextEntry) -> RepeatKey {
+    let (kind, table_id) = charset_group(entry);
+    (
+        kind,
+        table_id.to_string(),
+        entry.source_text.clone(),
+        entry.max_bytes.unwrap_or(entry.original_bytes.len()),
+        entry.pointer_offsets().is_empty(),
+    )
+}
+
 fn charset_group(entry: &TextEntry) -> (u8, &str) {
     match &entry.encoding {
         TextEncoding::Ascii | TextEncoding::ShiftJis => (1, ""),

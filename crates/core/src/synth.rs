@@ -257,6 +257,51 @@ pub fn make_nds_rom_with_binary_files() -> Vec<u8> {
     build_nds(&files)
 }
 
+/// Arquivo de mensagens MPT0 (`adapters::mpt`): cabecalho, indice com ids
+/// 0.. e as mensagens em fila, cada uma preenchida com 0xFE ate o multiplo
+/// de 4.
+pub fn mpt_file(messages: &[&str]) -> Vec<u8> {
+    let index_len = (messages.len() * 6).next_multiple_of(4);
+    let mut index = Vec::new();
+    let mut body = Vec::new();
+    for (i, text) in messages.iter().enumerate() {
+        index.extend_from_slice(&(i as u16).to_le_bytes());
+        index.extend_from_slice(&(text.len() as u16).to_le_bytes());
+        index.extend_from_slice(&((body.len() / 4) as u16).to_le_bytes());
+        body.extend_from_slice(text.as_bytes());
+        body.resize(body.len().next_multiple_of(4), 0xFE);
+    }
+    index.resize(index_len, 0xFE);
+    let total = 32 + index_len + body.len();
+    let mut out = b"MPT0".to_vec();
+    for field in [total, 7002, 7955, messages.len(), 32, index_len, body.len()] {
+        out.extend_from_slice(&(field as u32).to_le_bytes());
+    }
+    out.extend_from_slice(&index);
+    out.extend_from_slice(&body);
+    out
+}
+
+/// Mensagens do `make_nds_rom_with_mpt`: duas falas e um nome de menu.
+pub const NDS_MPT_MESSAGES: [&str; 4] = [
+    "@aBob@bWelcome to Santa Rosa!\r\nRest well.\n@c0@",
+    "@",
+    "@0N@2the @3a @4stick@5the @6some @7sticks@8N@",
+    "@a@b*: %0%a000090 found %H0860%Xa coin%Ycoins%Z!\n@c0@",
+];
+
+/// NDS com os arquivos base mais `b0.mpt` (`NDS_MPT_MESSAGES`) e um MPT0 de
+/// icone, que nao e texto.
+pub fn make_nds_rom_with_mpt() -> Vec<u8> {
+    let mut icon = mpt_file(&["x"]);
+    let at = icon.len() - 4;
+    icon[at] = 0xFF;
+    let mut files = base_nds_files();
+    files.push(("b0.mpt", mpt_file(&NDS_MPT_MESSAGES)));
+    files.push(("icon.mpt", icon));
+    build_nds(&files)
+}
+
 /// NDS minimo: header + FNT (so a raiz) + FAT + arquivos alinhados em 0x40.
 fn build_nds(files: &[(&str, Vec<u8>)]) -> Vec<u8> {
     use crate::adapters::nds::{crc16, LOGO_CRC_EXPECTED};

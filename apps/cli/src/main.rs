@@ -112,7 +112,7 @@ enum Command {
     Estimate {
         #[arg(value_name = "PROJETO")]
         project: PathBuf,
-        /// Frases por chamada, de 1 a 50 [padrao: o das configuracoes do app]
+        /// Frases por chamada, de 1 a 100 [padrao: o das configuracoes do app]
         #[arg(long, value_name = "N")]
         batch: Option<usize>,
         /// Conta tambem as frases com erro de validacao (como no translate)
@@ -127,7 +127,7 @@ enum Command {
     Translate {
         #[arg(value_name = "PROJETO")]
         project: PathBuf,
-        /// Frases por chamada, de 1 a 50 [padrao: o das configuracoes do app]
+        /// Frases por chamada, de 1 a 100 [padrao: o das configuracoes do app]
         #[arg(long, value_name = "N")]
         batch: Option<usize>,
         /// Chamadas ao provider ao mesmo tempo [padrao: o das configuracoes do app]
@@ -896,7 +896,9 @@ fn load(project: &Path) -> Result<GameProject, Failure> {
 fn options(game: GameProject, batch: usize) -> TranslateOptions {
     let mut opts = TranslateOptions::new(game.target_language);
     opts.source_language = game.source_language;
-    opts.batch_size = batch.clamp(1, 50);
+    // ponytail: 100 no CLI (lote longo ainda fecha em `BATCH_CHARS`); a tela
+    // segue com o que as configuracoes dizem.
+    opts.batch_size = batch.clamp(1, 100);
     opts
 }
 

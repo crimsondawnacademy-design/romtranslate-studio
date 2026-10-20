@@ -4,6 +4,7 @@ pub mod gamecube;
 pub mod gba;
 pub(crate) mod inplace;
 pub(crate) mod iso9660;
+pub(crate) mod mpt;
 pub mod nds;
 pub mod nes;
 pub(crate) mod packed;
@@ -85,7 +86,12 @@ pub struct ExtractOutcome {
 /// principal (os 2 bytes do codigo, o menos significativo primeiro):
 /// `0100=あ` e o codigo 1. Feito a mao, olhando a fonte do jogo no emulador.
 pub fn hints(project_dir: &Path) -> Result<crate::adapter::ExtractHints> {
-    let mut hints = crate::adapter::ExtractHints::default();
+    let mut hints = crate::adapter::ExtractHints {
+        source_language: crate::project::load_project(project_dir)
+            .ok()
+            .and_then(|project| project.source_language),
+        ..Default::default()
+    };
     let dir = project_dir.join(crate::tbl::TABLES_DIR);
     let Ok(list) = std::fs::read_dir(&dir) else {
         return Ok(hints);

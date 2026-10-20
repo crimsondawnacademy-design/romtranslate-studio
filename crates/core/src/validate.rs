@@ -357,6 +357,9 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
                 // Mensagem de banco com a largura da caixa conhecida: crescer
                 // e o esperado, e quem avisa e a conta de linha, mais abaixo.
                 _ if n > original && crate::adapters::bank::line_width(entry).is_some() => {}
+                // Fala de arquivo MPT0: o arquivo e remontado e o jogo quebra
+                // a linha sozinho.
+                _ if n > original && crate::adapters::mpt::is_mpt(entry) => {}
                 // Realocar resolve o espaco na imagem, nao na tela: caixa de texto
                 // ou buffer de RAM do jogo podem nao comportar o texto maior.
                 _ if n > original && relocatable => push(
