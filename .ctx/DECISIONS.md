@@ -2502,3 +2502,15 @@ português passa do inglês e erraria quase todo nome); fonte do app pro sinal
 
 **Decisão:** na lista cujo original usa `;`, o teto é o maior pedaço entre dois `;` da lista inteira (a janela é a mesma pra todos os nomes) e o `;` vira código `[;]` que a validação não conta; na regravação o app põe o `;` no último espaço antes do teto, no formato do original (`mpt::wrapped`). Lista sem `;` continua com o teto da mensagem. 135 erros viraram 12, todos em nomes de lugar, corrigidos à mão.
 
+## 2026-10-20 — Plataformas novas por ficha, guiadas pela lista de pedidos e pelo japonês
+
+**Contexto:** o Rhuan pediu traduzir as ROMs de todas as plataformas da lista de pedidos do Data Crystal, com foco no japonês ("o maior gargalo do mercado"). A lista tem ~2.300 jogos em 44 plataformas, quase todos japoneses; o app cobria 8 delas (53% dos pedidos).
+
+**Decisão:**
+- **Cartucho = ficha, não adapter novo.** `adapters/cartucho.rs` tem uma `Console` por plataforma (detecção pelo cabeçalho + checksum); o motor (varredura, tabela, perfil, no lugar) é o mesmo. Disco da Sega idem (`sega_disco.rs`, sobre o ISO 9660 do PS1).
+- **Checksum só refeito se o do original conferia.** No N64, a variante do CRC é a que reproduz o guardado: sem constante do código de boot.
+- **Japonês desde o começo:** extração em ASCII + Shift-JIS em toda plataforma nova; kana de 8 bits fica com a skill (tabela + perfil).
+- **Criptografados (3DS, PS3, Vita, Xbox 360, Wii U) fora:** o app não leva chave; só arquivo já decriptado pela pessoa.
+
+**Alternativas descartadas:** um adapter por console copiando o NES (dez arquivos quase iguais); kuten de 16 bits em todo cartucho (padrão de um motor só, medido no GBA — entra quando um jogo real mostrar).
+
