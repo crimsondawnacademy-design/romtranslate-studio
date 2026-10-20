@@ -13,7 +13,7 @@ Quase todos são **japoneses que nunca saíram traduzidos** — é esse o gargal
 | PlayStation 2 | 186 | extrai, regrava no lugar | Shift-JIS |
 | PSP | 147 | extrai, regrava no lugar | Shift-JIS |
 | NES / Famicom | 111 | extrai, regrava no lugar | por tabela/perfil |
-| Saturn | 109 | — | — |
+| Saturn | 109 | **novo (20/10)**: extrai por arquivo, regrava no lugar (BIN Mode 1 ou ISO) | Shift-JIS |
 | Nintendo DS | 106 | extrai, arquivo cresce; MPT0 (Dragon Quest) | UTF-16, UTF-8 |
 | Game Boy / Color | 104 | **novo (20/10)**: extrai, checksum refeito | Shift-JIS; kana por tabela/perfil |
 | Game Boy Advance | 98 | extrai, ponteiros, LZ77, bancos | Shift-JIS e 16 bits na ordem JIS; fonte ganha acento |
@@ -25,7 +25,7 @@ Quase todos são **japoneses que nunca saíram traduzidos** — é esse o gargal
 | Dreamcast | 48 | — | — |
 | 3DS | 47 | — (criptografado) | — |
 | PlayStation 3 | 44 | — (criptografado) | — |
-| Mega-CD | 37 | — | — |
+| Mega-CD | 37 | **novo (20/10)**: extrai por arquivo, regrava no lugar | Shift-JIS |
 | PS Vita | 37 | — (criptografado) | — |
 | Xbox | 34 | — | — |
 | PC Engine (HuCard) | 29 | **novo (20/10)**: extrai (reconhece pela extensão) | Shift-JIS; tabela/perfil |
@@ -46,7 +46,7 @@ Quase todos são **japoneses que nunca saíram traduzidos** — é esse o gargal
 | Neo Geo Pocket | 3 | **novo (20/10)**: extrai | tabela/perfil |
 | Outras (Amiga, Atari ST, CD-i, Neo Geo, celular) | 12 | — | — |
 
-Antes de 20/10 o app cobria ~1.220 dos ~2.300 pedidos (53%). Com os cartuchos novos, ~1.580 (68%) — **todos experimentais**: os cartuchos novos foram conferidos só com arquivos sintéticos; nenhum jogo real dessas plataformas passou pelo app ainda.
+Antes de 20/10 o app cobria ~1.220 dos ~2.300 pedidos (53%). Com os cartuchos novos, o Saturn e o Mega-CD, ~1.730 (75%) — **todos experimentais**: o que entrou em 20/10 foi conferido só com arquivos sintéticos; nenhum jogo real dessas plataformas passou pelo app ainda.
 
 ## O gargalo do japonês, por etapa
 
@@ -57,7 +57,7 @@ Antes de 20/10 o app cobria ~1.220 dos ~2.300 pedidos (53%). Com os cartuchos no
 
 ## Próximos passos, pelo tamanho do pedido
 
-1. **Saturn (109) e Mega-CD (37):** disco ISO 9660 em setor Mode 1 — reaproveita o leitor de disco do PS1.
+1. **Jogo real** de cada plataforma nova pelo app (detecção, extração, regravação, emulador) — falta o arquivo.
 2. **PC Engine CD (77) e PC-FX (18):** trilha de dados crua, sem ISO 9660 na maioria; perfil do jogo por cima da trilha.
 3. **PC-9801 (80), PC-8801 (23), X68000 (26):** imagens de disquete e HD (D88, FDI, HDI, DIM, XDF) com FAT12 por dentro.
 4. **Dreamcast (48):** GDI/CDI, ISO 9660 na área de alta densidade.

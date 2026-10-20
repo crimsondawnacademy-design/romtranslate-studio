@@ -578,6 +578,52 @@ fn wrap_raw_2352(plain: &[u8]) -> Vec<u8> {
     out
 }
 
+/// Setor raw Mode 1 (CD de Saturn e Mega-CD): dados em +16, EDC/ECC com o
+/// endereco do setor.
+fn wrap_raw_mode1(plain: &[u8]) -> Vec<u8> {
+    const SYNC: [u8; 12] = [
+        0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00,
+    ];
+    let bcd = |n: usize| ((n / 10) << 4 | (n % 10)) as u8;
+    let mut out = Vec::with_capacity(plain.len() / 2048 * 2352);
+    for (lba, chunk) in plain.chunks(2048).enumerate() {
+        let mut sector = vec![0u8; 2352];
+        sector[..12].copy_from_slice(&SYNC);
+        let at = lba + 150;
+        sector[12] = bcd(at / 75 / 60);
+        sector[13] = bcd(at / 75 % 60);
+        sector[14] = bcd(at % 75);
+        sector[15] = 1;
+        sector[16..16 + chunk.len()].copy_from_slice(chunk);
+        crate::adapters::cdrom::regenerate_sector(&mut sector)
+            .expect("synth: setor sintetico sempre regeneravel");
+        out.extend_from_slice(&sector);
+    }
+    out
+}
+
+/// Disco de console da Sega: ISO 9660 com a assinatura no setor 0, um
+/// arquivo com uma frase ASCII e uma em japones (Shift-JIS).
+fn sega_disc(tag: &[u8], system_id: &str) -> Vec<u8> {
+    let mut game = vec![0u8; 3000];
+    plant(&mut game, 0x40, b"PRESS START BUTTON\0");
+    let japanese = crate::sjis::encode("ぼうけんを はじめますか？").expect("synth: sjis");
+    plant(&mut game, 0x200, &japanese);
+    let mut plain = build_iso9660(system_id, "SYNTH_SEGA", &[("GAME.DAT", game)]);
+    plain[..tag.len()].copy_from_slice(tag);
+    plain
+}
+
+/// Saturn em BIN raw 2352 (Mode 1).
+pub fn make_saturn_bin() -> Vec<u8> {
+    wrap_raw_mode1(&sega_disc(b"SEGA SEGASATURN ", "SEGA SEGASATURN"))
+}
+
+/// Mega-CD em ISO de 2048.
+pub fn make_mega_cd_iso() -> Vec<u8> {
+    sega_disc(b"SEGADISCSYSTEM  ", "SEGADISCSYSTEM")
+}
+
 /// PARAM.SFO minimo (psdevwiki): magic \\0PSF + index de entries de 16 bytes.
 fn build_sfo(pairs: &[(&str, &str)]) -> Vec<u8> {
     let mut keys = Vec::new();

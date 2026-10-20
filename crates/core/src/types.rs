@@ -26,6 +26,8 @@ pub enum Platform {
     Fds,
     Msx,
     PcEngine,
+    Saturn,
+    MegaCd,
     /// Fixture sintetica do proprio RomTranslate (formato RTSF, para demo/testes).
     Synthetic,
     Unknown,
@@ -53,6 +55,8 @@ impl Platform {
             Platform::Fds => "Famicom Disk System",
             Platform::Msx => "MSX",
             Platform::PcEngine => "PC Engine / TurboGrafx-16",
+            Platform::Saturn => "Sega Saturn",
+            Platform::MegaCd => "Mega-CD / Sega CD",
             Platform::Synthetic => "Fixture sintetica (RTSF)",
             Platform::Unknown => "Desconhecida",
         }

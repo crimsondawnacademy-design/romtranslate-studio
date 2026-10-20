@@ -15,6 +15,7 @@ pub mod ps1;
 pub mod ps2;
 pub mod psp;
 pub mod rtsf;
+pub mod sega_disco;
 pub mod snes;
 pub mod wii;
 pub mod wiiu;
@@ -42,6 +43,8 @@ pub fn all() -> Vec<Box<dyn GameAdapter>> {
         Box::new(psp::PspAdapter),
         Box::new(ps2::Ps2Adapter),
         Box::new(ps1::Ps1Adapter),
+        Box::new(sega_disco::SegaDisc(&sega_disco::DISCS[0])),
+        Box::new(sega_disco::SegaDisc(&sega_disco::DISCS[1])),
         Box::new(nes::NesAdapter),
         Box::new(gba::GbaAdapter),
         Box::new(snes::SnesAdapter),

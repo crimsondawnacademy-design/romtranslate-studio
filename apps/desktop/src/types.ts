@@ -20,6 +20,8 @@ export type Platform =
   | "fds"
   | "msx"
   | "pc_engine"
+  | "saturn"
+  | "mega_cd"
   | "synthetic"
   | "unknown";
 
@@ -293,6 +295,8 @@ export const PLATFORM_NAMES: Record<Platform, string> = {
   fds: "Famicom Disk System",
   msx: "MSX",
   pc_engine: "PC Engine / TurboGrafx-16",
+  saturn: "Sega Saturn",
+  mega_cd: "Mega-CD / Sega CD",
   synthetic: "Fixture sintética (RTSF)",
   unknown: "?",
 };
