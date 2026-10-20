@@ -875,6 +875,48 @@ pub fn make_x68k_dim() -> Vec<u8> {
     out
 }
 
+/// Trilha de dados de disco da NEC, sem ISO 9660: a partida nos setores 0 e
+/// 1 (`boot`), depois tres setores de jogo com uma frase ASCII, uma em
+/// japones (Shift-JIS) e uma que atravessa a divisa de setor.
+fn nec_track(boot: [&[u8]; 2]) -> Vec<u8> {
+    let mut track = vec![0u8; 5 * 2048];
+    for (k, sector) in boot.iter().enumerate() {
+        plant(&mut track, k * 2048, sector);
+    }
+    let game = 2 * 2048;
+    plant(&mut track, game + 0x40, b"PRESS RUN BUTTON\0");
+    plant_sjis(&mut track, game + 0x200, "ぼうけんを はじめますか？");
+    plant(
+        &mut track,
+        game + 2048 - 12,
+        b"THIS LINE CROSSES THE SECTOR\0",
+    );
+    track
+}
+
+/// PC Engine CD-ROM² em BIN raw 2352 (Mode 1) depois de `pregap` setores
+/// vazios, como a trilha 2 de um dump do Redump. Setor 0 com um aviso
+/// inventado; setor 1 com a partida: campos de carga zerados, as duas
+/// assinaturas do sistema e o nome do jogo.
+pub fn make_pce_cd_bin(pregap: usize) -> Vec<u8> {
+    let mut ipl = vec![0u8; 0x80];
+    plant(&mut ipl, 0x20, b"PC Engine CD-ROM SYSTEM\0");
+    plant(
+        &mut ipl,
+        0x38,
+        b"Copyright HUDSON SOFT / NEC Home Electronics,Ltd.\0",
+    );
+    plant(&mut ipl, 0x6A, b"SYNTH PCE CD");
+    let mut out = vec![0u8; pregap * 2352];
+    out.extend(wrap_raw_mode1(&nec_track([b"SYNTHETIC NOTICE", &ipl])));
+    out
+}
+
+/// PC-FX em ISO de 2048: "PC-FX:Hu_CD-ROM " no setor 0, nome no setor 1.
+pub fn make_pcfx_iso() -> Vec<u8> {
+    nec_track([b"PC-FX:Hu_CD-ROM ", b"SYNTH PC-FX"])
+}
+
 /// PARAM.SFO minimo (psdevwiki): magic \\0PSF + index de entries de 16 bytes.
 fn build_sfo(pairs: &[(&str, &str)]) -> Vec<u8> {
     let mut keys = Vec::new();

@@ -25,6 +25,8 @@ export type Platform =
   | "pc98"
   | "pc88"
   | "x68000"
+  | "pc_engine_cd"
+  | "pc_fx"
   | "synthetic"
   | "unknown";
 
@@ -303,6 +305,8 @@ export const PLATFORM_NAMES: Record<Platform, string> = {
   pc98: "PC-9801 / PC-9821",
   pc88: "PC-8801",
   x68000: "Sharp X68000",
+  pc_engine_cd: "PC Engine CD-ROM² / TurboGrafx-CD",
+  pc_fx: "PC-FX",
   synthetic: "Fixture sintética (RTSF)",
   unknown: "?",
 };

@@ -8,6 +8,7 @@ pub(crate) mod inplace;
 pub(crate) mod iso9660;
 pub(crate) mod mpt;
 pub mod nds;
+pub mod nec_disco;
 pub mod nes;
 pub(crate) mod nftr;
 pub(crate) mod packed;
@@ -46,6 +47,8 @@ pub fn all() -> Vec<Box<dyn GameAdapter>> {
         Box::new(ps1::Ps1Adapter),
         Box::new(sega_disco::SegaDisc(&sega_disco::DISCS[0])),
         Box::new(sega_disco::SegaDisc(&sega_disco::DISCS[1])),
+        Box::new(nec_disco::NecDisc(&nec_disco::DISCS[0])),
+        Box::new(nec_disco::NecDisc(&nec_disco::DISCS[1])),
         Box::new(nes::NesAdapter),
         Box::new(gba::GbaAdapter),
         Box::new(snes::SnesAdapter),

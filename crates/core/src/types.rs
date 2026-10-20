@@ -31,6 +31,8 @@ pub enum Platform {
     Pc98,
     Pc88,
     X68000,
+    PcEngineCd,
+    PcFx,
     /// Fixture sintetica do proprio RomTranslate (formato RTSF, para demo/testes).
     Synthetic,
     Unknown,
@@ -63,6 +65,8 @@ impl Platform {
             Platform::Pc98 => "PC-9801 / PC-9821",
             Platform::Pc88 => "PC-8801",
             Platform::X68000 => "Sharp X68000",
+            Platform::PcEngineCd => "PC Engine CD-ROM² / TurboGrafx-CD",
+            Platform::PcFx => "PC-FX",
             Platform::Synthetic => "Fixture sintetica (RTSF)",
             Platform::Unknown => "Desconhecida",
         }

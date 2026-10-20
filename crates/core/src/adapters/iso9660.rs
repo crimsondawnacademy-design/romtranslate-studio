@@ -18,7 +18,7 @@ use crate::types::ResourceDescriptor;
 
 pub const SECTOR_RAW: usize = 2352;
 pub const SECTOR_DATA: usize = 2048;
-const SYNC: [u8; 12] = [
+pub(crate) const SYNC: [u8; 12] = [
     0x00, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x00,
 ];
 const PVD_LBA: usize = 16;

@@ -24,6 +24,7 @@ struct CueTrack {
     mode: String,
     file: PathBuf,
     first_in_file: bool,
+    index00_frames: Option<u32>,
     index01_frames: Option<u32>,
 }
 
@@ -36,6 +37,9 @@ pub struct CueResolution {
     pub data_mode: String,
     pub total_tracks: usize,
     pub audio_tracks: usize,
+    /// Setores de pregap no comeco do arquivo, antes do INDEX 01 (Redump:
+    /// trilha de dados depois de uma de audio).
+    pub pregap_sectors: u32,
 }
 
 /// "MM:SS:FF" -> frames (75/s). None em formato invalido.
@@ -106,6 +110,7 @@ fn parse(text: &str, base: &Path) -> Result<Vec<CueTrack>> {
                     mode,
                     file,
                     first_in_file: tracks_in_file == 1,
+                    index00_frames: None,
                     index01_frames: None,
                 });
                 if tracks.len() > 99 {
@@ -116,8 +121,12 @@ fn parse(text: &str, base: &Path) -> Result<Vec<CueTrack>> {
                 let mut toks = line.split_whitespace().skip(1);
                 let idx: Option<u32> = toks.next().and_then(|n| n.parse().ok());
                 let msf = toks.next().and_then(parse_msf);
-                if let (Some(1), Some(frames), Some(track)) = (idx, msf, tracks.last_mut()) {
-                    track.index01_frames.get_or_insert(frames);
+                if let (Some(frames), Some(track)) = (msf, tracks.last_mut()) {
+                    match idx {
+                        Some(0) => track.index00_frames.get_or_insert(frames),
+                        Some(1) => track.index01_frames.get_or_insert(frames),
+                        _ => continue,
+                    };
                 }
             }
             _ => {} // REM, PREGAP, FLAGS, TITLE etc.
@@ -131,8 +140,11 @@ fn parse(text: &str, base: &Path) -> Result<Vec<CueTrack>> {
 
 /// Resolve um .cue pro arquivo do track de dados. Conservador: o track de
 /// dados precisa ser o primeiro do seu FILE e comecar em INDEX 01 00:00:00
-/// (layout Redump padrao); qualquer outro layout da erro claro em vez de
-/// ler dados da posicao errada.
+/// (layout Redump padrao) ou ter o pregap gravado no comeco do arquivo
+/// (INDEX 00 00:00:00, como a trilha 2 do PC Engine CD no Redump) — nesse
+/// caso so o adapter que acha a trilha pela assinatura (`nec_disco`) le o
+/// disco; os outros nao o reconhecem. Qualquer outro layout da erro claro em
+/// vez de ler dados da posicao errada.
 pub fn resolve_cue(cue_path: &Path) -> Result<CueResolution> {
     let meta = std::fs::metadata(cue_path).map_err(|e| CoreError::io(cue_path, e))?;
     if meta.len() > MAX_CUE_SIZE {
@@ -155,12 +167,17 @@ pub fn resolve_cue(cue_path: &Path) -> Result<CueResolution> {
             data.number
         )));
     }
-    if data.index01_frames != Some(0) {
-        return Err(err(format!(
-            "track de dados {} nao comeca em INDEX 01 00:00:00 — layout nao suportado",
-            data.number
-        )));
-    }
+    let pregap_sectors = match (data.index00_frames, data.index01_frames) {
+        (_, Some(0)) => 0,
+        (Some(0), Some(frames)) => frames,
+        _ => {
+            return Err(err(format!(
+                "track de dados {} nao comeca em INDEX 01 00:00:00 nem traz o pregap no comeco \
+                 do arquivo (INDEX 00 00:00:00) — layout nao suportado",
+                data.number
+            )))
+        }
+    };
     if !data.file.is_file() {
         return Err(err(format!(
             "arquivo do track de dados nao encontrado: {}",
@@ -173,6 +190,7 @@ pub fn resolve_cue(cue_path: &Path) -> Result<CueResolution> {
         data_mode: data.mode.clone(),
         total_tracks: tracks.len(),
         audio_tracks: tracks.iter().filter(|t| t.mode == "AUDIO").count(),
+        pregap_sectors,
     })
 }
 

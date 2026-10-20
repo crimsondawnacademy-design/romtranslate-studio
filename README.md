@@ -98,6 +98,7 @@ Every real platform is **experimental**. Games use different engines, compressio
 | PC Engine (HuCard), MSX cartridge, Famicom Disk System, Neo Geo Pocket | yes, ASCII and Shift-JIS (new, checked with test files only) | in place | no |
 | Saturn, Mega-CD (ISO, raw BIN) | yes, per file, ASCII and Shift-JIS (new, checked with test files only) | in place, sector EDC/ECC regenerated | no |
 | PC-9801/9821 (D88, FDI, HDI), PC-8801 (D88), Sharp X68000 (DIM, XDF, D88) | yes, per file on FAT12/FAT16 disks, the whole disk otherwise; ASCII and Shift-JIS (new, checked with test files only) | in place, a line that crosses a D88 sector is written in both pieces | no |
+| PC Engine CD-ROM² / TurboGrafx-CD, PC-FX (ISO, raw BIN, Redump `.cue`) | yes, the data track as one block, ASCII and Shift-JIS (new, checked with test files only) | in place, sector EDC/ECC regenerated | no |
 | Wii, Wii U | detection only | no | no |
 
 "In place" means the translation uses the room of the original line. Which platforms the translation-request lists ask for, and what is still missing, is in [docs/PLATAFORMAS.md](docs/PLATAFORMAS.md) (Portuguese). The full matrix, with what each column means and the known limits, is in [docs/DETALHES.md](docs/DETALHES.md) (Portuguese).
