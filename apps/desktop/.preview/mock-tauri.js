@@ -176,6 +176,8 @@
     get_settings: () => ({ settings, apiKeySet: false, anthropicKeySet: true }),
     save_settings: ({ newSettings }) => ((settings = newSettings), { settings, apiKeySet: false, anthropicKeySet: true }),
     scan_project: () => ({ entries, truncated: false, scannedBytes: project.sourceSize, discarded: 212, tblPath: null }),
+    // Projeto sem perfil do jogo (perfil.toml): a tela nao mostra o painel dele.
+    profile_summary: () => null,
     extract_structured: () => ({ saved: entries.length, discarded: 18, truncated: false, removed: 0, stray: 0, packed: 0, jis16: 0, banked: 0 }),
     xray_project: () => ({
       size: project.sourceSize,
@@ -196,7 +198,7 @@
       warnings: issues.filter((i) => i.severity === "warning").length,
       checked: entries.filter((e) => e.translatedText).length,
     }),
-    estimate_translation: () => ({ entries: count("untranslated"), batches: 1, inputTokens: 1840, outputTokens: 420, calibrated: false }),
+    estimate_translation: () => ({ entries: count("untranslated"), batches: 1, retryBatches: 1, overheadTokens: 13000, inputTokens: 14840, outputTokens: 420, calibrated: false }),
     last_scan: () =>
       q.get("scanned")
         ? { encoding: "table", tblPath: `${DIR}/tables/farol.tbl`, minChars: 4, regionStart: 0x1a40, regionEnd: 0x2000, onlyText: true }
