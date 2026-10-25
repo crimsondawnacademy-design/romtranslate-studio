@@ -14,7 +14,7 @@ Quase todos são **japoneses que nunca saíram traduzidos** — é esse o gargal
 | PSP | 147 | extrai, regrava no lugar | Shift-JIS |
 | NES / Famicom | 111 | extrai, regrava no lugar | por tabela/perfil |
 | Saturn | 109 | **novo (20/10)**: extrai por arquivo, regrava no lugar (BIN Mode 1 ou ISO) | Shift-JIS |
-| Nintendo DS | 106 | extrai, arquivo cresce; MPT0 (Dragon Quest) | UTF-16, UTF-8 |
+| Nintendo DS | 106 | extrai, arquivo cresce; MPT0 (Dragon Quest); BMG em blocos LZ77, linhas quebradas pelo app na largura em pixels da fonte do jogo, e nomes em tabela de registro fixo (Animal Crossing: Wild World) | UTF-16, UTF-8, Windows-1252 |
 | Game Boy / Color | 104 | **novo (20/10)**: extrai, checksum refeito | Shift-JIS; kana por tabela/perfil |
 | Game Boy Advance | 98 | extrai, ponteiros, LZ77, bancos | Shift-JIS e 16 bits na ordem JIS; fonte ganha acento |
 | PC-9801/9821 | 80 | **novo (20/10)**: D88, FDI, HDI; por arquivo com FAT12/FAT16, regrava no lugar | Shift-JIS |

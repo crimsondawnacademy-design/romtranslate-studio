@@ -350,11 +350,16 @@ fn batch_request(
                     .or_else(|| {
                         crate::images::place_of(e)
                             .map(|(_, block)| crate::images::chars_that_fit(&block))
-                    }),
+                    })
+                    // Nome de item em tabela de registro fixo (o campo), carta
+                    // de BMG (as linhas dela).
+                    .or_else(|| crate::adapters::bmg::hint_chars(e)),
                 // Com pares de letras, a linha cabe mais letras que codigos.
                 max_line: crate::adapters::bank::line_width(e)
                     .filter(|_| layout.is_none())
-                    .map(|width| table.map_or(width, |table| table.letters_in(width))),
+                    .map(|width| table.map_or(width, |table| table.letters_in(width)))
+                    // Lista de BMG, que guarda as linhas: a largura em letras.
+                    .or_else(|| crate::adapters::bmg::max_line(e)),
                 max_lines: page.as_ref().map(|(_, lines)| lines.clone()),
                 page_code: page.map(|(code, _)| code),
             })

@@ -270,8 +270,9 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
         source_tokens.remove(layout.soft());
         translation_tokens.remove(layout.soft());
     }
-    if let Some(newline) =
-        crate::profile::newline(entry).or_else(|| crate::adapters::mpt::newline(entry))
+    if let Some(newline) = crate::profile::newline(entry)
+        .or_else(|| crate::adapters::mpt::newline(entry))
+        .or_else(|| crate::adapters::bmg::newline(entry))
     {
         source_tokens.remove(newline);
         translation_tokens.remove(newline);
@@ -362,6 +363,9 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
                 // Fala de arquivo MPT0: o arquivo e remontado e o jogo quebra
                 // a linha sozinho.
                 _ if n > original && crate::adapters::mpt::is_mpt(entry) => {}
+                // BMG: o arquivo e remontado; o que vale e caber na caixa e
+                // no campo do nome, conta da propria mensagem (mais abaixo).
+                _ if crate::adapters::bmg::is_bmg(entry) => {}
                 // Realocar resolve o espaco na imagem, nao na tela: caixa de texto
                 // ou buffer de RAM do jogo podem nao comportar o texto maior.
                 _ if n > original && relocatable => push(
@@ -427,6 +431,28 @@ pub fn validate_entry(entry: &TextEntry, table: Option<&TblTable>) -> Vec<Valida
                      mostra {width} por linha — quebre a frase de outro jeito ou encurte"
                 ),
             );
+        }
+    }
+
+    // Mensagem BMG: letra que a fonte nao tem, linha mais larga que a caixa
+    // (em pixels), linhas demais, nome maior que o campo.
+    if crate::adapters::bmg::is_bmg(entry) {
+        if let Some(c) = crate::adapters::bmg::unencodable(translation) {
+            push(
+                Severity::Error,
+                IssueKind::Unencodable,
+                format!("a letra {c:?} nao existe na fonte do jogo"),
+            );
+        }
+        for (error, why) in crate::adapters::bmg::problems(entry, translation) {
+            if !why.contains("fonte do jogo") {
+                let severity = if error {
+                    Severity::Error
+                } else {
+                    Severity::Warning
+                };
+                push(severity, IssueKind::ByteOverflow, why);
+            }
         }
     }
 

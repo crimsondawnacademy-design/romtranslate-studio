@@ -16,7 +16,7 @@ use super::pointers::{
     ensure_pointers_untouched, file_relative_tables, mark_relocatable, relocate, to_file_relative,
     Relocation,
 };
-use super::{mpt, nftr};
+use super::{bmg, mpt, nftr};
 use crate::adapter::{
     AppliedImage, ExtractHints, Extraction, GameAdapter, GameInput, VerificationReport,
 };
@@ -43,7 +43,9 @@ const MAX_ROM_LEN: usize = 512 * 1024 * 1024;
 const FILE_ALIGN: usize = 0x200;
 /// Valor fixo do CRC do logo em ROMs validas (GBATEK).
 pub const LOGO_CRC_EXPECTED: u16 = 0xCF56;
-const MAX_FILES: usize = 8192;
+/// File ids vao de 0 a 0xEFFF: a partir de 0xF000 o numero e de pasta na FNT
+/// (Animal Crossing: Wild World tem 9.650 arquivos).
+const MAX_FILES: usize = 0xF000;
 const MAX_DIRS: u16 = 2048;
 
 /// (posicao, bytes) do cabecalho de formatos binarios do DS que nao guardam
@@ -595,6 +597,30 @@ impl GameAdapter for NdsAdapter {
                 ..Extraction::default()
             });
         }
+        // Mensagens BMG (Animal Crossing): o texto e o delas, mais os nomes
+        // das tabelas de registro fixo; a varredura so traria nome de modelo
+        // 3D. A largura das letras vem do arquivo de atributos da fonte.
+        let stored: Vec<(String, usize, &[u8])> = files
+            .iter()
+            .map(|f| {
+                (
+                    f.path.clone(),
+                    f.offset as usize,
+                    &data[f.offset as usize..(f.offset + f.size) as usize],
+                )
+            })
+            .collect();
+        let font = stored
+            .iter()
+            .filter(|(path, ..)| path.contains("font") && path.ends_with("_attr.bin"))
+            .find_map(|(_, _, file)| bmg::font_widths(file));
+        let entries = bmg::extract(&stored, font.as_ref());
+        if !entries.is_empty() {
+            return Ok(Extraction {
+                entries,
+                ..Extraction::default()
+            });
+        }
         scan_files(data, files)
     }
 
@@ -603,14 +629,19 @@ impl GameAdapter for NdsAdapter {
             return Err(err("arquivo menor que o header NDS"));
         }
         let files = self.list_resources(data)?;
+        let (bmgs, entries): (Vec<TextEntry>, Vec<TextEntry>) =
+            entries.iter().cloned().partition(bmg::is_bmg);
         let (messages, entries): (Vec<TextEntry>, Vec<TextEntry>) =
-            entries.iter().cloned().partition(mpt::is_mpt);
-        let (rebuilt, mpt_report) = mpt::plan(data, &messages, |path| {
+            entries.into_iter().partition(mpt::is_mpt);
+        let place = |path: &str| {
             files
                 .iter()
                 .find(|f| f.path == path)
                 .map(|f| (f.offset as usize, f.size as usize))
-        })?;
+        };
+        let (mut rebuilt, mpt_report) = mpt::plan(data, &messages, place)?;
+        let (bmg_rebuilt, bmg_report) = bmg::plan(data, &bmgs, place)?;
+        rebuilt.extend(bmg_rebuilt);
         let plan = super::inplace::plan_in_place(data, &entries, true)?;
         let mut out = data.to_vec();
         for (offset, patch) in &plan.writes {
@@ -641,8 +672,8 @@ impl GameAdapter for NdsAdapter {
         let crc = crc16(&out[..HEADER_CRC_OFFSET]);
         out[HEADER_CRC_OFFSET..HEADER_CRC_OFFSET + 2].copy_from_slice(&crc.to_le_bytes());
         let mut report = plan.report;
-        report.applied += mpt_report.applied;
-        report.kept_original += mpt_report.kept_original;
+        report.applied += mpt_report.applied + bmg_report.applied;
+        report.kept_original += mpt_report.kept_original + bmg_report.kept_original;
         report.letters += letters;
         Ok(AppliedImage { bytes: out, report })
     }

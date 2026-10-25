@@ -260,6 +260,8 @@ impl TextEntry {
             || self.metadata.get("bank").is_some_and(|v| v.is_object())
             || crate::profile::is_profile(self)
             || crate::adapters::mpt::is_mpt(self)
+            || (crate::adapters::bmg::is_bmg(self)
+                && crate::adapters::bmg::max_chars(self).is_none())
     }
 
     /// So as posicoes dos ponteiros, de qualquer largura.

@@ -1,4 +1,5 @@
 pub(crate) mod bank;
+pub(crate) mod bmg;
 pub mod cartucho;
 pub(crate) mod cdrom;
 pub mod computador;
