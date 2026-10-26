@@ -2548,3 +2548,11 @@ português passa do inglês e erraria quase todo nome); fonte do app pro sinal
 
 **Driver:** claude (ponytail).
 
+## [2026-10-26] BMG: o app quebra as linhas em pixels; a IA recebe a fala corrida
+
+**Contexto:** no Animal Crossing: Wild World o jogo não quebra a linha — o texto vem quebrado à mão, em 3 linhas por página, e a fonte é proporcional ('m' 7 px, 'i' 3). Português sai ~25% maior.
+**Decisão:** a fala vai corrida pra IA (`[p]` só onde o original pula pra página nova com linha em branco); a regravação quebra no último espaço antes da largura medida em pixels (larguras do arquivo de atributos da fonte, guardadas na entry) e completa a página. Só código do tipo 04 (nome, número, item que o jogo escreve) ocupa espaço, o menor que o original deixou pra ele. Listas guardam as linhas e não passam das letras da mais longa do arquivo (bordão e apelido vão pra campo fixo do save). Nomes de item fora do BMG: tabela de registro fixo achada pelo alinhamento dos nomes, gravada no campo.
+**Alternativas descartadas:** manter as quebras do original (a tradução estoura a caixa); teto em letras na fala (fonte proporcional: 26 letras com 'm' passam de 134 px); largura pra todo código pelo espaço que sobrou na linha (a pausa, que só aparece em linha curta, ficava com a caixa inteira).
+
+**Driver:** claude (ponytail).
+
