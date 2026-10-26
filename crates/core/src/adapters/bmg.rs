@@ -455,6 +455,9 @@ struct Box {
     lines: usize,
     /// Lista: letras da linha mais longa do arquivo original.
     chars: usize,
+    /// Fala: largura da opcao de escolha mais larga do grupo (a caixa de
+    /// escolha e mais estreita que a de fala).
+    options: usize,
     common: usize,
     letters: HashMap<char, usize>,
     codes: HashMap<String, usize>,
@@ -493,6 +496,7 @@ impl Box {
             width: num("largura"),
             lines: num("linhas"),
             chars: num("letras"),
+            options: num("opcao"),
             common: num("padrao").max(1),
             letters,
             codes,
@@ -519,15 +523,7 @@ impl Box {
             return text.split(NL).map(str::to_string).collect();
         }
         // Escolha: o que vem depois e uma opcao por linha.
-        let split = tokens(text)
-            .iter()
-            .scan(0, |at, &(code, piece)| {
-                *at += piece.len();
-                Some((*at, code && piece.starts_with("[02")))
-            })
-            .find(|&(_, choice)| choice)
-            .map_or(text.len(), |(at, _)| at);
-        let (head, tail) = text.split_at(split);
+        let (head, tail) = text.split_at(choice_at(text));
         let mut lines: Vec<String> = Vec::new();
         for (k, part) in head.split(PAGE).enumerate() {
             if k > 0 {
@@ -564,6 +560,19 @@ impl Box {
         lines.extend(tail.map(str::to_string));
         lines
     }
+}
+
+/// Onde acaba o codigo de escolha (o que vem depois e uma opcao por linha),
+/// ou o fim do texto.
+fn choice_at(text: &str) -> usize {
+    tokens(text)
+        .iter()
+        .scan(0, |at, &(code, piece)| {
+            *at += piece.len();
+            Some((*at, code && piece.starts_with("[02")))
+        })
+        .find(|&(_, choice)| choice)
+        .map_or(text.len(), |(at, _)| at)
 }
 
 /// O texto como vai pro jogo: as linhas quebradas pelo app, em `[n]`.
@@ -667,6 +676,20 @@ pub(crate) fn problems(entry: &TextEntry, text: &str) -> Vec<(bool, String)> {
             ),
         ));
     }
+    if let Some(wide) = text[choice_at(text)..]
+        .split(NL)
+        .skip(1)
+        .find(|o| b.options > 0 && b.mode != Mode::Lines && b.px(o) > b.options)
+    {
+        out.push((
+            true,
+            format!(
+                "a opcao \"{wide}\" ocupa {} pixels; a caixa de escolha do jogo mostra {} — encurte",
+                b.px(wide),
+                b.options
+            ),
+        ));
+    }
     if b.lines > 0 && lines.len() > b.lines {
         out.push((
             true,
@@ -715,6 +738,7 @@ pub(crate) fn extract(
     }
     // Largura de cada grupo, e o espaco que cada codigo teve no mais apertado.
     let mut widest: HashMap<String, usize> = HashMap::new();
+    let mut widest_option: HashMap<String, usize> = HashMap::new();
     let mut most_lines: HashMap<&str, usize> = HashMap::new();
     let mut most_chars: HashMap<&str, usize> = HashMap::new();
     let mut lines_of = Vec::new();
@@ -745,6 +769,13 @@ pub(crate) fn extract(
             *max = (*max).max(chars.into_iter().max().unwrap_or(0));
             for (px, _) in &lines {
                 let w = widest.entry(g.clone()).or_default();
+                *w = (*w).max(*px);
+            }
+            let choice = lines
+                .iter()
+                .position(|(_, codes)| codes.iter().any(|c| c.starts_with("02")));
+            for (px, _) in choice.map_or(&lines[..0], |k| &lines[k + 1..]) {
+                let w = widest_option.entry(g.clone()).or_default();
                 *w = (*w).max(*px);
             }
             lines_of.push((g.clone(), lines));
@@ -805,6 +836,7 @@ pub(crate) fn extract(
                 "largura": widest[&g],
                 "linhas": if mode == Mode::Flow { most_lines[path] } else { 0 },
                 "letras": if mode == Mode::Lines { most_chars[path] } else { 0 },
+                "opcao": widest_option.get(&g).copied().unwrap_or(0),
                 "padrao": common,
                 "px": px,
                 "nomes": codes,
@@ -1148,6 +1180,13 @@ mod tests {
                 "No"
             ]
         );
+        // A opcao de escolha tem a caixa dela, mais estreita.
+        let mut narrow = e.clone();
+        narrow.metadata["bmg"]["opcao"] = 10.into();
+        assert!(problems(&narrow, "OK?[0201000d0e0f][n]Yes[n]No")
+            .iter()
+            .any(|(error, why)| *error && why.contains("\"Yes\"")));
+        assert!(problems(&e, "OK?[0201000d0e0f][n]Yes[n]No").is_empty());
         let text = "Um dois[p]Tres";
         assert_eq!(
             Box::of(&e).unwrap().layout(text),
