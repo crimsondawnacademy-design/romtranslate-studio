@@ -6,6 +6,7 @@
 
 | data | maquina | ferramenta | modelo | o_que_fez | arquivos_tocados |
 |---|---|---|---|---|---|
+| 2026-11-04 | Mac mini M1 (casa) | claude | claude-opus-5-5 | v0.1.11 publicada (Windows, Linux, Mac Apple Silicon; Mac Intel esperando máquina do GitHub) | Cargo.toml, Cargo.lock, apps/desktop/package.json, tauri.conf.json, .ctx/* |
 | 2026-11-04 | Mac mini M1 (casa) | claude | claude-opus-5-5 | PC Engine CD em BIN único (áudio antes dos dados) aceito; diagnóstico do "layout não suportado" do usuário de Windows (v0.1.10 não tem PCE CD) | crates/core/src/{cue,detect}.rs, adapters/nec_disco.rs, tests/cue.rs, README*, docs/PLATAFORMAS.md |
 | 2026-10-26 | Mac mini M1 (casa) | claude | claude-opus-5-5 | Animal Crossing: Wild World 100% em português (21.192 frases, audit 0, validação 0), patch BPS; teto próprio da caixa de escolha no BMG; ~1.000 frases encurtadas à mão | crates/core/src/adapters/bmg.rs, .ctx/* |
 | 2026-10-26 | Mac mini M1 (casa) | claude | claude-opus-5-5 | Leitor BMG (Animal Crossing: Wild World): contêiner de blocos LZ77, fala corrida com quebra em pixels da fonte do jogo, tabelas de nomes de registro fixo; FAT até 0xF000; teste no emulador; tradução inteira disparada | crates/core/src/adapters/{bmg,nds,mod}.rs, pipeline.rs, types.rs, validate.rs, docs/PLATAFORMAS.md, .ctx/* |
