@@ -55,7 +55,7 @@ pub fn inspect(path: &Path) -> Result<InspectionReport> {
         );
         if cue.pregap_sectors > 0 {
             note.push_str(&format!(
-                "; {} setores de pregap no comeco do arquivo",
+                "; {} setores antes da trilha de dados no arquivo",
                 cue.pregap_sectors
             ));
         }

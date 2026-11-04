@@ -96,10 +96,56 @@ fn redump_pc_engine_cd_with_the_pregap_in_the_data_file_is_recognized() {
     assert!(
         best.evidence
             .iter()
-            .any(|e| e.contains("225 setores de pregap no comeco do arquivo")),
+            .any(|e| e.contains("225 setores antes da trilha de dados no arquivo")),
         "{:?}",
         best.evidence
     );
+}
+
+/// PC Engine CD num BIN unico com todas as trilhas, a de audio primeiro (o
+/// dump que um usuario de Windows trouxe em 04/11/2026: "layout nao
+/// suportado"). A trilha de dados e achada depois do audio, a traducao vai
+/// pra ela e o audio fica intacto.
+#[test]
+fn single_bin_pc_engine_cd_with_audio_before_the_data_works() {
+    let tmp = TempDir::new("pce-single");
+    let audio_sectors: usize = 1000;
+    let mut disc: Vec<u8> = (0..audio_sectors * 2352usize)
+        .map(|i| (i.wrapping_mul(2_654_435_761usize) >> 13) as u8)
+        .collect();
+    disc.extend(synth::make_pce_cd_bin(150));
+    let bin = tmp.0.join("Jogo (Japan).bin");
+    fs::write(&bin, &disc).unwrap();
+    let cue = tmp.0.join("Jogo (Japan).cue");
+    fs::write(
+        &cue,
+        "FILE \"Jogo (Japan).bin\" BINARY\r\n  TRACK 01 AUDIO\r\n    INDEX 01 00:00:00\r\n  TRACK 02 MODE1/2352\r\n    INDEX 00 00:13:25\r\n    INDEX 01 00:15:25\r\n",
+    )
+    .unwrap();
+    let r = resolve_cue(&cue).unwrap();
+    assert_eq!((r.bin_path.clone(), r.data_track), (bin, 2));
+    assert_eq!(r.pregap_sectors, 15 * 75 + 25);
+    let best = inspect(&cue).unwrap().best.expect("pc engine cd pelo cue");
+    assert_eq!(best.platform, Platform::PcEngineCd);
+
+    let adapter = romtranslate_core::adapters::nec_disco::NecDisc(
+        &romtranslate_core::adapters::nec_disco::DISCS[0],
+    );
+    let mut entries = adapter.extract_structured(&disc).unwrap();
+    let press = entries
+        .iter_mut()
+        .find(|e| e.source_text == "PRESS RUN BUTTON")
+        .expect("frase da trilha de dados");
+    press.translated_text = Some("APERTE RUN".into());
+    let applied = adapter.apply_text(&disc, &entries).unwrap();
+    assert_eq!(applied.report.applied, 1);
+    let audio_end = audio_sectors * 2352;
+    assert_eq!(
+        &applied.bytes[..audio_end],
+        &disc[..audio_end],
+        "audio intacto"
+    );
+    assert!(adapter.verify(&applied.bytes).unwrap().ok);
 }
 
 #[test]
@@ -168,23 +214,14 @@ fn cue_errors_are_clear_and_non_cue_passes_through() {
         .to_string()
         .contains("nenhum track de dados"));
 
-    let not_first = write_cue(
-        "notfirst.cue",
-        "FILE \"a.bin\" BINARY\nTRACK 01 AUDIO\nINDEX 01 00:00:00\nTRACK 02 MODE2/2352\nINDEX 01 03:00:00\n",
+    let no_start = write_cue(
+        "nostart.cue",
+        "FILE \"a.bin\" BINARY\nTRACK 01 MODE2/2352\nINDEX 00 00:00:00\n",
     );
-    assert!(resolve_cue(&not_first)
+    assert!(resolve_cue(&no_start)
         .unwrap_err()
         .to_string()
-        .contains("nao e o primeiro"));
-
-    let offset = write_cue(
-        "offset.cue",
-        "FILE \"a.bin\" BINARY\nTRACK 01 MODE2/2352\nINDEX 01 00:02:00\n",
-    );
-    assert!(resolve_cue(&offset)
-        .unwrap_err()
-        .to_string()
-        .contains("INDEX 01 00:00:00"));
+        .contains("sem INDEX 01"));
 
     let missing = write_cue(
         "missing.cue",

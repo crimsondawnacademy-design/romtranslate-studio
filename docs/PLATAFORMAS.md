@@ -18,7 +18,7 @@ Quase todos são **japoneses que nunca saíram traduzidos** — é esse o gargal
 | Game Boy / Color | 104 | **novo (20/10)**: extrai, checksum refeito | Shift-JIS; kana por tabela/perfil |
 | Game Boy Advance | 98 | extrai, ponteiros, LZ77, bancos | Shift-JIS e 16 bits na ordem JIS; fonte ganha acento |
 | PC-9801/9821 | 80 | **novo (20/10)**: D88, FDI, HDI; por arquivo com FAT12/FAT16, regrava no lugar | Shift-JIS |
-| PC Engine CD | 77 | **novo (20/10)**: trilha de dados como um bloco, regrava no lugar (BIN Mode 1 ou ISO; `.cue` do Redump com pregap) | Shift-JIS |
+| PC Engine CD | 77 | **novo (20/10)**: trilha de dados como um bloco, regrava no lugar (BIN Mode 1 ou ISO; `.cue` do Redump com pregap ou BIN único com todas as trilhas) | Shift-JIS |
 | Mega Drive / Genesis (+ Pico 24) | 91 | **novo (20/10)**: extrai, checksum refeito | Shift-JIS; kana por tabela/perfil |
 | PC (Windows/DOS/Mac) | 65 | fora do escopo (não é ROM) | — |
 | WonderSwan / Color | 56 | **novo (20/10)**: extrai, checksum refeito | Shift-JIS; tabela/perfil |
@@ -48,7 +48,7 @@ Quase todos são **japoneses que nunca saíram traduzidos** — é esse o gargal
 
 Antes de 20/10 o app cobria ~1.220 dos ~2.300 pedidos (53%). Com os cartuchos novos, o Saturn e o Mega-CD, ~1.730 (75%); com PC-98, PC-88 e X68000 e com o PC Engine CD e o PC-FX, ~1.955 (84%) — **todos experimentais**: o que entrou em 20/10 foi conferido só com arquivos sintéticos; nenhum jogo real dessas plataformas passou pelo app ainda.
 
-**PC Engine CD e PC-FX:** quase nenhum disco tem ISO 9660 — o jogo lê a trilha de dados por número de setor. O app reconhece a trilha pela assinatura (PC Engine: "PC Engine CD-ROM SYSTEM" e "NEC Home Electronics" no setor 1; PC-FX: "PC-FX:Hu_CD-ROM" no setor 0, conferidas no código aberto do rcheevos, FBNeo, llvm-mos e Aaru), deixa de fora os dois setores da partida, varre o resto como um bloco e regrava cada frase no lugar, com o EDC/ECC do setor refeito no BIN raw. Frase que atravessa de um setor para o outro no BIN raw fica de fora (os dados não são contínuos ali). O `.cue` do Redump funciona: a trilha 2 vem num arquivo próprio que começa pelos 3 s de pregap. Disco num `.bin` só com todas as trilhas, e o CD de jogo da GameExpress (que tem ISO 9660), não.
+**PC Engine CD e PC-FX:** quase nenhum disco tem ISO 9660 — o jogo lê a trilha de dados por número de setor. O app reconhece a trilha pela assinatura (PC Engine: "PC Engine CD-ROM SYSTEM" e "NEC Home Electronics" no setor 1; PC-FX: "PC-FX:Hu_CD-ROM" no setor 0, conferidas no código aberto do rcheevos, FBNeo, llvm-mos e Aaru), deixa de fora os dois setores da partida, varre o resto como um bloco e regrava cada frase no lugar, com o EDC/ECC do setor refeito no BIN raw. Frase que atravessa de um setor para o outro no BIN raw fica de fora (os dados não são contínuos ali). O `.cue` do Redump funciona: a trilha 2 vem num arquivo próprio que começa pelos 3 s de pregap. Desde 04/11 também o disco num `.bin` só com todas as trilhas (a de áudio antes; dump antigo trazido por um usuário de Windows): a trilha de dados começa no primeiro setor com o sync de CD. O CD de jogo da GameExpress (que tem ISO 9660) ainda não.
 
 ## O gargalo do japonês, por etapa
 

@@ -23,8 +23,6 @@ struct CueTrack {
     number: u32,
     mode: String,
     file: PathBuf,
-    first_in_file: bool,
-    index00_frames: Option<u32>,
     index01_frames: Option<u32>,
 }
 
@@ -37,8 +35,8 @@ pub struct CueResolution {
     pub data_mode: String,
     pub total_tracks: usize,
     pub audio_tracks: usize,
-    /// Setores de pregap no comeco do arquivo, antes do INDEX 01 (Redump:
-    /// trilha de dados depois de uma de audio).
+    /// Setores do arquivo antes do INDEX 01 do track de dados: o pregap
+    /// (Redump), ou as trilhas de audio de um BIN unico.
     pub pregap_sectors: u32,
 }
 
@@ -70,7 +68,6 @@ fn file_name(rest: &str) -> &str {
 fn parse(text: &str, base: &Path) -> Result<Vec<CueTrack>> {
     let mut tracks: Vec<CueTrack> = Vec::new();
     let mut current_file: Option<PathBuf> = None;
-    let mut tracks_in_file = 0usize;
 
     for line in text.lines() {
         let line = line.trim();
@@ -89,7 +86,6 @@ fn parse(text: &str, base: &Path) -> Result<Vec<CueTrack>> {
                 } else {
                     base.join(path)
                 });
-                tracks_in_file = 0;
             }
             "TRACK" => {
                 let mut toks = line.split_whitespace().skip(1);
@@ -104,13 +100,10 @@ fn parse(text: &str, base: &Path) -> Result<Vec<CueTrack>> {
                 let file = current_file
                     .clone()
                     .ok_or_else(|| err(format!("TRACK {number} antes de qualquer FILE")))?;
-                tracks_in_file += 1;
                 tracks.push(CueTrack {
                     number,
                     mode,
                     file,
-                    first_in_file: tracks_in_file == 1,
-                    index00_frames: None,
                     index01_frames: None,
                 });
                 if tracks.len() > 99 {
@@ -122,11 +115,9 @@ fn parse(text: &str, base: &Path) -> Result<Vec<CueTrack>> {
                 let idx: Option<u32> = toks.next().and_then(|n| n.parse().ok());
                 let msf = toks.next().and_then(parse_msf);
                 if let (Some(frames), Some(track)) = (msf, tracks.last_mut()) {
-                    match idx {
-                        Some(0) => track.index00_frames.get_or_insert(frames),
-                        Some(1) => track.index01_frames.get_or_insert(frames),
-                        _ => continue,
-                    };
+                    if idx == Some(1) {
+                        track.index01_frames.get_or_insert(frames);
+                    }
                 }
             }
             _ => {} // REM, PREGAP, FLAGS, TITLE etc.
@@ -138,13 +129,13 @@ fn parse(text: &str, base: &Path) -> Result<Vec<CueTrack>> {
     Ok(tracks)
 }
 
-/// Resolve um .cue pro arquivo do track de dados. Conservador: o track de
-/// dados precisa ser o primeiro do seu FILE e comecar em INDEX 01 00:00:00
-/// (layout Redump padrao) ou ter o pregap gravado no comeco do arquivo
-/// (INDEX 00 00:00:00, como a trilha 2 do PC Engine CD no Redump) — nesse
-/// caso so o adapter que acha a trilha pela assinatura (`nec_disco`) le o
-/// disco; os outros nao o reconhecem. Qualquer outro layout da erro claro em
-/// vez de ler dados da posicao errada.
+/// Resolve um .cue pro arquivo do track de dados. O track comeca no INDEX 01
+/// dele: em 00:00:00 no layout Redump padrao; depois do pregap gravado no
+/// comeco do arquivo (trilha 2 do PC Engine CD no Redump); ou depois das
+/// trilhas de audio, no BIN unico com todas elas (dumps antigos de PC Engine
+/// CD, o que um usuario de Windows trouxe em 04/11/2026). Fora do 00:00:00, so
+/// o adapter que acha a trilha pela assinatura (`nec_disco`) le o disco; os
+/// outros nao o reconhecem. Track sem INDEX 01 da erro claro.
 pub fn resolve_cue(cue_path: &Path) -> Result<CueResolution> {
     let meta = std::fs::metadata(cue_path).map_err(|e| CoreError::io(cue_path, e))?;
     if meta.len() > MAX_CUE_SIZE {
@@ -161,23 +152,12 @@ pub fn resolve_cue(cue_path: &Path) -> Result<CueResolution> {
         .iter()
         .find(|t| t.mode.starts_with("MODE"))
         .ok_or_else(|| err("nenhum track de dados (MODE1/MODE2) — cue so de audio?"))?;
-    if !data.first_in_file {
-        return Err(err(format!(
-            "track de dados {} nao e o primeiro do seu FILE — layout nao suportado",
+    let pregap_sectors = data.index01_frames.ok_or_else(|| {
+        err(format!(
+            "track de dados {} sem INDEX 01 — nao da pra saber onde ele comeca",
             data.number
-        )));
-    }
-    let pregap_sectors = match (data.index00_frames, data.index01_frames) {
-        (_, Some(0)) => 0,
-        (Some(0), Some(frames)) => frames,
-        _ => {
-            return Err(err(format!(
-                "track de dados {} nao comeca em INDEX 01 00:00:00 nem traz o pregap no comeco \
-                 do arquivo (INDEX 00 00:00:00) — layout nao suportado",
-                data.number
-            )))
-        }
-    };
+        ))
+    })?;
     if !data.file.is_file() {
         return Err(err(format!(
             "arquivo do track de dados nao encontrado: {}",
@@ -220,12 +200,9 @@ mod tests {
         assert_eq!(tracks.len(), 3);
         assert_eq!(tracks[0].file, base.join("My Game (BR).bin"));
         assert_eq!(tracks[0].mode, "MODE2/2352");
-        assert!(tracks[0].first_in_file);
         assert_eq!(tracks[0].index01_frames, Some(0));
         assert_eq!(tracks[1].index01_frames, Some(6 * 60 * 75 + 74));
-        assert!(!tracks[1].first_in_file);
         assert_eq!(tracks[2].file, base.join("bonus.bin"));
-        assert!(tracks[2].first_in_file);
     }
 
     #[test]

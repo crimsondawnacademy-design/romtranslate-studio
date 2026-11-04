@@ -14,7 +14,9 @@
 //!
 //! Os setores 0 e 1 sao o que o BIOS confere pra dar partida: ficam fora da
 //! extracao. Dump do Redump: o arquivo da trilha 2 comeca pelos 3 s de pregap
-//! (INDEX 00); a trilha e achada pela assinatura nos primeiros setores.
+//! (INDEX 00); a trilha e achada pela assinatura nos primeiros setores. BIN
+//! unico com todas as trilhas (a de audio antes, como em dumps antigos): a
+//! trilha de dados comeca no primeiro setor com o sync de CD.
 //!
 //! Lista de pedidos do Data Crystal (20/10/2026): PC Engine CD 77 jogos,
 //! PC-FX 18, quase todos japoneses.
@@ -69,6 +71,10 @@ const BOOT_SECTORS: usize = 2;
 /// Setores de pregap que podem vir antes da trilha no arquivo. O Redump
 /// grava 3 s (225 setores); 10 s de folga.
 const MAX_PREGAP: usize = 750;
+/// Maior imagem raw de CD em que a trilha de dados e procurada depois das de
+/// audio (80 min de CD sao ~800 MiB raw): o probe roda em toda imagem, e a de
+/// DVD nao e lida inteira.
+const CD_MAX: usize = 900 * 1024 * 1024;
 
 /// Onde a trilha de dados esta no arquivo.
 #[derive(Debug, Clone, Copy)]
@@ -117,18 +123,32 @@ impl Track {
     }
 }
 
+/// Setor do arquivo raw onde comeca a parte de dados: 0, ou, se o arquivo nao
+/// comeca com o sync de CD (pregap vazio, ou as trilhas de audio de um BIN
+/// unico), o primeiro setor com ele.
+fn data_start(data: &[u8]) -> usize {
+    if data.starts_with(&SYNC) || !data.len().is_multiple_of(SECTOR_RAW) || data.len() > CD_MAX {
+        return 0;
+    }
+    (0..data.len() / SECTOR_RAW)
+        .find(|&k| data[k * SECTOR_RAW..].starts_with(&SYNC))
+        .unwrap_or(0)
+}
+
 /// A trilha de `disc` no arquivo: a assinatura no lugar dela, em imagem raw
-/// ou de 2048, depois de ate `MAX_PREGAP` setores.
+/// ou de 2048, ate `MAX_PREGAP` setores depois do comeco da parte de dados.
 fn find(disc: &Disc, data: &[u8]) -> Option<Track> {
-    [true, false].into_iter().find_map(|raw| {
-        (0..=MAX_PREGAP)
-            .map(|first| Track { raw, first })
-            .find(|t| {
-                t.sector(data, disc.sector)
-                    .and_then(|s| s.get(disc.at..disc.at + disc.tag.len()))
-                    == Some(disc.tag)
-            })
-    })
+    [(true, data_start(data)), (false, 0)]
+        .into_iter()
+        .find_map(|(raw, start)| {
+            (start..=start + MAX_PREGAP)
+                .map(|first| Track { raw, first })
+                .find(|t| {
+                    t.sector(data, disc.sector)
+                        .and_then(|s| s.get(disc.at..disc.at + disc.tag.len()))
+                        == Some(disc.tag)
+                })
+        })
 }
 
 /// O nome gravado na partida (ASCII ou Shift-JIS), ate o primeiro byte que
